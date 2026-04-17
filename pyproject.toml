@@ -1,0 +1,19 @@
+[project]
+name = "roma-execution-bridge"
+version = "1.0.0"
+description = "ROMA JSON → Kubernetes Job Compiler"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.0",
+    "kubernetes>=29.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+roma-bridge = "main:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
