@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install deps
-        run: pip install --upgrade pip pip install typer rich requests pyyaml plotly dash pytest pytest-cov
+        run: pip install typer rich requests pyyaml plotly dash pytest pytest-cov
       - name: Compile check
         run: |
           find . -name "*.py" -not -path "./__pycache__/*" -exec python -m py_compile {} + 2>&1 | tail -5
