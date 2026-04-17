@@ -25,15 +25,14 @@ jobs:
 
       - name: Compile check
         run: |
-          python -m py_compile roma_cli.py
-          find . -name "*.py" -not -path "./__pycache__/*" -exec python -m py_compile {} + 2>&1 | tail -3
+          find . -name "*.py" -not -path "./__pycache__/*" -exec python -m py_compile {} + 2>&1 | tail -5
           echo "Compile OK"
 
       - name: Import test
         run: |
           python -c "
 import sys; sys.path.insert(0, '.')
-from auth.api_keys import ApiKeySystem
+from auth.api_keys import APIKeyManager
 from rbac.engine import RbacEngine
 from cost.predictor import CostPredictor
 from cost.gate import DecisionGate
@@ -44,8 +43,8 @@ print('All core modules import OK')
         run: |
           python -c "
 import sys; sys.path.insert(0, '.')
-from auth.api_keys import ApiKeySystem
-keys = ApiKeySystem()
+from auth.api_keys import APIKeyManager
+keys = APIKeyManager()
 k = keys.create_key('org_test', 'proj_test', permissions=['job:submit'])
 assert keys.validate(k['key_id'])
 print('Auth OK')
@@ -61,6 +60,12 @@ pred = CostPredictor()
 result = pred.predict('train YOLOv8', gpu_required=True, plugin_type='ml_training')
 assert 'estimated_cost' in result
 print('Cost prediction OK')
+
+from cost.gate import DecisionGate
+gate = DecisionGate()
+eval_result = gate.evaluate(task='train YOLOv8', gpu_required=True, plugin_type='ml_training', tenant_id='tenant_acme')
+assert 'decision' in eval_result
+print('Decision gate OK')
 "
 
       - name: Event sourcing test
