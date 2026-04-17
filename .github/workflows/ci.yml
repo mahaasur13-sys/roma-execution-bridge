@@ -10,79 +10,19 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - name: Install deps
-        run: |
-          pip install --upgrade pip
-          pip install typer rich requests pyyaml plotly dash pytest pytest-cov
-
+        run: pip install --upgrade pip pip install typer rich requests pyyaml plotly dash pytest pytest-cov
       - name: Compile check
         run: |
           find . -name "*.py" -not -path "./__pycache__/*" -exec python -m py_compile {} + 2>&1 | tail -5
           echo "Compile OK"
-
-      - name: Import test
-        run: |
-          python -c "
-import sys; sys.path.insert(0, '.')
-from auth.api_keys import APIKeyManager
-from rbac.engine import RbacEngine
-from cost.predictor import CostPredictor
-from cost.gate import DecisionGate
-print('All core modules import OK')
-"
-
-      - name: Core module tests
-        run: |
-          python -c "
-import sys; sys.path.insert(0, '.')
-from auth.api_keys import APIKeyManager
-keys = APIKeyManager()
-k = keys.create_key('org_test', 'proj_test', permissions=['job:submit'])
-assert keys.validate(k['key_id'])
-print('Auth OK')
-
-from rbac.engine import RbacEngine
-rbac = RbacEngine()
-rbac.assign_role('user_dev', 'org_acme', 'developer')
-assert rbac.check_permission('user_dev', 'job:submit', 'org_acme', 'proj_alpha')
-print('RBAC OK')
-
-from cost.predictor import CostPredictor
-pred = CostPredictor()
-result = pred.predict('train YOLOv8', gpu_required=True, plugin_type='ml_training')
-assert 'estimated_cost' in result
-print('Cost prediction OK')
-
-from cost.gate import DecisionGate
-gate = DecisionGate()
-eval_result = gate.evaluate(task='train YOLOv8', gpu_required=True, plugin_type='ml_training', tenant_id='tenant_acme')
-assert 'decision' in eval_result
-print('Decision gate OK')
-"
-
-      - name: Event sourcing test
-        run: |
-          python -c "
-import sys; sys.path.insert(0, '.')
-from durability.event_sourcing import EventSourcedAggregate
-agg = EventSourcedAggregate('test-job-001')
-agg.submit_job('train model', 'ml_training', {'gpu': True})
-agg.start_execution()
-agg.complete_job()
-events = agg.replay()
-assert len(events) == 3
-assert agg.current_state()['status'] == 'completed'
-print('Event sourcing OK')
-"
-
+      - name: Run tests
+        run: python3 test_ci.py
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -93,5 +33,4 @@ print('Event sourcing OK')
       - name: Install ruff
         run: pip install ruff
       - name: Lint
-        run: |
-          ruff check . --output-format=text 2>&1 | head -20 || true
+        run: ruff check . --output-format=text 2>&1 | head -20 || true
