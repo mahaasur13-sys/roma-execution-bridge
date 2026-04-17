@@ -1,24 +1,55 @@
-"""RevenueShareCalculator — tiered 10-20% per tenant."""
+"""Revenue Share Calculator — tiered, per partner, per month"""
 import time
-TIER_THRESHOLDS = [(1000_00, 0.10), (5000_00, 0.15), (float("inf"), 0.20)]
+from typing import Optional
+
 class RevenueShareCalculator:
-    def __init__(self, ledger=None):
-        self.ledger = ledger
-    def get_rate(self, monthly_revenue_cents: int) -> float:
-        for threshold, rate in TIER_THRESHOLDS:
-            if monthly_revenue_cents < threshold:
+    # Tier thresholds: (max_gross_INCLUSIVE, rate)
+    # $0-$1000 → 10%, $1001-$5000 → 15%, $5001+ → 20%
+    TIERS = [
+        (1000.0, 0.10),   # $0 - $1000 inclusive
+        (5000.0, 0.15),   # $1001 - $5000 inclusive
+        (float('inf'), 0.20),
+    ]
+    
+    def __init__(self):
+        self._store = {}
+
+    def calculate(self, gross_amount: float, partner_id: str) -> dict:
+        if gross_amount < 0:
+            raise ValueError("gross_amount cannot be negative")
+        if gross_amount == 0:
+            return {'romas_share': 0.0, 'partner_payout': 0.0, 'rate_used': 0.0}
+        rate = self._get_tier_rate(gross_amount)
+        roma_share = round(gross_amount * rate, 6)
+        partner_payout = round(gross_amount - roma_share, 6)
+        return {
+            'gross_amount': gross_amount,
+            'romas_share': roma_share,
+            'partner_payout': partner_payout,
+            'rate_used': rate,
+            'partner_id': partner_id,
+        }
+
+    def _get_tier_rate(self, gross_amount: float) -> float:
+        for threshold, rate in self.TIERS:
+            if gross_amount <= threshold:
                 return rate
         return 0.20
-    def calculate(self, tenant_id: str, gross_cents: int) -> dict:
-        rate = 0.10
-        if self.ledger:
-            mr = self.ledger.get_monthly_revenue(tenant_id)
-            rate = self.get_rate(int(mr * 100))
-        deduction = round(gross_cents * rate)
-        return {
-            "gross_amount_cents": gross_cents,
-            "revenue_share_percent": rate,
-            "revenue_share_cents": deduction,
-            "net_to_platform_cents": gross_cents - deduction,
-            "tenant_id": tenant_id, "calculated_at": int(time.time())
-        }
+
+    def record_revenue(self, partner_id: str, amount: float, invoice_id: str, period: str) -> int:
+        key = (partner_id, period)
+        if key not in self._store:
+            self._store[key] = {'total': 0.0, 'invoices': []}
+        self._store[key]['total'] += amount
+        self._store[key]['invoices'].append({'invoice_id': invoice_id, 'amount': amount})
+        return len(self._store[key]['invoices'])
+
+    def get_partner_monthly_revenue(self, partner_id: str, period: str) -> dict:
+        entry = self._store.get((partner_id, period), {'total': 0.0, 'invoices': []})
+        return {'partner_id': partner_id, 'period': period, 'total': entry['total']}
+
+if __name__ == "__main__":
+    calc = RevenueShareCalculator()
+    for amt in [999, 1000, 1001, 5000, 5001, 0.01]:
+        r = calc.calculate(amt, 'test')
+        print(f"${amt}: ROMA {r['rate_used']*100:.0f}% = ${r['romas_share']:.2f}")

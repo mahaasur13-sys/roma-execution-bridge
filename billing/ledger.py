@@ -15,6 +15,8 @@ class BillingLedger:
             "tenant_id": tenant_id,
             "type": entry_type,
             "amount": amount,
+    "partner_id": partner_id or "platform",
+    "revenue_share_percent_applied": revenue_share_percent,
             "currency": currency,
             "metadata": metadata or {},
         }
