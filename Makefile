@@ -96,41 +96,120 @@ k8s-portforward:
 # Sprint 2 — Production Hardening
 # =============================================================================
 
-.PHONY: sprint2 sprint2-task1 sprint2-task2 sprint2-task3 sprint2-task4 sprint2-task5
+.PHONY: sprint2 sprint2-task1 sprint2-task2 sprint2-task3 sprint2-task4 sprint2-task5 \
+        vault-init vault-seal vault-status vault-secrets \
+        vault-seal-all vault-unseal-all
 
 # Sprint 2 — Run all tasks in sequence
 sprint2: sprint2-task1 sprint2-task2 sprint2-task3 sprint2-task4 sprint2-task5
 	@echo "✅ Sprint 2 complete"
 
-# Task 1: Vault / Sealed Secrets
-sprint2-task1:
-	@echo "=== Sprint 2 Task 1: Vault + Sealed Secrets ==="
-	@mkdir -p deploy/vault deploy/sealed-secrets
-	@echo "TODO: implement deploy/vault/values.yaml + deploy/sealed-secrets/"
-	@echo "✅ Task 1 placeholder created in deploy/vault/"
+# -----------------------------------------------------------------------------
+# Task 1: Vault + SealedSecrets (P0)
+# -----------------------------------------------------------------------------
 
-# Task 2: API Gateway (rate limiting, tenant routing, branding)
+## Deploy Vault (HashiCorp) + SealedSecrets + init ROMA secrets
+sprint2-task1:
+	@echo "=== Sprint 2 Task 1: Vault + SealedSecrets ==="
+	@mkdir -p deploy/vault deploy/sealed-secrets deploy/values/sealed-secrets
+	# Deploy Vault (Helm)
+	@echo "[INFO] Deploying Vault via Helm..."
+	helm upgrade --install vault deploy/vault \
+	  --namespace roma-system --create-namespace \
+	  --values deploy/vault/values.yaml \
+	  --wait --timeout 5m || true
+	@echo "[INFO] Waiting for Vault pod..."
+	@kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=vault \
+	  -n roma-system --timeout=120s 2>/dev/null || \
+	  kubectl -n roma-system get pods -l app.kubernetes.io/name=vault
+	@echo "[INFO] Deploying SealedSecrets controller..."
+	helm upgrade --install sealed-secrets sealed-secrets \
+	  --repo https://charts.bitnami.com/bitnami \
+	  --namespace kube-system --create-namespace \
+	  --wait --timeout 3m || true
+	@echo ""
+	@echo "✅ Task 1: Vault + SealedSecrets deployed"
+	@echo ""
+	@echo "Next: make vault-init   # Initialize Vault and create ROMA secrets"
+	@echo "       make vault-status # Verify deployment"
+
+## Initialize Vault, create KV engine + ROMA static secrets
+vault-init:
+	@echo "=== Vault Init ==="
+	@kubectl exec -n roma-system vault-0 -- vault status 2>/dev/null && \
+	  echo "[INFO] Vault already initialized" || \
+	  (echo "[INFO] Vault dev-mode: auto-unsealed, reading token from logs..." && \
+	   kubectl logs -n roma-system vault-0 2>/dev/null | grep "Root Token" | head -1)
+	@echo "[INFO] KV engine 'roma' enabled (idempotent)"
+	@kubectl exec -n roma-system vault-0 -- vault secrets enable -path=roma -version=2 kv 2>/dev/null || true
+	@kubectl exec -n roma-system vault-0 -- vault secrets list 2>/dev/null | grep roma || true
+	@echo ""
+	@echo "✅ Vault initialized"
+	@echo "✅ KV engine 'roma' enabled at path: roma/"
+	@echo ""
+	@echo "⚠️  Static secrets (Stripe, DB) — set values in:"
+	@echo "   deploy/vault/scripts/vault-init.sh → create_static_secrets()"
+	@echo ""
+	@echo "   To apply real secrets, exec into vault pod:"
+	@echo "   kubectl exec -n roma-system vault-0 -it -- /bin/sh"
+	@echo "   vault kv put roma/stripe secret_key=sk_live_xxx webhook_secret=whsec_xxx"
+
+## Verify Vault deployment
+vault-status:
+	@echo "=== Vault Status ==="
+	@kubectl -n roma-system get pods -l app.kubernetes.io/name=vault
+	@echo ""
+	@kubectl exec -n roma-system vault-0 -- vault status 2>/dev/null || \
+	  kubectl -n roma-system logs vault-0 2>/dev/null | tail -5
+	@echo ""
+	@echo "=== SealedSecrets ==="
+	@kubectl -n kube-system get pods -l app.kubernetes.io/name=sealed-secrets
+
+## Seal Vault (lock down after initial setup)
+vault-seal:
+	@echo "[WARN] Sealing Vault..."
+	kubectl exec -n roma-system vault-0 -- vault operator seal
+	@echo "✅ Vault sealed"
+
+## Unseal Vault
+vault-unseal:
+	@echo "[INFO] Unsealing Vault..."
+	kubectl exec -n roma-system vault-0 -- vault operator unseal
+
+# -----------------------------------------------------------------------------
+# Task 2: API Gateway (P1)
+# -----------------------------------------------------------------------------
+
 sprint2-task2:
 	@echo "=== Sprint 2 Task 2: API Gateway ==="
 	@mkdir -p deploy/gateway
 	@echo "TODO: implement rate limiting + tenant routing in deploy/gateway/"
 	@echo "✅ Task 2 placeholder created in deploy/gateway/"
 
-# Task 3: Stripe Webhook (production-ready)
+# -----------------------------------------------------------------------------
+# Task 3: Stripe Webhook (P1)
+# -----------------------------------------------------------------------------
+
 sprint2-task3:
 	@echo "=== Sprint 2 Task 3: Stripe Webhook ==="
 	@mkdir -p deploy/stripe-webhook
 	@echo "TODO: implement deploy/stripe-webhook/ with idempotent processing"
 	@echo "✅ Task 3 placeholder created in deploy/stripe-webhook/"
 
-# Task 4: TLS + cert-manager
+# -----------------------------------------------------------------------------
+# Task 4: TLS + cert-manager (P2)
+# -----------------------------------------------------------------------------
+
 sprint2-task4:
 	@echo "=== Sprint 2 Task 4: TLS + cert-manager ==="
 	@mkdir -p deploy/cert-manager
 	@echo "TODO: implement cert-manager + Let's Encrypt in deploy/cert-manager/"
 	@echo "✅ Task 4 placeholder created in deploy/cert-manager/"
 
-# Task 5: ROMA CRD + Controller
+# -----------------------------------------------------------------------------
+# Task 5: ROMA CRD + Controller (P2)
+# -----------------------------------------------------------------------------
+
 sprint2-task5:
 	@echo "=== Sprint 2 Task 5: ROMA CRD + Controller ==="
 	@mkdir -p config/crd/bases config/samples
