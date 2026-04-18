@@ -173,6 +173,20 @@ spec:
               topologyKey: kubernetes.io/hostname
 
 ---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: roma-tenant-operator
+  namespace: roma-tenant-operator
+  labels:
+    app.kubernetes.io/name: roma-tenant-operator
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: roma-tenant-operator
+
+---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:

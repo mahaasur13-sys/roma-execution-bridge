@@ -111,6 +111,21 @@ spec:
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: stripe-webhook
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: stripe-webhook
+  namespace: roma-system
+  labels:
+    app.kubernetes.io/name: stripe-webhook
+    app.kubernetes.io/component: webhook
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: stripe-webhook
 ---
 apiVersion: v1
 kind: Service
