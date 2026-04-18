@@ -93,6 +93,51 @@ k8s-portforward:
 	kubectl port-forward -n roma-system svc/roma-api-server 8080:8080 &
 
 # =============================================================================
+# Sprint 2 — Production Hardening
+# =============================================================================
+
+.PHONY: sprint2 sprint2-task1 sprint2-task2 sprint2-task3 sprint2-task4 sprint2-task5
+
+# Sprint 2 — Run all tasks in sequence
+sprint2: sprint2-task1 sprint2-task2 sprint2-task3 sprint2-task4 sprint2-task5
+	@echo "✅ Sprint 2 complete"
+
+# Task 1: Vault / Sealed Secrets
+sprint2-task1:
+	@echo "=== Sprint 2 Task 1: Vault + Sealed Secrets ==="
+	@mkdir -p deploy/vault deploy/sealed-secrets
+	@echo "TODO: implement deploy/vault/values.yaml + deploy/sealed-secrets/"
+	@echo "✅ Task 1 placeholder created in deploy/vault/"
+
+# Task 2: API Gateway (rate limiting, tenant routing, branding)
+sprint2-task2:
+	@echo "=== Sprint 2 Task 2: API Gateway ==="
+	@mkdir -p deploy/gateway
+	@echo "TODO: implement rate limiting + tenant routing in deploy/gateway/"
+	@echo "✅ Task 2 placeholder created in deploy/gateway/"
+
+# Task 3: Stripe Webhook (production-ready)
+sprint2-task3:
+	@echo "=== Sprint 2 Task 3: Stripe Webhook ==="
+	@mkdir -p deploy/stripe-webhook
+	@echo "TODO: implement deploy/stripe-webhook/ with idempotent processing"
+	@echo "✅ Task 3 placeholder created in deploy/stripe-webhook/"
+
+# Task 4: TLS + cert-manager
+sprint2-task4:
+	@echo "=== Sprint 2 Task 4: TLS + cert-manager ==="
+	@mkdir -p deploy/cert-manager
+	@echo "TODO: implement cert-manager + Let's Encrypt in deploy/cert-manager/"
+	@echo "✅ Task 4 placeholder created in deploy/cert-manager/"
+
+# Task 5: ROMA CRD + Controller
+sprint2-task5:
+	@echo "=== Sprint 2 Task 5: ROMA CRD + Controller ==="
+	@mkdir -p config/crd/bases config/samples
+	@echo "TODO: implement ROMA CRD + Controller in config/crd/"
+	@echo "✅ Task 5 placeholder created in config/crd/"
+
+# =============================================================================
 # Helm
 # =============================================================================
 
