@@ -30,7 +30,7 @@ spec:
         target:
           type: Utilization
           averageUtilization: {{ $apiMetrics.targetMemoryUtilizationPercentage }}
-  {{- if and $apiMetrics.targetGPUUtilizationPercentage (gt $apiMetrics.targetGPUUtilizationPercentage 0) }}
+  {{- if and $apiMetrics.targetGPUUtilizationPercentage (gt ($apiMetrics.targetGPUUtilizationPercentage | default 0 | int) 0) }}
     - type: External
       external:
         metric:

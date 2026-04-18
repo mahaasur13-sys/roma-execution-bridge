@@ -75,5 +75,5 @@ spec:
             severity: warning
           annotations:
             summary: "ROMA job queue depth is high"
-            description: "Job queue depth is {{ $value }}, above threshold of 50."
+            description: "Job queue depth is {{ "$value" }}, above threshold of 50."
 {{- end }}
