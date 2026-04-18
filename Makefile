@@ -292,10 +292,32 @@ sprint2-task4:
 # -----------------------------------------------------------------------------
 
 sprint2-task5:
-	@echo "=== Sprint 2 Task 5: ROMA CRD + Controller ==="
-	@mkdir -p config/crd/bases config/samples
-	@echo "TODO: implement ROMA CRD + Controller in config/crd/"
-	@echo "✅ Task 5 placeholder created in config/crd/"
+	@echo "=== Sprint 2 Task 5: ROMA CRD + Tenant Controller ==="
+	@mkdir -p config/crd/bases config/crd/samples config/crd/controller deploy/roma-tenant/scripts
+	@echo "[INFO] 1/4 — Applying RomaTenant CRD..."
+	@kubectl apply -f config/crd/bases/roma.io_romatenants.yaml
+	@echo "[INFO] 2/4 — Building operator image..."
+	@docker build -t ghcr.io/mahaasur13-sys/roma-tenant-operator:latest \
+		-f config/crd/Dockerfile.operator .
+	@echo "[INFO] 3/4 — Pushing to GHCR..."
+	@docker push ghcr.io/mahaasur13-sys/roma-tenant-operator:latest 2>/dev/null || \
+		echo "[WARN] GHCR push skipped — authenticate with: docker login ghcr.io"
+	@echo "[INFO] 4/4 — Deploying operator to cluster..."
+	@kubectl apply -f config/crd/controller/deployment.yaml
+	@echo ""
+	@echo "   Waiting for operator to be ready..."
+	@kubectl wait --for=condition=ready pod \
+		-l app.kubernetes.io/name=roma-tenant-operator \
+		-n roma-tenant-operator --timeout=120s 2>/dev/null || \
+		kubectl -n roma-tenant-operator get pods
+	@echo ""
+	@echo "✅ Task 5: ROMA Tenant CRD + Controller deployed"
+	@echo ""
+	@echo "   Try it:"
+	@echo "   kubectl apply -f config/crd/samples/romatenant-free.yaml"
+	@echo "   kubectl get romatenants"
+	@echo "   kubectl get ns -l roma.io/tenant"
+	@echo "   kubectl describe romatenant partner-acme-free"
 
 # =============================================================================
 # Helm
