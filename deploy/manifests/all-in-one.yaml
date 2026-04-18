@@ -181,15 +181,21 @@ spec:
           drop: [ALL]
       affinity:
         podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchExpressions:
-                    - key: app.kubernetes.io/component
-                      operator: In
-                      values: [api-server]
-                topologyKey: kubernetes.io/hostname
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app.kubernetes.io/component
+                    operator: In
+                    values: [api-server]
+              topologyKey: kubernetes.io/hostname
+        topologySpreadConstraints:
+          - maxSkew: 1
+            topologyKey: topology.kubernetes.io/zone
+            whenUnsatisfiable: ScheduleAnyway
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: api-server
+      priorityClassName: roma-critical
       containers:
         - name: api-server
           image: ghcr.io/mahaasur13-sys/roma-execution-bridge:1.0.0
@@ -281,6 +287,21 @@ spec:
         allowPrivilegeEscalation: false
         capabilities:
           drop: [ALL]
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/component: gpu-worker
+              topologyKey: kubernetes.io/hostname
+        topologySpreadConstraints:
+          - maxSkew: 1
+            topologyKey: topology.kubernetes.io/zone
+            whenUnsatisfiable: ScheduleAnyway
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: gpu-worker
+      priorityClassName: roma-critical
       nodeSelector:
         gpu: "true"
       tolerations:
@@ -372,3 +393,341 @@ spec:
   selector:
     app.kubernetes.io/name: roma-execution-bridge
     app.kubernetes.io/component: api-server
+
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: roma-critical
+value: 1000000
+globalDefault: false
+description: "Critical ROMA pods — api-server, gpu-worker — never evicted"
+
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: roma-system
+value: 100000
+globalDefault: false
+description: "Standard ROMA system pods"
+
+---
+# =============================================================================
+# NetworkPolicies — Default deny-all + explicit allow
+# =============================================================================
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: roma-system
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: rl-system
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# roma-api-server: allow Kong + self-ingress, controlled egress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-roma-api-server
+  namespace: roma-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: api-server
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kong
+      ports:
+        - port: 8080
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: api-server
+      ports:
+        - port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 443
+          protocol: TCP
+
+---
+# roma-gpu-worker: allow ingress from api-server only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-roma-gpu-worker
+  namespace: roma-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: gpu-worker
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: api-server
+      ports:
+        - port: 8000
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 8000
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: api-server
+      ports:
+        - port: 8080
+    - ports:
+        - port: 443
+          protocol: TCP
+
+---
+# stripe-webhook: allow Kong ingress only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-stripe-webhook
+  namespace: roma-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: stripe-webhook
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kong
+      ports:
+        - port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: api-server
+      ports:
+        - port: 8080
+    - ports:
+        - port: 443
+          protocol: TCP
+
+---
+# Kong Gateway (rl-system): allow external + Kong admin
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-kong-proxy
+  namespace: rl-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kong
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - port: 8000
+          protocol: TCP
+        - port: 8443
+          protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 8000
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: roma-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: api-server
+      ports:
+        - port: 8080
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: roma-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: stripe-webhook
+      ports:
+        - port: 8080
+    - ports:
+        - port: 443
+          protocol: TCP
+
+---
+# =============================================================================
+# Pod Security Admission
+# =============================================================================
+
+apiVersion: policy/v1beta1
+kind: PodSecurity
+metadata:
+  name: roma-baseline
+  namespace: roma-system
+spec:
+  baseline:
+    allowedHostPaths: []
+    seccompProfiles:
+      - runtime/default
+      - unconfined
+    supplementalGroups:
+      ranges:
+        - max: 65535
+          min: 1
+    runAsUser:
+      rule: MustRunAsNonRoot
+    fsGroup:
+      rule: MustRunAs
+      ranges:
+        - max: 65535
+          min: 1
+    volumes:
+      - configMap
+      - emptyDir
+      - persistentVolumeClaim
+      - secret
+      - projected
+    hostNetwork: false
+    hostPorts:
+      - max: 65535
+        min: 1
+    hostPID: false
+    hostIPC: false
+    privileged: false
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+      allowCapabilities: []
+    defaultAddCapabilities: []
+
+---
+apiVersion: policy/v1beta1
+kind: PodSecurity
+metadata:
+  name: kong-restricted
+  namespace: rl-system
+spec:
+  restricted:
+    seccompProfiles:
+      - runtime/default
+    runAsUser:
+      rule: MustRunAsNonRoot
+    runAsGroup:
+      rule: MustRunAs
+      ranges:
+        - max: 65535
+          min: 1
+    supplementalGroups:
+      ranges:
+        - max: 65535
+          min: 1
+    fsGroup:
+      rule: MustRunAs
+      ranges:
+        - max: 65535
+          min: 1
+    volumes:
+      - configMap
+      - emptyDir
+      - persistentVolumeClaim
+      - secret
+      - projected
+    hostNetwork: false
+    hostPID: false
+    hostIPC: false
+    privileged: false
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+    requireCanonicalCSCCapabilities: true

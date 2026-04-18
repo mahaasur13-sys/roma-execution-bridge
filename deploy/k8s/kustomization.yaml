@@ -11,6 +11,9 @@ resources:
   - secrets/roma-secrets.yaml
   - services/roma-extras.yaml
   - ../k8s/services/roma-ingress-nodeport.yaml
+  - ../manifests/priority-classes.yaml
+  - ../manifests/network-policies.yaml
+  - ../manifests/pod-security.yaml
 
 commonLabels:
   app.kubernetes.io/name: roma-execution-bridge
