@@ -247,9 +247,26 @@ kong-clean:
 
 sprint2-task3:
 	@echo "=== Sprint 2 Task 3: Stripe Webhook ==="
-	@mkdir -p deploy/stripe-webhook
-	@echo "TODO: implement deploy/stripe-webhook/ with idempotent processing"
-	@echo "✅ Task 3 placeholder created in deploy/stripe-webhook/"
+	@mkdir -p deploy/stripe-webhook/app deploy/stripe-webhook/deploy deploy/stripe-webhook/scripts
+	@echo "[INFO] Building Docker image..."
+	docker build -t roma-stripe-webhook:latest -f deploy/stripe-webhook/Dockerfile .
+	@echo ""
+	@echo "=== Deploying Stripe Webhook to k3s ==="
+	kubectl apply -f deploy/stripe-webhook/deploy/deployment.yaml
+	@echo ""
+	@echo "✅ Task 3: Stripe Webhook deployed"
+	@echo ""
+	@echo "   make stripe-webhook-logs     # View logs"
+	@echo "   make stripe-webhook-restart # Rolling restart"
+
+stripe-webhook-logs:
+	@echo "[INFO] Streaming logs..."
+	kubectl logs -n roma-system -l app.kubernetes.io/name=stripe-webhook -f --tail=50
+
+stripe-webhook-restart:
+	@echo "[INFO] Rolling restart..."
+	kubectl rollout restart deployment/stripe-webhook -n roma-system
+	kubectl rollout status deployment/stripe-webhook -n roma-system --timeout=60s
 
 # -----------------------------------------------------------------------------
 # Task 4: TLS + cert-manager (P2)
