@@ -166,6 +166,11 @@ gpuWorker:
     metricType: Utilization
     targetGPUUtilization: 75
 
+  # Pod Disruption Budget — ensures GPU compute stays available during upgrades/drains
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
   env:
     WORKER_NAME_PREFIX: roma-gpu-worker
     LOG_LEVEL: INFO
