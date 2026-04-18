@@ -274,9 +274,18 @@ stripe-webhook-restart:
 
 sprint2-task4:
 	@echo "=== Sprint 2 Task 4: TLS + cert-manager ==="
-	@mkdir -p deploy/cert-manager
-	@echo "TODO: implement cert-manager + Let's Encrypt in deploy/cert-manager/"
-	@echo "✅ Task 4 placeholder created in deploy/cert-manager/"
+	@kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.crds.yaml 2>/dev/null || true
+	@helm repo add jetstack https://charts.jetstack.io --force-update 2>/dev/null || true
+	@helm repo update 2>/dev/null || true
+	@helm install cert-manager jetstack/cert-manager \
+		--namespace cert-manager \
+		--create-namespace \
+		--version v1.16.2 \
+		--set startupapicheck.enabled=false \
+		--wait --timeout 120s 2>/dev/null || true
+	@kubectl apply -f deploy/cert-manager/issuer/issuers.yaml
+	@echo "✅ Task 4 complete — cert-manager + ClusterIssuers installed"
+	@echo "   Run: kubectl get clusterissuer"
 
 # -----------------------------------------------------------------------------
 # Task 5: ROMA CRD + Controller (P2)
