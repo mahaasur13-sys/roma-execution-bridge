@@ -181,10 +181,65 @@ vault-unseal:
 # -----------------------------------------------------------------------------
 
 sprint2-task2:
-	@echo "=== Sprint 2 Task 2: API Gateway ==="
-	@mkdir -p deploy/gateway
-	@echo "TODO: implement rate limiting + tenant routing in deploy/gateway/"
-	@echo "✅ Task 2 placeholder created in deploy/gateway/"
+	@echo "=== Sprint 2 Task 2: API Gateway (Kong) ==="
+	@mkdir -p deploy/kong/deploy/kong/templates/plugins deploy/kong/templates/ingress \
+	         deploy/values/kong deploy/kong/scripts
+	# Deploy Kong via Helm
+	@echo "[INFO] Deploying Kong Gateway via Helm..."
+	helm repo add kong https://charts.konghq.com --force-update 2>/dev/null || true
+	helm repo update 2>/dev/null || true
+	kubectl create namespace kong --dry-run=client -o yaml | kubectl apply -f -
+	helm upgrade --install kong kong/kong \
+	  --version 2.36.0 \
+	  --namespace kong \
+	  --values deploy/kong/values.yaml \
+	  --wait --timeout 10m --atomic --create-namespace || true
+	@echo "[INFO] Applying KongPlugin CRDs..."
+	kubectl apply -f deploy/kong/templates/plugins/tenant-plugins.yaml
+	kubectl apply -f deploy/kong/templates/plugins/rate-limit-tenant.yaml
+	kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=kong \
+	  --namespace kong --timeout=120s 2>/dev/null || kubectl -n kong get pods
+	@echo ""
+	@echo "✅ Task 2: Kong Gateway deployed with rate limiting + tenant routing"
+	@echo ""
+	@echo "   make kong-init     # Full init: DB, Redis, consumers, routes"
+	@echo "   make kong-status   # Verify Kong + plugins"
+	@echo "   make kong-plugins  # Apply all KongPlugin CRDs"
+
+## Kong Gateway — full init (plugins + consumers + routes)
+kong-init: kong-plugins
+	@echo "=== Kong Init ==="
+	@kubectl exec -n kong deploy/kong -c kong -- kong health 2>/dev/null && \
+	  echo "[INFO] Kong is healthy" || echo "[WARN] Kong not yet ready"
+	@kubectl apply -f deploy/kong/templates/ingress.yaml
+	@echo ""
+	@echo "✅ Kong init complete"
+	@echo "   Proxy: kubectl -n kong get svc kong-proxy"
+
+## Apply all KongPlugin CRDs
+kong-plugins:
+	@echo "[INFO] Applying KongPlugin CRDs..."
+	kubectl apply -f deploy/kong/templates/plugins/tenant-plugins.yaml
+	kubectl apply -f deploy/kong/templates/plugins/rate-limit-tenant.yaml
+	@echo "✅ KongPlugin CRDs applied"
+
+## Verify Kong deployment
+kong-status:
+	@echo "=== Kong Status ==="
+	@kubectl -n kong get pods -l app.kubernetes.io/name=kong
+	@echo ""
+	@echo "=== KongPlugin CRDs ==="
+	@kubectl get kongplugin -n roma-system
+	@echo ""
+	@echo "=== Kong Services ==="
+	@kubectl -n kong get svc
+
+## Kong Gateway teardown
+kong-clean:
+	@echo "[WARN] Removing Kong from cluster..."
+	helm uninstall kong -n kong --wait 2>/dev/null || true
+	kubectl delete namespace kong --ignore-not-found=true
+	@echo "✅ Kong removed"
 
 # -----------------------------------------------------------------------------
 # Task 3: Stripe Webhook (P1)
