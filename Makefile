@@ -334,3 +334,23 @@ helm-diff:
 	helm diff upgrade roma charts/roma-execution-bridge \
 	  --namespace roma-system \
 	  --values charts/roma-execution-bridge/values.yaml || true
+# =============================================================================
+# Integration Testing (Sprint 2 → v1.0.0 Release Gate)
+# =============================================================================
+
+.PHONY: integration-test integration-test-mock
+
+# Full integration test pipeline (~10 min, requires k8s cluster)
+# Delegates to scripts/integration-test.sh for clean bash logic
+integration-test:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║   ROMA — Integration Test (Sprint 2 → v1.0.0 Release Gate)     ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@bash scripts/integration-test.sh
+
+# Mock mode — no cluster, validate manifests only
+integration-test-mock:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║   ROMA — Integration Test (MOCK MODE)                          ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@bash scripts/integration-test.sh mock
