@@ -3,7 +3,7 @@
 import sys
 sys.path.insert(0, '/home/workspace/roma-execution-bridge')
 
-from billing.pricing_engine import PricingEngine, PricingTier, TIERS
+from billing.pricing_engine import PricingEngine, PricingTier
 
 class CostPredictor:
     """Predicts execution cost BEFORE running task."""
@@ -16,28 +16,49 @@ class CostPredictor:
                 tenant_tier: str = "FREE", custom_duration: int = None) -> dict:
         tier_enum = self.tier_map.get(tenant_tier, PricingTier.FREE)
 
+        # Оцениваем длительность (в секундах)
         if custom_duration:
-            gpu_seconds = custom_duration * (1 if gpu_required else 0)
+            duration_sec = custom_duration
         else:
-            gpu_seconds = self._estimate_runtime(task, plugin_type, gpu_required)
+            duration_sec = self._estimate_runtime(task, plugin_type, gpu_required)
 
-        result = self.pricing.calculate(tier_enum, 1, 0, 0)
-        rate = result["base_cost"]
-        util_multiplier = self.pricing.multiplier()
-        effective_rate = rate * util_multiplier
-        total_cost = gpu_seconds * effective_rate
+        # Расчёт стоимости через движок (gpu_s — длительность в секундах, если GPU нужен)
+        gpu_seconds = duration_sec if gpu_required else 0
+        cpu_seconds = duration_sec if not gpu_required else 0
+        storage_sec = 0  # storage пока не учитываем, но можно передать 0
 
-        risk_flags = self._assess_risk(gpu_seconds, tenant_tier, task)
+        cost = self.pricing.calculate(tier_enum, gpu_s=gpu_seconds, cpu_s=cpu_seconds, gb_s=storage_sec)
+        total_cost = cost["total"]
+
+        risk_flags = self._assess_risk(duration_sec, tenant_tier, task)
+
+        # Определяем уровень риска для CLI
+        if risk_flags:
+            risk_level = "MEDIUM" if "HIGH_COMPUTE_TASK" in risk_flags else "LOW"
+        else:
+            risk_level = "LOW"
+
+        # Оцениваем GPU узел и количество (заглушки)
+        gpu_node = "gpu-node-1" if gpu_required else "cpu-cluster"
+        gpu_count = 1 if gpu_required else 0
 
         return {
             "estimated_cost": round(total_cost, 4),
+            "estimated_duration_minutes": round(duration_sec / 60, 1),
+            "gpu_node": gpu_node,
+            "gpu_count": gpu_count,
+            "risk_level": risk_level,
             "currency": "USD",
-            "confidence": self._confidence_score(plugin_type, gpu_seconds),
+            "confidence": self._confidence_score(plugin_type, duration_sec),
             "breakdown": {
+                "duration_sec": duration_sec,
                 "gpu_seconds": gpu_seconds,
-                "rate_per_gpu_sec": round(rate, 6),
-                "utilization_multiplier": round(util_multiplier, 2),
-                "effective_rate": round(effective_rate, 6),
+                "cpu_seconds": cpu_seconds,
+                "gpu_cost": cost["gpu_cost"],
+                "cpu_cost": cost["cpu_cost"],
+                "storage_cost": cost["storage_cost"],
+                "tier": tier_enum.value,
+                "multiplier": self.pricing.multiplier,
                 "total": round(total_cost, 4),
                 "plugin_type": plugin_type,
                 "gpu_required": gpu_required
@@ -53,21 +74,21 @@ class CostPredictor:
             base = int(base * 1.1)
         return base
 
-    def _assess_risk(self, gpu_seconds: int, tier: str, task: str) -> list:
+    def _assess_risk(self, duration_sec: int, tier: str, task: str) -> list:
         flags = []
-        if gpu_seconds > 36000:
+        if duration_sec > 36000:
             flags.append("LONG_RUNNING_TASK")
-        if tier == "FREE" and gpu_seconds > 3600:
+        if tier == "FREE" and duration_sec > 3600:
             flags.append("FREE_TIER_LIMIT_RISK")
         if "yolov8" in task.lower() or "llm" in task.lower():
             flags.append("HIGH_COMPUTE_TASK")
         return flags
 
-    def _confidence_score(self, plugin_type: str, gpu_seconds: int) -> float:
+    def _confidence_score(self, plugin_type: str, duration_sec: int) -> float:
         base = 0.75
         if plugin_type in {"ml_training", "inference", "simulation"}:
             base += 0.15
-        if 1800 <= gpu_seconds <= 14400:
+        if 1800 <= duration_sec <= 14400:
             base += 0.10
         return min(base, 0.98)
 

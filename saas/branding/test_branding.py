@@ -6,7 +6,7 @@ import sys
 sys.path.insert(0, ".")
 
 from saas.branding import (
-    TenantBranding, BrandingService, branding_cache,
+    BrandingService, branding_cache,
     load_default, load_by_tenant_id
 )
 from saas.branding.stripe_integration import build_stripe_metadata, build_stripe_invoice_settings

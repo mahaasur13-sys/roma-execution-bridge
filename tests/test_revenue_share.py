@@ -7,12 +7,19 @@ class MockLedger:
 
 def test_tiered_rates():
     from saas.webhooks.revenue_share import RevenueShareCalculator
-    calc = RevenueShareCalculator(MockLedger())
-    for tid, gross, exp_rate in [("t1", 50_000, 0.10), ("t2", 300_000, 0.15), ("t3", 700_000, 0.20)]:
-        r = calc.calculate(tid, gross)
-        assert r["revenue_share_percent"] == exp_rate, f"{tid}: got {r['revenue_share_percent']}, want {exp_rate}"
-        assert r["revenue_share_cents"] == round(gross * exp_rate)
-        assert r["net_to_platform_cents"] == gross - r["revenue_share_cents"]
+    calc = RevenueShareCalculator()
+    # Теперь ставка зависит от суммы транзакции, а не от месячного дохода
+    # (partner_id, gross_amount_in_dollars, expected_rate)
+    test_cases = [
+        ("t1", 500.0, 0.10),    # ≤ 1000 → 10%
+        ("t2", 3000.0, 0.15),   # ≤ 5000 → 15%
+        ("t3", 7000.0, 0.20),   # > 5000 → 20%
+    ]
+    for partner_id, gross, exp_rate in test_cases:
+        r = calc.calculate(gross, partner_id)
+        assert r["rate_used"] == exp_rate, f"{partner_id}: got {r['rate_used']}, want {exp_rate}"
+        assert r["romas_share"] == round(gross * exp_rate, 6)
+        assert r["partner_payout"] == gross - r["romas_share"]
     print("PASS: tiered_rates")
 
 def test_idempotency():

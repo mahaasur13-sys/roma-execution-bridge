@@ -3,7 +3,7 @@
 import threading
 import time
 import queue
-from typing import Optional, Dict, Callable
+from typing import Optional, Callable
 from dataclasses import dataclass
 
 # These will be imported from the modules above

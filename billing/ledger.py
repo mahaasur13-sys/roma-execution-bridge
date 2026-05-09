@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """ROMA Billing Ledger — append-only ledger of all billing state changes."""
 from typing import Optional
-import time, json
+import time
+import json
 
 class BillingLedger:
     """Append-only ledger — every billing event is recorded, never mutated."""

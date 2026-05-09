@@ -5,8 +5,7 @@ import uuid
 from datetime import datetime
 from enum import Enum
 from typing import Optional
-from dataclasses import dataclass, asdict
-import json
+from dataclasses import dataclass
 
 
 class JobStatus(str, Enum):

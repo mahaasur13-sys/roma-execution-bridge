@@ -9,8 +9,6 @@ Usage: python3 roma_controller.py --kubeconfig ~/.kube/config
 import os
 import sys
 import time
-import yaml
-import json
 import signal
 import logging
 from datetime import datetime

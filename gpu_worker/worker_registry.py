@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """ROMA Worker Registry + Heartbeat System"""
-import time
 import threading
-import asyncio
 from dataclasses import dataclass, asdict
 from typing import Dict, Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime
 
 @dataclass
 class WorkerStatus:

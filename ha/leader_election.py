@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Leader Election — Raft-style lease with split-brain protection."""
-import time, threading, uuid
-from dataclasses import dataclass, field
+import time
+import threading
+from dataclasses import dataclass
 from typing import Optional
 
 LEASE_TTL_SEC = 10.0

@@ -2,7 +2,6 @@
 """ROMA Billing Events — Core billing event definitions for GPU usage."""
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
-from datetime import datetime
 from enum import Enum
 
 class BillingEventType(Enum):

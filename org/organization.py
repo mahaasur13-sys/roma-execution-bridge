@@ -1,5 +1,4 @@
 """ROMA Organization Model — org → project → tenant hierarchy."""
-from typing import Optional
 
 class Organization:
     def __init__(self, org_id: str, name: str, plan: str, billing_account: str):

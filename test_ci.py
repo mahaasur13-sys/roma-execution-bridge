@@ -42,7 +42,7 @@ def t_billing():
     from billing.pricing_engine import PricingEngine, PricingTier
     pe = PricingEngine()
     calc = pe.calculate(tier=PricingTier.PRO, gpu_s=3600, cpu_s=0, gb_s=86400)
-    assert calc.get('final_cost', 0) > 0, f"billing failed"
+    assert calc.get('final_cost', 0) > 0, "billing failed"
 
 def t_ledger():
     from billing.ledger import BillingLedger
@@ -90,4 +90,4 @@ test("Plugin API", t_plugin)
 
 print()
 print(f"RESULTS: {passed} passed, {failed} failed")
-sys.exit(0 if failed == 0 else 1)
+raise SystemExit("CI check failed")

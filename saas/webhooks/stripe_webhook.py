@@ -2,7 +2,11 @@
 from fastapi import APIRouter, Request, HTTPException, Header
 from pydantic import BaseModel
 from typing import Optional
-import hmac, hashlib, time, json, os
+import hmac
+import hashlib
+import time
+import json
+import os
 
 router = APIRouter(prefix="/webhook", tags=["webhooks"])
 

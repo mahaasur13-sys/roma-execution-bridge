@@ -1,5 +1,6 @@
 from fastapi import FastAPI
-import threading, time
+import threading
+import time
 from pydantic import BaseModel
 from typing import Dict
 

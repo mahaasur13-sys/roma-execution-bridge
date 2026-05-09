@@ -3,14 +3,13 @@
 Receives jobs from ROMA control plane, executes on GPU, returns results."""
 
 import os
-import json
 import uuid
 import subprocess
 import asyncio
 from datetime import datetime
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
 # =============================================================================
@@ -269,7 +268,7 @@ def metrics():
 # =============================================================================
 if __name__ == "__main__":
     import uvicorn
-    print(f"=== ROMA GPU Worker ===")
+    print("=== ROMA GPU Worker ===")
     print(f"Worker ID: {WORKER_ID}")
     print(f"GPU Device: {GPU_DEVICE}")
     print(f"GPU Available: {state.gpu_available}")

@@ -10,7 +10,6 @@ import hashlib
 import json
 import logging
 import os
-import time
 import redis.asyncio as aioredis
 
 logging.basicConfig(level=logging.INFO)

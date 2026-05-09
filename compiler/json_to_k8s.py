@@ -4,7 +4,6 @@ Fixed: uses nvidia.com/gpu, nodeSelector, restartPolicy: Never
 Supports: k8s_job (default) | ray_job fallback
 """
 
-from typing import Optional
 import copy
 
 class K8sCompiler:

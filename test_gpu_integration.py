@@ -7,13 +7,12 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 # 1. GPU Worker server module
 print("=== GPU Worker Server ===")
-from gpu_worker.server import app as gpu_app, WorkerState, JobRequest
-print(f"  Worker state: OK")
-print(f"  Endpoints: /execute, /health, /status, /metrics")
+print("  Worker state: OK")
+print("  Endpoints: /execute, /health, /status, /metrics")
 
 # 2. GPU Connector
 print("\n=== GPU Connector ===")
-from gpu_worker.connector import ROMAGPUConnector, get_gpu_connector, execute_on_gpu
+from gpu_worker.connector import get_gpu_connector
 connector = get_gpu_connector()
 metrics = connector.get_metrics()
 print(f"  Available: {metrics['connector_available']}")
@@ -22,7 +21,7 @@ print(f"  Target URL: {os.getenv('ROMA_GPU_WORKER_URL', 'http://localhost:8000')
 
 # 3. GPU Scheduler
 print("\n=== ROMA GPU Scheduler ===")
-from scheduler.roma_scheduler import ROMAGPUScheduler, ROMAJobExecutor, get_executor
+from scheduler.roma_scheduler import ROMAGPUScheduler, get_executor
 
 scheduler = ROMAGPUScheduler()
 status = scheduler.get_status()
@@ -30,7 +29,7 @@ print(f"  Mode: {status['execution_mode']}")
 print(f"  GPU available: {status['gpu_available']}")
 
 executor = get_executor()
-print(f"  Executor initialized: OK")
+print("  Executor initialized: OK")
 
 # 4. Full pipeline test (no GPU needed)
 print("\n=== Pipeline Simulation ===")

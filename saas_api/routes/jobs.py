@@ -26,4 +26,4 @@ def get_job_logs(job_id: str):
     if not job:
         from fastapi import HTTPException
         raise HTTPException(404, {"error": {"code": "NOT_FOUND", "message": f"Job {job_id} not found"}})
-    return {"job_id": job_id, "stdout": f"[SIMULATED] Running: " + job.get("task", ""), "stderr": "", "exit_code": None}
+    return {"job_id": job_id, "stdout": "[SIMULATED] Running: " + job.get("task", ""), "stderr": "", "exit_code": None}

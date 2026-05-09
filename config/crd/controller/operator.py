@@ -6,8 +6,6 @@
 
 import os
 import logging
-import asyncio
-from typing import Optional
 
 import kopf
 import kubernetes
@@ -418,7 +416,7 @@ def reconcile_tenant(meta, spec, status, namespace, name, **kwargs):
     ns = f"roma-{tenant_id}"
     try:
         core.read_namespaced_service(f"roma-{tenant_id}-api", ns)
-        logger.info(f"Service already exists — skipping")
+        logger.info("Service already exists — skipping")
     except ApiException as e:
         if e.status == 404:
             core.create_namespaced_service(ns, build_service(tenant_id))

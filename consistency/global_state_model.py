@@ -4,7 +4,7 @@ Defines: truth hierarchy, conflict resolution rules, consistency guarantees.
 """
 
 from enum import Enum
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 

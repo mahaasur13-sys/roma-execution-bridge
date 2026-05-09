@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """Stripe Connect integration — white-label revenue-share"""
-import time, json
+import time
+import json
 
 CONFIG = {
     "mode": "stripe_connect_standard",

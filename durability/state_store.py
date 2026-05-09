@@ -5,7 +5,7 @@ Provides: save, load, compare, rollback capabilities.
 
 import json
 import os
-from typing import Optional, Dict, Any, List
+from typing import Dict, Any, List
 from durability.event_store import EventStore, Event, EventType
 
 

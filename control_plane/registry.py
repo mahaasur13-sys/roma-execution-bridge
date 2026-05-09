@@ -1,5 +1,7 @@
 """Worker Registry — Source of Truth"""
-import time, threading, logging
+import time
+import threading
+import logging
 from typing import Optional, List, Dict, Any
 from .core_models import Worker, WorkerStatus
 

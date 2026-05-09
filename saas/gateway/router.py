@@ -1,5 +1,5 @@
 """Gateway router — mounts tenant-aware API routes."""
-from fastapi import APIRouter, Request, Depends
+from fastapi import APIRouter, Request
 from saas.gateway.models import GatewayConfig, TenantGatewayConfig
 from saas.gateway.rate_limiter import rate_limit_dependency
 

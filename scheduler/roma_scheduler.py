@@ -8,7 +8,7 @@ import logging
 from typing import Optional
 
 from scheduler.gpu_scheduler import GPUScheduler
-from gpu_worker.connector import get_gpu_connector, ROMAGPUConnector
+from gpu_worker.connector import get_gpu_connector
 from cost.gate import DecisionGate
 from cost.predictor import CostPredictor
 from queue_manager.queue_manager import QueueManager

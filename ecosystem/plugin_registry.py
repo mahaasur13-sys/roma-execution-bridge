@@ -1,5 +1,4 @@
 """ROMA Plugin Registry — Discovery, versioning, dependency resolution."""
-import hashlib, json, time
 from dataclasses import dataclass, field
 from typing import Dict, List, Set, Optional
 

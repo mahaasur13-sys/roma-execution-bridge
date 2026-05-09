@@ -1,5 +1,6 @@
 """ROMA API Key System — Scoped keys with rotation."""
-import hmac, hashlib, secrets, time
+import secrets
+import time
 from typing import Optional, List
 
 PREFIX = "roma_sk_live_"

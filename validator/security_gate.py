@@ -1,6 +1,5 @@
 """Security Gate — validates ROMA JSON before compilation."""
 
-from typing import Any
 
 
 class SecurityGate:

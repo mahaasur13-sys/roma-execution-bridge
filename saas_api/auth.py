@@ -1,11 +1,11 @@
 """ROMA SaaS API — Auth (API key + quota + rate limit)"""
-import sys, os
+import sys
+import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from auth.api_keys import APIKeyManager
 from tenancy.manager import TenantManager
 from billing.ledger import BillingLedger
 from billing.pricing_engine import PricingEngine
-from typing import Optional
 import time
 
 class QuotaExceeded(Exception): pass

@@ -76,4 +76,11 @@ class ROMAClient:
 
 if __name__ == "__main__":
     client = ROMAClient()
-    print("ROMA SDK ready. Usage: client.submit('train YOLOv8')")
+    print("ROMA SDK ready. Usage: client.submit('train YOLOv8')")    def submit_atom_cluster(self, task: str, cluster_spec: dict) -> "ATOMClusterJob":
+        """Submit execution as ATOMCluster managed job."""
+        resp = requests.post(f"{self.base_url}/submit", json={
+            "task": task,
+            "execution_mode": "atom_cluster",
+            "cluster_spec": cluster_spec
+        })
+        return ATOMClusterJob(resp.json())

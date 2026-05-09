@@ -2,7 +2,7 @@
 """ROMA API Gateway — Rate limiting, key validation middleware, quota headers."""
 from functools import wraps
 from typing import Dict, Callable, Optional, Tuple
-import time, hashlib
+import time
 
 # ── In-Memory Rate Limiter (Token Bucket) ────────────────────────────────────
 class RateLimiter:
@@ -134,7 +134,7 @@ class APIGateway:
 
 
 if __name__ == "__main__":
-    from billing.metering import MeteringEngine, UsageEvent
+    from billing.metering import MeteringEngine
     auth = AuthEngine()
     auth.create_tenant("tenant-test", "Test Tenant", "PRO")
     kid, sec = auth.create_key("tenant-test", "p1", KeyType.SERVER, "test", scopes=["submit"])

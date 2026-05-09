@@ -1,7 +1,6 @@
 """GPU-aware scheduler — VRAM enforcement + priority decisions."""
 
-from typing import Optional
-from queue_manager.queue_manager import QueueManager, JobStatus
+from queue_manager.queue_manager import QueueManager
 
 
 class GPUScheduler:

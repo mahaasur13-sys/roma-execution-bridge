@@ -2,7 +2,7 @@
 import pytest
 from fastapi import FastAPI
 from saas.gateway.middleware import setup_gateway_middleware
-from saas.gateway.router import gateway_router, mount_gateway_routes
+from saas.gateway.router import mount_gateway_routes
 from saas.gateway.models import (
     GatewayConfig, TenantGatewayConfig,
     RateLimitConfig, BrandingConfig, AuthConfig,

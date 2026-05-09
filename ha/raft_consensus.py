@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """ROMA Raft Consensus Layer — True distributed consensus implementation."""
-import time, threading, uuid, random
+import time
+import threading
+import random
 from dataclasses import dataclass, field
 from typing import List, Optional, Set, Dict
 

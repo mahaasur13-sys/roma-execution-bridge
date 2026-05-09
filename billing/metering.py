@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """ROMA Billing — Metering Engine, Usage Tracking, Cost Attribution."""
-import uuid, time
+import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 # ── Unit Rates (USD per second) ────────────────────────────────────────────
 GPU_RATE = 0.00001    # $0.00001 per GPU-second

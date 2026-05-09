@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """ROMA Projection Engine — Read Model for UI."""
-import json, time
 from dataclasses import dataclass, asdict
 from typing import Dict, List, Optional, Any
 from enum import Enum

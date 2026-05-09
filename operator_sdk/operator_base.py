@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """ROMA Operator SDK — Plugin → Declarative Controller Framework."""
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Any
-import hashlib, json
 
 @dataclass
 class CRDSpec:

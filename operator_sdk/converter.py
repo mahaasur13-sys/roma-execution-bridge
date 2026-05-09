@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """ROMA Operator SDK — Plugin → CRD → Controller transformation."""
-import sys, json
+import sys
 sys.path.insert(0, "/home/workspace/roma-execution-bridge")
-from plugins.plugin_api import IPlugin
 from operator_sdk.operator_base import plugin_to_crd, generate_controller_code, generate_crd_yaml
 
 class PluginToOperatorConverter:

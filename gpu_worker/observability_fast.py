@@ -1,5 +1,6 @@
 from fastapi import FastAPI
-import threading, time, psutil
+import time
+import psutil
 
 app = FastAPI()
 app.state.start_time = time.time()

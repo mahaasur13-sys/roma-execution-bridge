@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Replicated Event Store — 3-node write quorum."""
-import time, threading, uuid
-from dataclasses import dataclass, field
-from typing import List, Optional
+import threading
+from dataclasses import dataclass
+from typing import List
 
 @dataclass
 class Replica:

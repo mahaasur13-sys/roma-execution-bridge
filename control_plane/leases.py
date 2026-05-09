@@ -1,5 +1,6 @@
 """GPU Lease Manager — etcd-style distributed locking"""
-import time, threading, logging
+import threading
+import logging
 from typing import Optional
 from .core_models import GPULease
 

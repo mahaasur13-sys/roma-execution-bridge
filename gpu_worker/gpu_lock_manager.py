@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """GPU Lock Manager — prevents double execution on same GPU"""
 import threading
-import time
 from typing import Optional, Dict, List
 from dataclasses import dataclass
 from datetime import datetime

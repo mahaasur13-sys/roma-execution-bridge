@@ -14,7 +14,7 @@ def cli_validate(user_task: str) -> str:
     try:
         return InputContractValidator.strict_validate_or_raise(user_task)
     except ROMAValidationError as e:
-        print(f"❌ ROMA Input Contract Error", file=sys.stderr)
+        print("❌ ROMA Input Contract Error", file=sys.stderr)
         print(f"   Code: {e.code}", file=sys.stderr)
         print(f"   Severity: {e.severity}", file=sys.stderr)
         print(f"   {e.message}", file=sys.stderr)

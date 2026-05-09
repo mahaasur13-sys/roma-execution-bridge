@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from saas.tenants.onboarding import OnboardingSession, OnboardingStep
+from saas.tenants.onboarding import OnboardingSession
 
 
 _TENANTS_FILE = Path(__file__).parent.parent / "tenants.json"
@@ -99,7 +99,7 @@ def cmd_stripe_onboard(args: argparse.Namespace) -> None:
     s.tenant_id = t["id"]
     s.start_stripe_onboarding()
     print(f"Stripe onboarding URL:\n{s.stripe_onboarding_url}")
-    print(f"\nShare this URL with the tenant to complete Stripe Connect setup.")
+    print("\nShare this URL with the tenant to complete Stripe Connect setup.")
 
 
 def main() -> None:

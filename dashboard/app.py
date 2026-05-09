@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """ROMA Observable OS — Unified Control Plane Dashboard."""
-from dash import Dash, html, dcc, callback, Output, Input, State, register_page
+from dash import Dash, html, dcc, callback, Output, Input
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
-import plotly.express as px
 from datetime import datetime
 import time
 
 # ── Projection Engine import ──────────────────────────────────────
 import sys; sys.path.insert(0, '/home/workspace/roma-execution-bridge')
-from dashboard.projection_engine import ProjectionEngine, EventType
+from dashboard.projection_engine import ProjectionEngine
 
 # ── Init ──────────────────────────────────────────────────────────
 app = Dash(__name__, external_stylesheets=[dbc.themes.DARK])

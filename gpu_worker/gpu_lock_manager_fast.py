@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import threading, time
+import threading
+import time
 
 app = FastAPI()
 locks = {}

@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """ROMA Job Retry System with Persistent Execution Guarantee"""
 import threading
-import time
 import uuid
 from enum import Enum
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from typing import Optional, Dict, List, Callable
-from datetime import datetime, timedelta
+from datetime import datetime
 
 class JobState(Enum):
     QUEUED = "queued"

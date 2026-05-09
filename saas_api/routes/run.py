@@ -1,8 +1,11 @@
 """ROMA SaaS API — POST /run endpoint"""
-from fastapi import APIRouter, HTTPException, Header, Request
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Literal, Optional
-import uuid, time, sys, os
+import uuid
+import time
+import sys
+import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from control_plane.registry import WorkerRegistry
 from control_plane.job_store import JobStore

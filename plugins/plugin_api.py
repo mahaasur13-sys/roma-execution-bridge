@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """ROMA Plugin API Specification — Lifecycle hooks, execution contract, sandbox."""
 from abc import ABC, abstractmethod
-from typing import Protocol, Any, Dict, List, Optional, Callable
+from typing import Protocol, Any, Dict, List
 from enum import Enum
-import hashlib, json, time
+import hashlib
+import json
+import time
 
 class PluginPhase(Enum):
     INITIALIZING = "initializing"

@@ -3,7 +3,6 @@ saas/branding/loader.py
 """
 import json
 from pathlib import Path
-from typing import Optional
 from .models import TenantBranding
 from .cache import branding_cache
 

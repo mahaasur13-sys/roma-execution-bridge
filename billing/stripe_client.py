@@ -4,8 +4,10 @@ ROMA Stripe Client — Metered billing integration.
 Maps: ROMA billing events → Stripe usage records → invoice finalization.
 """
 from dataclasses import dataclass
-from typing import Optional, Callable
-import time, hashlib, hmac
+from typing import Callable
+import time
+import hashlib
+import hmac
 
 @dataclass
 class StripeConfig:

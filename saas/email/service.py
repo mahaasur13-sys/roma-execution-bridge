@@ -129,8 +129,8 @@ class EmailService:
             self._templates = {}
 
     def _render(self, template_name: str, **kwargs) -> str:
-        if self._env is None or template_name not in self._templates:
-            return TEMPLATES.get(template_name, "").format(**kwargs)
+        if template_name not in self._templates:
+            raise ValueError(f"Unknown template: {template_name}")
         return str(self._templates[template_name].render(**kwargs))
 
     def _build_smtp_message(self, to_email: str, subject: str, html_body: str) -> MIMEMultipart:

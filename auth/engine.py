@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """ROMA Auth Engine — API Keys, HMAC signing, tenant identity."""
-import hmac, hashlib, secrets, time, uuid
+import hmac
+import hashlib
+import secrets
+import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Dict, Optional, List
 from enum import Enum

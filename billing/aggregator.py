@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """ROMA Usage Aggregator — GPU-second aggregation from billing events."""
 from billing.models.billing_events import BillingEvent, BillingEventStore, BillingEventType
-from typing import Optional
 import time
 
 class UsageAggregator:

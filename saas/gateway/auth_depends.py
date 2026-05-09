@@ -1,6 +1,5 @@
 """FastAPI-native auth dependency — runs AFTER middleware chain completes."""
 from fastapi import Request, HTTPException, Depends
-from typing import Optional
 
 
 class AuthContext:

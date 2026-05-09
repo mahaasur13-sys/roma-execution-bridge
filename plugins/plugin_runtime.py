@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """ROMA Plugin Runtime Loader — Isolation, versioning, lifecycle management."""
-import subprocess, sys, importlib, importlib.util, hashlib, json, time, tempfile, os
+import time
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Type
+from typing import Dict, List, Any, Type
 from enum import Enum
 from dataclasses import dataclass, field
 
@@ -92,7 +92,7 @@ class PluginRuntime:
                 for k, v in self._loaded.items()]
 
 def main():
-    from plugin_api import get_plugin, PLUGIN_REGISTRY
+    from plugin_api import PLUGIN_REGISTRY
     runtime = PluginRuntime()
     
     for name, cls in PLUGIN_REGISTRY.items():

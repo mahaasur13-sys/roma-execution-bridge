@@ -2,16 +2,15 @@
 """ROMA SaaS API — HTTP API server with /run endpoint
 Runs as: python3 -m saas_api.server
 """
-import sys, os
+import sys
+import os
 sys.path.insert(0, os.path.dirname(__file__))
 
-from fastapi import FastAPI, HTTPException, Header, Request
-from pydantic import BaseModel, Field
-from typing import Optional, Literal
-import uvicorn, uuid, time
+from fastapi import FastAPI
+import uvicorn
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from saas_api.middleware import auth_middleware, LogRequestMiddleware
+from saas_api.middleware import LogRequestMiddleware
 from saas_api.routes.run import router as run_router
 from saas_api.routes.jobs import router as jobs_router
 from saas_api.routes.health import router as health_router

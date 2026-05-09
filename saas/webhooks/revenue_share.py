@@ -1,6 +1,4 @@
 """Revenue Share Calculator — tiered, per partner, per month"""
-import time
-from typing import Optional
 
 class RevenueShareCalculator:
     # Tier thresholds: (max_gross_INCLUSIVE, rate)

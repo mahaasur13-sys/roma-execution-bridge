@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """ROMA Quota Engine — Per-tenant quota tracking and enforcement."""
-from typing import Dict, Optional
-import time
+from typing import Dict
 
 class QuotaEngine:
     """
