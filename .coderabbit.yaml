@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en
+reviews:
+  profile: assertive
+  high_level_summary: true
+  suggest_code_changes: true
+  request_changes_workflow: true
+  review_status: true
+  path_filters:
+    - "!**/*.md"
+    - "!**/*.txt"
+    - "**/__pycache__/**"
+    - "**/.pytest_cache/**"
+    - "**/dist/**"
+    - "**/build/**"
+    - "**/.env*"
+    - "**/node_modules/**"
+knowledge_base:
+  instructions: |
+    Senior engineer review. Enforce: type hints, no print() at top-level,
+    no hardcoded secrets, parameterized SQL, tests for new features,
+    graceful error handling. Be concrete with code suggestions.
