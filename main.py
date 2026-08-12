@@ -723,6 +723,90 @@ async def ws_worker(ws: WebSocket):
 # DASHBOARD — HTML page (browser-friendly)
 # ============================================
 
+
+# ============================================
+# BROWSER AUTH — cookie-based sessions
+# ============================================
+
+from auth.sessions import create_session, get_session, delete_session
+from starlette.responses import RedirectResponse
+
+LOGIN_PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ROMA — Login</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#0f1117; color:#e5e7eb; display:flex; align-items:center; justify-content:center; min-height:100vh }
+.card { background:#161b22; border:1px solid #30363d; border-radius:12px; padding:40px; max-width:420px; width:100% }
+h1 { font-size:24px; margin-bottom:8px; color:#f9fafb }
+p { color:#8b949e; font-size:14px; margin-bottom:24px }
+input { width:100%; padding:10px 14px; background:#0d1117; border:1px solid #30363d; border-radius:8px; color:#e5e7eb; font-size:15px; margin-bottom:16px; outline:none }
+input:focus { border-color:#3b82f6 }
+button { width:100%; padding:10px; background:#238636; border:none; border-radius:8px; color:#fff; font-size:15px; cursor:pointer; font-weight:600 }
+button:hover { background:#2ea043 }
+.error { background:rgba(239,68,68,0.1); border:1px solid #ef4444; border-radius:8px; padding:12px; color:#ef4444; font-size:14px; margin-bottom:16px }
+.hint { font-size:12px; color:#6b7280; margin-top:16px; text-align:center }
+.hint code { background:#1f2937; padding:1px 6px; border-radius:4px }
+</style>
+</head>
+<body>
+<div class="card">
+    <h1>⚡ ROMA Execution Bridge</h1>
+    <p>Enter your API key to access the dashboard.</p>
+    <form method="POST" action="/auth/login">
+        <input type="text" name="api_key" placeholder="roma-demo-key-2026" autofocus required>
+        <button type="submit">Sign In</button>
+    </form>
+    <div class="hint">Test key: <code>roma-demo-key-2026</code></div>
+</div>
+</body>
+</html>"""
+
+
+@app.get("/auth/login")
+async def login_page(request: Request):
+    """Show login form."""
+    # If already logged in, redirect to dashboard
+    session_id = request.cookies.get("session_id")
+    if session_id and get_session(session_id):
+        return RedirectResponse(url="/dashboard", status_code=302)
+    return Response(content=LOGIN_PAGE, media_type="text/html")
+
+
+@app.post("/auth/login")
+async def login(request: Request):
+    """Process login form submission."""
+    form = await request.form()
+    api_key = form.get("api_key", "")
+    if api_key not in API_KEYS:
+        # Show login page with error
+        error_html = LOGIN_PAGE.replace("</form>", '<div class="error">Invalid API key. Try <code>roma-demo-key-2026</code></div></form>')
+        return Response(content=error_html, media_type="text/html", status_code=401)
+
+    info = API_KEYS[api_key]
+    session_id = create_session(info["tenant_id"], api_key)
+
+    resp = RedirectResponse(url="/dashboard", status_code=302)
+    resp.set_cookie(
+        "session_id", session_id,
+        httponly=True, max_age=3600, samesite="lax",
+    )
+    return resp
+
+
+@app.get("/auth/logout")
+async def logout(request: Request):
+    """Clear session and redirect to login."""
+    session_id = request.cookies.get("session_id")
+    if session_id:
+        delete_session(session_id)
+    resp = RedirectResponse(url="/auth/login", status_code=302)
+    resp.delete_cookie("session_id")
+    return resp
+
 def _resolve_api_key(request: Request) -> dict | None:
     """Try header first, then query param (for browser access)."""
     key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
@@ -844,19 +928,30 @@ footer .dot {{ display:inline-block; width:7px; height:7px; border-radius:50%; b
 
 @app.get("/dashboard")
 async def dashboard(request: Request):
-    api_key_raw = request.headers.get("X-API-Key") or request.query_params.get("api_key", "unknown")
-    key_info = _resolve_api_key(request)
-    if not key_info:
-        return Response(
-            content=_error_page("Missing or invalid API key. Use <code>?api_key=...</code> or <code>X-API-Key</code> header."),
-            media_type="text/html",
-            status_code=401,
-        )
-    tenant_id = key_info["tenant_id"]
-    t = db.get_tenant(tenant_id)
-    plan_name = t["plan"] if t else key_info.get("plan", "free")
-    html = _render_dashboard(tenant_id, plan_name, api_key_raw)
-    return Response(content=html, media_type="text/html")
+    # 1. Check session cookie first
+    session_id = request.cookies.get("session_id")
+    if session_id:
+        sess = get_session(session_id)
+        if sess:
+            tenant_id = sess["tenant_id"]
+            api_key_raw = sess["api_key"]
+            t = db.get_tenant(tenant_id)
+            plan_name = t["plan"] if t else PLANS.get("free", {})
+            html = _render_dashboard(tenant_id, plan_name, api_key_raw)
+            return Response(content=html, media_type="text/html")
+
+    # 2. Fall back to query param or header
+    api_key_raw = request.headers.get("X-API-Key") or request.query_params.get("api_key")
+    if api_key_raw and api_key_raw in API_KEYS:
+        info = API_KEYS[api_key_raw]
+        tenant_id = info["tenant_id"]
+        t = db.get_tenant(tenant_id)
+        plan_name = t["plan"] if t else info.get("plan", "free")
+        html = _render_dashboard(tenant_id, plan_name, api_key_raw)
+        return Response(content=html, media_type="text/html")
+
+    # 3. No valid auth — redirect to login page
+    return RedirectResponse(url="/auth/login", status_code=302)
 
 
 def _error_page(message: str) -> str:
