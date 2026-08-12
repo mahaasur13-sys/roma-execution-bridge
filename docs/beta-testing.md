@@ -60,3 +60,67 @@
 | 2 | Onboarding calls + support |
 | 3–4 | Mid-beta survey → iterate |
 | 4+ | Evaluate → decide on public launch |
+
+
+## First Wave — Beta Invitations (2026-08-12)
+
+**Mode:** Dry-run (SENDGRID_API_KEY not configured)
+
+| Metric | Value |
+|--------|:-----:|
+| Leads processed | 10 |
+| Emails sent (dry-run) | 10 |
+| Failed | 0 |
+| Delivery rate | 100% |
+| Leads status updated to 'invited' | 10/10 |
+
+### Test Webhook Events (simulated)
+
+| Event | Email | Status |
+|-------|-------|:------:|
+| delivered | alex@ml-startup.io | ✅ processed |
+| open | alex@ml-startup.io | ✅ processed |
+| click | alex@ml-startup.io | ✅ processed |
+
+### Email Statistics (post-send)
+
+| Metric | Value |
+|--------|:-----:|
+| Total sent | 10 |
+| Opened | 1 |
+| Clicked | 1 |
+| Open rate | 10.0% |
+| Click rate | 10.0% |
+
+### Lead Details
+
+| # | Email | Company | Role | Use Case |
+|---|-------|---------|------|----------|
+| 1 | alex@ml-startup.io | ML Startup | CTO | GPU training pipeline |
+| 2 | maria@dataflow.com | DataFlow Inc | ML Engineer | Batch inference jobs |
+| 3 | dmitry@cloudlab.dev | CloudLab | DevOps Lead | K8s GPU orchestration |
+| 4 | elena@airesearch.org | AI Research Lab | Researcher | LLM fine-tuning |
+| 5 | sergey@quantcore.ru | QuantCore | Quant Developer | Monte Carlo simulations |
+| 6 | anna@biotechml.com | BioTech ML | Data Scientist | Protein folding |
+| 7 | pavel@startupx.io | StartupX | Founder | Cost-aware ML infra |
+| 8 | olga@fintech.ai | FinTech AI | VP Engineering | Fraud detection pipelines |
+| 9 | ivan@robotics.dev | Robotics Lab | Research Engineer | Reinforcement learning |
+| 10 | nina@edtech.ai | EdTech AI | Head of AI | Student model training |
+
+### Invitation Template
+
+- HTML: Professional dark theme (GitHub-style), responsive
+- Plain text: Included as alternative
+- Personalization: `{ name }` (company name fallback), `{ email }`
+- CTA: Direct link to dashboard with UTM tracking
+- Demo key: `roma-demo-key-2026`
+- Template: `docs/beta-invitation-template.md`
+- Script: `scripts/send_invitations.py`
+
+### Next Steps
+
+1. **Enable real sends:** Configure `SENDGRID_API_KEY` and `FROM_EMAIL` in `.env`
+2. **Re-seed leads:** Reset `leads.status` to `'new'` for the 10 test leads
+3. **Send real wave:** `python scripts/send_invitations.py --limit 10`
+4. **Monitor:** Track email open/click via SendGrid webhook + `/admin/email-stats`
+5. **Onboard:** Schedule calls with engaged testers

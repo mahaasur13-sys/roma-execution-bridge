@@ -1,36 +1,53 @@
-# ROMA Beta — Invitation Email Template
+# Beta Invitation Email Template
 
-**Subject:** You're invited — ROMA Beta (GPU Execution Platform)
+ROMA Execution Bridge — приглашение в закрытое бета-тестирование.
 
----
+## HTML-шаблон
 
-Hi {name},
+Адаптивный, тёмная тема (GitHub-стиль), с кнопкой CTA и UTM-параметрами.
 
-Thanks for your interest in **ROMA** — the closed-loop GPU execution platform.
+Переменные:
+- `{{ name }}` — имя получателя (fallback: "Valued Tester")
+- `{{ email }}` — email получателя
+- `{{ invitation_link }}` — полная ссылка на дашборд с UTM-параметрами
 
-ROMA helps ML teams run, schedule, and bill GPU workloads across any backend (local, Slurm, Ray, or custom workers), with built-in usage tracking, multi-tenancy, and Stripe billing.
+## Plain Text
 
-**Your invite:**
+Текстовая альтернатива для почтовых клиентов без поддержки HTML.
 
-- **Dashboard:** [https://roma-execution-bridge-asurdev.zocomputer.io/dashboard?api_key=roma-demo-key-2026](https://roma-execution-bridge-asurdev.zocomputer.io/dashboard?api_key=roma-demo-key-2026)
-- **Demo tasks:** 5 ready-to-run examples (PyTorch Training, BERT Inference, Batch Processing, GPU Benchmark, Hello World)
-- **Documentation:** [docs/README.md](https://github.com/mahaasur13-sys/roma-execution-bridge/blob/master/docs/README.md)
-- **Quickstart:** [docs/quickstart.md](https://github.com/mahaasur13-sys/roma-execution-bridge/blob/master/docs/quickstart.md)
+## Персонализация
 
-**What's free during beta:**
+```python
+name = lead.get("company", "") or lead.get("role", "") or "Valued Tester"
+invitation_link = f"{DASHBOARD_URL}&email={email}"
+```
 
-- 50 tasks/month (Free plan)
-- All backends (local, Slurm, Ray)
-- Priority support via email
+## UTM-параметры
 
-**What we'd love from you:**
+```
+?ref=beta&utm_source=email&utm_medium=invite&email={{ email }}
+```
 
-- 1–2 test tasks in your first week
-- Feedback on pain points / missing features
-- A 5-minute survey (link in follow-up)
+## Демо-ключ
 
-**Questions?** Reply to this email or open an issue on [GitHub](https://github.com/mahaasur13-sys/roma-execution-bridge).
+`roma-demo-key-2026` — единый для всех бета-тестеров.
 
-Let's build the future of GPU orchestration together.
+## Отправка
 
-— ROMA Team
+```bash
+# Dry-run (без реальной отправки)
+python scripts/send_invitations.py --dry-run --limit 10
+
+# Реальная отправка (требуется SENDGRID_API_KEY)
+python scripts/send_invitations.py --limit 10
+
+# Через админ-эндпоинт
+curl -X POST https://roma-execution-bridge-asurdev.zocomputer.io/admin/invite \
+  -H "X-API-Key: roma-demo-key-2026" \
+  -H "Content-Type: application/json" \
+  -d '{"limit": 10, "dry_run": true}'
+```
+
+## Шаблон письма
+
+См. `scripts/send_invitations.py` — константы `HTML_TEMPLATE` и `PLAIN_TEXT_TEMPLATE`.
