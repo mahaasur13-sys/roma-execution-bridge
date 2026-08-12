@@ -155,12 +155,6 @@ async def submit_atom_cluster(payload: dict):
     cluster_spec = payload.get("cluster_spec", {})
     cluster_name = cluster_spec.get("name", "default")
     
-    # Create ATOMCluster CR if not exists
-    try:
-        create_atomcluster(cluster_name, cluster_spec)
-    except Exception:
-        pass  # Already exists
-    
     # Dispatch as managed job
     job_id = str(uuid.uuid4())
     job = {
@@ -176,16 +170,6 @@ async def submit_atom_cluster(payload: dict):
     }
     jobs[job_id] = job
     return job
-
-
-@app.get("/jobs")
-async def list_jobs():
-    return {
-        "rom_version": "1.0.0",
-        "queue": len(jobs),
-        "jobs": list(jobs.values())[-10:],
-        "execution_modes": ["k8s_job", "k8s_persistent", "atom_cluster", "batch"]
-    }
 
 
 @app.get("/jobs")
