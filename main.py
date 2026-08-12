@@ -578,6 +578,26 @@ async def run_demo(demo_name: str, key_info: dict = Depends(verify_api_key)):
         execution_mode=demo["execution_mode"],
     )
     return await submit_job(payload, key_info)
+# ============================================
+# SLURM INTEGRATION ENDPOINTS
+# ============================================
+
+from scheduler.slurm_plugin import slurm as slurm_plugin
+
+
+@app.get("/slurm/status/{slurm_job_id}", dependencies=[Depends(verify_api_key)])
+async def slurm_status(slurm_job_id: str, key_info: dict = Depends(verify_api_key)):
+    """Get Slurm job status via sacct/squeue."""
+    result = slurm_plugin.get_status(slurm_job_id)
+    return result
+
+
+@app.post("/slurm/cancel/{slurm_job_id}", dependencies=[Depends(verify_api_key)])
+async def slurm_cancel(slurm_job_id: str, key_info: dict = Depends(verify_api_key)):
+    """Cancel Slurm job via scancel."""
+    result = slurm_plugin.cancel(slurm_job_id)
+    return result
+
 # ENTRY POINT
 # ============================================
 if __name__ == "__main__":
