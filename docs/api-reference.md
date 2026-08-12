@@ -6,103 +6,123 @@
 https://roma-execution-bridge-asurdev.zocomputer.io
 ```
 
+---
+
 ## Authentication
 
-Все защищённые эндпоинты требуют заголовок:
+Защищённые эндпоинты требуют заголовок:
 
 ```
-X-API-Key: <your-api-key>
+X-API-Key: <your_api_key>
 ```
 
-Без ключа или с неверным ключом → **401 Unauthorized**.
+Тестовые ключи доступны в `config/api_keys.json`.
 
-### Получение ключа
+### Поведение
 
-Тестовые ключи хранятся в `config/api_keys.json`. Для production — запрос ключа через лендинг (доступен в Фазе 0, неделя 5–6).
-
-### Пример запроса
-
-```bash
-# Правильный запрос (200/202)
-curl -X POST https://roma-execution-bridge-asurdev.zocomputer.io/submit \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: roma-demo-key-2026" \
-  -d '{"task": "train PyTorch model", "gpu_required": true}'
-
-# Без ключа (401)
-curl https://roma-execution-bridge-asurdev.zocomputer.io/jobs
-# → {"detail": "Missing X-API-Key header. Request a key at ..."}
-
-# Неверный ключ (401)
-curl https://roma-execution-bridge-asurdev.zocomputer.io/jobs \
-  -H "X-API-Key: wrong-key"
-# → {"detail": "Invalid API key"}
-```
+| Сценарий | Код | Ответ |
+|----------|-----|-------|
+| Ключ отсутствует | 401 | `{"detail": "Missing X-API-Key header..."}` |
+| Ключ неверный | 401 | `{"detail": "Invalid API key"}` |
+| Ключ верный | 2xx | Данные |
 
 ---
 
-## Endpoints
+## Public Endpoints
 
 ### GET /health
 
-**Публичный (без ключа).**
+Статус сервиса. **Не требует аутентификации.**
 
 ```bash
 curl https://roma-execution-bridge-asurdev.zocomputer.io/health
 ```
 
-**Response 200:**
+**Response (200):**
 ```json
 {
   "status": "ok",
   "queue_depth": 0,
-  "jobs": 1
+  "jobs": 0
 }
 ```
 
 ---
 
+### GET /metrics
+
+Prometheus-метрики в формате `text/plain`. **Не требует аутентификации.**
+
+```bash
+curl https://roma-execution-bridge-asurdev.zocomputer.io/metrics
+```
+
+**Response (200, text/plain):**
+```text
+# HELP roma_jobs_total Total number of submitted jobs
+# TYPE roma_jobs_total counter
+roma_jobs_total 2.0
+# HELP roma_jobs_active Currently active jobs
+# TYPE roma_jobs_active gauge
+roma_jobs_active 2.0
+# HELP roma_queue_depth Current queue depth
+# TYPE roma_queue_depth gauge
+roma_queue_depth 0.0
+# HELP roma_requests_total Total HTTP requests
+# TYPE roma_requests_total counter
+roma_requests_total{endpoint="/health",method="GET",status="200"} 5.0
+roma_requests_total{endpoint="/metrics",method="GET",status="200"} 3.0
+roma_requests_total{endpoint="/submit",method="POST",status="202"} 2.0
+# HELP roma_request_duration_seconds Request duration in seconds
+# TYPE roma_request_duration_seconds histogram
+roma_request_duration_seconds_bucket{endpoint="/submit",method="POST",le="0.005"} 2.0
+...
+```
+
+**Доступные метрики:**
+
+| Метрика | Тип | Описание |
+|---------|-----|----------|
+| `roma_jobs_total` | Counter | Общее количество отправленных задач |
+| `roma_jobs_active` | Gauge | Текущие активные задачи |
+| `roma_queue_depth` | Gauge | Глубина очереди |
+| `roma_requests_total` | Counter | Счётчик HTTP-запросов (labels: endpoint, method, status) |
+| `roma_request_duration_seconds` | Histogram | Длительность запросов (labels: endpoint, method) |
+
+---
+
+## Protected Endpoints
+
 ### POST /submit
 
-**Требует ключ.** Отправить задачу на выполнение.
+Отправить задачу на выполнение.
 
 ```bash
 curl -X POST https://roma-execution-bridge-asurdev.zocomputer.io/submit \
-  -H "Content-Type: application/json" \
   -H "X-API-Key: roma-demo-key-2026" \
-  -d '{
-    "task": "train PyTorch model on 2 GPUs",
-    "gpu_required": true,
-    "priority": 8,
-    "execution_mode": "k8s_job"
-  }'
+  -H "Content-Type: application/json" \
+  -d '{"task": "Train Bert on GPU", "gpu_required": true, "priority": 8}'
 ```
 
-**Request body:**
+**Request Body:**
+```json
+{
+  "task": "string (required)",
+  "gpu_required": false,
+  "priority": 5,
+  "execution_mode": "k8s_job"
+}
+```
 
-| Поле | Тип | Обязательное | По умолчанию | Описание |
-|------|-----|:------------:|--------------|----------|
-| `task` | string | ✅ | — | Описание задачи (min 1 символ) |
-| `gpu_required` | bool | | `false` | Нужен ли GPU |
-| `priority` | int | | `5` | Приоритет 1–10 |
-| `execution_mode` | str | | `k8s_job` | Режим: `k8s_job`, `k8s_persistent`, `atom_cluster`, `batch` |
-
-**Response 202:**
+**Response (202):**
 ```json
 {
   "status": "queued",
-  "job_id": "24740fcd-63bd-462a-bf58-886d78764857",
-  "roma_dispatch": {
-    "protocol": "rom",
-    "target": "rom://local/24740fcd-63bd-462a-bf58-886d78764857"
-  },
+  "job_id": "a1b2c3d4-...",
+  "roma_dispatch": {"protocol": "rom", "target": "rom://local/..."},
   "dag": ["validate", "dispatch", "execute", "commit"],
-  "estimated_resources": {
-    "cpu_cores": 2,
-    "memory_mb": 512,
-    "gpu": 0
-  },
-  "gpu_required": false
+  "estimated_resources": {"cpu_cores": 2, "memory_mb": 512, "gpu": 0},
+  "gpu_required": true
 }
 ```
 
@@ -110,81 +130,63 @@ curl -X POST https://roma-execution-bridge-asurdev.zocomputer.io/submit \
 
 ### GET /status/{job_id}
 
-**Требует ключ.** Проверить статус задачи.
+Получить статус задачи.
 
 ```bash
-curl https://roma-execution-bridge-asurdev.zocomputer.io/status/24740fcd-63bd-462a-bf58-886d78764857 \
-  -H "X-API-Key: roma-demo-key-2026"
+curl -H "X-API-Key: roma-demo-key-2026" \
+  https://roma-execution-bridge-asurdev.zocomputer.io/status/a1b2c3d4-...
 ```
 
-**Response 200:**
+**Response (200):**
 ```json
 {
-  "job_id": "24740fcd-63bd-462a-bf58-886d78764857",
+  "job_id": "a1b2c3d4-...",
   "status": "queued",
-  "created_at": "2026-08-12T07:45:04",
+  "created_at": "2026-08-12T07:48:00",
   "started_at": null,
   "completed_at": null,
   "error": null
 }
 ```
 
-**Response 404:**
+**Response (404):**
 ```json
-{
-  "detail": "Job not found"
-}
+{"detail": "Job not found"}
 ```
 
 ---
 
 ### POST /cancel/{job_id}
 
-**Требует ключ.** Отменить задачу.
+Отменить задачу.
 
 ```bash
-curl -X POST https://roma-execution-bridge-asurdev.zocomputer.io/cancel/24740fcd-63bd-462a-bf58-886d78764857 \
-  -H "X-API-Key: roma-demo-key-2026"
+curl -X POST -H "X-API-Key: roma-demo-key-2026" \
+  https://roma-execution-bridge-asurdev.zocomputer.io/cancel/a1b2c3d4-...
 ```
 
-**Response 200:**
+**Response (200):**
 ```json
-{
-  "status": "cancelled",
-  "job_id": "24740fcd-63bd-462a-bf58-886d78764857"
-}
+{"status": "cancelled", "job_id": "a1b2c3d4-..."}
 ```
 
 ---
 
 ### GET /jobs
 
-**Требует ключ.** Список последних 10 задач.
+Список всех задач.
 
 ```bash
-curl https://roma-execution-bridge-asurdev.zocomputer.io/jobs \
-  -H "X-API-Key: roma-demo-key-2026"
+curl -H "X-API-Key: roma-demo-key-2026" \
+  https://roma-execution-bridge-asurdev.zocomputer.io/jobs
 ```
 
-**Response 200:**
+**Response (200):**
 ```json
 {
   "rom_version": "1.0.0",
-  "queue": 1,
-  "jobs": [
-    {
-      "status": "queued",
-      "job_id": "24740fcd-63bd-462a-bf58-886d78764857",
-      "rom": "rom://local/24740fcd-63bd-462a-bf58-886d78764857",
-      "submitted_at": "2026-08-12T07:45:04",
-      "payload": {
-        "task": "test",
-        "gpu_required": false,
-        "priority": 5,
-        "execution_mode": "k8s_job"
-      }
-    }
-  ],
+  "queue": 2,
+  "jobs": [...],
   "execution_modes": ["k8s_job", "k8s_persistent", "atom_cluster", "batch"]
 }
 ```
@@ -193,35 +195,22 @@ curl https://roma-execution-bridge-asurdev.zocomputer.io/jobs \
 
 ### POST /submit/cluster
 
-**Требует ключ.** Отправить задачу как ATOMCluster.
+Отправить задачу как ATOMCluster.
 
 ```bash
 curl -X POST https://roma-execution-bridge-asurdev.zocomputer.io/submit/cluster \
-  -H "Content-Type: application/json" \
   -H "X-API-Key: roma-demo-key-2026" \
-  -d '{"cluster_spec": {"name": "my-cluster", "nodes": 4}}'
+  -H "Content-Type: application/json" \
+  -d '{"cluster_spec": {"name": "demo-cluster", "nodes": 4}}'
 ```
 
----
-
-## Коды ошибок
-
-| Код | Описание |
-|-----|----------|
-| 200 | OK — запрос выполнен |
-| 202 | Accepted — задача принята в очередь |
-| 401 | Unauthorized — отсутствует или неверный `X-API-Key` |
-| 404 | Not Found — задача с указанным `job_id` не найдена |
-| 500 | Internal Server Error |
-
----
-
-## Тестовые ключи
-
-Актуальные ключи в `config/api_keys.json`:
-
-- `roma-demo-key-2026`
-- `roma-test-key-alpha`
-- `roma-test-key-bravo`
-
-> Для production: ключи выдаются через лендинг и хранятся в `ROMA_API_KEYS` (переменная окружения).
+**Response (202):**
+```json
+{
+  "status": "atom_cluster_managed",
+  "job_id": "...",
+  "cluster_name": "demo-cluster",
+  "execution_mode": "atom_cluster",
+  "atom_cluster": {"name": "demo-cluster", "managed": true, "nodes": 4}
+}
+```

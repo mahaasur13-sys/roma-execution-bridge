@@ -4,13 +4,54 @@ In-memory storage (will be SQLite later).
 """
 
 import json
+import logging
+import time
+import traceback
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from pydantic import BaseModel, Field, ConfigDict
+from starlette.requests import Request
+from starlette.responses import Response
+
+# ============================================
+# JSON LOGGING
+# ============================================
+
+class JSONFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        log_entry = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "level": record.levelname,
+            "logger": record.name,
+        }
+        for key in ("endpoint", "method", "status_code", "duration_ms", "api_key", "job_id"):
+            if hasattr(record, key):
+                log_entry[key] = getattr(record, key)
+        if record.exc_info and record.exc_info[0]:
+            log_entry["error"] = record.getMessage()
+            log_entry["traceback"] = traceback.format_exception(*record.exc_info)
+        else:
+            log_entry["message"] = record.getMessage()
+        return json.dumps(log_entry, ensure_ascii=False)
+
+_log_handler = logging.StreamHandler()
+_log_handler.setFormatter(JSONFormatter())
+_log_handler.setLevel(logging.INFO)
+
+logger = logging.getLogger("roma")
+logger.addHandler(_log_handler)
+logger.setLevel(logging.INFO)
+logger.propagate = False
+
+def _mask_key(api_key: str | None) -> str | None:
+    if not api_key:
+        return None
+    return api_key[:4] + "***" + api_key[-4:] if len(api_key) > 8 else "***"
 
 # ============================================
 # API KEY AUTH
@@ -36,7 +77,7 @@ def verify_api_key(x_api_key: str = Header(None)) -> str:
     return x_api_key
 
 # ============================================
-# МОДЕЛИ
+# MODELS
 # ============================================
 
 class RomaTaskInput(BaseModel):
@@ -70,7 +111,7 @@ class RomaStatusResponse(BaseModel):
 
 
 # ============================================
-# ПРИЛОЖЕНИЕ
+# APP
 # ============================================
 
 app = FastAPI(
@@ -79,7 +120,61 @@ app = FastAPI(
 )
 
 # ============================================
-# IN-MEMORY STORAGE (временное)
+# PROMETHEUS METRICS
+# ============================================
+
+roma_jobs_total = Counter("roma_jobs_total", "Total number of submitted jobs")
+roma_jobs_active = Gauge("roma_jobs_active", "Currently active jobs")
+roma_queue_depth = Gauge("roma_queue_depth", "Current queue depth")
+roma_requests_total = Counter(
+    "roma_requests_total",
+    "Total HTTP requests",
+    ["endpoint", "method", "status"],
+)
+roma_request_duration = Histogram(
+    "roma_request_duration_seconds",
+    "Request duration in seconds",
+    ["endpoint", "method"],
+)
+
+# ============================================
+# MIDDLEWARE — structured logging + metrics
+# ============================================
+
+@app.middleware("http")
+async def tracking_middleware(request: Request, call_next) -> Response:
+    start = time.monotonic()
+    api_key = _mask_key(request.headers.get("X-API-Key"))
+
+    response = await call_next(request)
+
+    duration_ms = round((time.monotonic() - start) * 1000, 2)
+    endpoint = request.url.path
+    method = request.method
+    status = response.status_code
+
+    roma_requests_total.labels(endpoint=endpoint, method=method, status=str(status)).inc()
+    roma_request_duration.labels(endpoint=endpoint, method=method).observe(duration_ms / 1000)
+
+    extra = {
+        "endpoint": endpoint,
+        "method": method,
+        "status_code": status,
+        "duration_ms": duration_ms,
+        "api_key": api_key,
+    }
+    if status >= 500:
+        logger.error(f"{method} {endpoint} → {status}", extra=extra)
+    elif status >= 400:
+        logger.warning(f"{method} {endpoint} → {status}", extra=extra)
+    else:
+        logger.info(f"{method} {endpoint} → {status}", extra=extra)
+
+    return response
+
+
+# ============================================
+# IN-MEMORY STORAGE (temporary)
 # ============================================
 
 jobs: dict = {}
@@ -87,16 +182,17 @@ queue_depth: int = 0
 
 
 # ============================================
-# ЭНДПОИНТЫ
+# ENDPOINTS (protected)
 # ============================================
 
 @app.post("/submit", response_model=RomaTaskResponse, status_code=202, dependencies=[Depends(verify_api_key)])
-async def submit_task(payload: RomaTaskInput):
+async def submit_task(payload: RomaTaskInput, request: Request):
     global queue_depth
 
     try:
         job_id = str(uuid.uuid4())
         queue_depth += 1
+        roma_queue_depth.set(queue_depth)
 
         job = {
             "status": "queued",
@@ -108,6 +204,9 @@ async def submit_task(payload: RomaTaskInput):
 
         jobs[job_id] = job
         queue_depth -= 1
+        roma_queue_depth.set(queue_depth)
+        roma_jobs_total.inc()
+        roma_jobs_active.set(len(jobs))
 
         return RomaTaskResponse(
             status="queued",
@@ -127,6 +226,7 @@ async def submit_task(payload: RomaTaskInput):
 
     except Exception as e:
         queue_depth -= 1
+        roma_queue_depth.set(queue_depth)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -167,7 +267,16 @@ async def health():
 
 
 # ============================================
-# ТОЧКА ВХОДА
+# /metrics — Prometheus (public)
+# ============================================
+
+@app.get("/metrics")
+async def metrics():
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+# ============================================
+# ENTRY POINT
 # ============================================
 if __name__ == "__main__":
     import uvicorn
