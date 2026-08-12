@@ -3,12 +3,37 @@ ROMA Execution Bridge – FastAPI + Pydantic v2
 In-memory storage (will be SQLite later).
 """
 
+import json
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field, ConfigDict
+
+# ============================================
+# API KEY AUTH
+# ============================================
+
+API_KEYS_FILE = Path(__file__).parent / "config" / "api_keys.json"
+
+def _load_api_keys() -> set[str]:
+    with open(API_KEYS_FILE) as f:
+        data = json.load(f)
+    return set(data.get("keys", []))
+
+VALID_API_KEYS: set[str] = _load_api_keys()
+
+def verify_api_key(x_api_key: str = Header(None)) -> str:
+    if not x_api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing X-API-Key header. Request a key at https://roma-execution-bridge-asurdev.zocomputer.io",
+        )
+    if x_api_key not in VALID_API_KEYS:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    return x_api_key
 
 # ============================================
 # МОДЕЛИ
@@ -17,7 +42,7 @@ from pydantic import BaseModel, Field, ConfigDict
 class RomaTaskInput(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
-        validate_default=True
+        validate_default=True,
     )
 
     task: str = Field(..., min_length=1)
@@ -57,15 +82,15 @@ app = FastAPI(
 # IN-MEMORY STORAGE (временное)
 # ============================================
 
-jobs = {}
-queue_depth = 0
+jobs: dict = {}
+queue_depth: int = 0
 
 
 # ============================================
 # ЭНДПОИНТЫ
 # ============================================
 
-@app.post("/submit", response_model=RomaTaskResponse, status_code=202)
+@app.post("/submit", response_model=RomaTaskResponse, status_code=202, dependencies=[Depends(verify_api_key)])
 async def submit_task(payload: RomaTaskInput):
     global queue_depth
 
@@ -105,7 +130,7 @@ async def submit_task(payload: RomaTaskInput):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/status/{job_id}", response_model=RomaStatusResponse)
+@app.get("/status/{job_id}", response_model=RomaStatusResponse, dependencies=[Depends(verify_api_key)])
 async def get_status(job_id: str):
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -119,7 +144,7 @@ async def get_status(job_id: str):
     )
 
 
-@app.post("/cancel/{job_id}")
+@app.post("/cancel/{job_id}", dependencies=[Depends(verify_api_key)])
 async def cancel_job(job_id: str):
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -149,12 +174,12 @@ if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8899)
 
 
-@app.post("/submit/cluster", status_code=202)
+@app.post("/submit/cluster", status_code=202, dependencies=[Depends(verify_api_key)])
 async def submit_atom_cluster(payload: dict):
     """Submit job as ATOMCluster managed execution."""
     cluster_spec = payload.get("cluster_spec", {})
     cluster_name = cluster_spec.get("name", "default")
-    
+
     # Dispatch as managed job
     job_id = str(uuid.uuid4())
     job = {
@@ -165,18 +190,18 @@ async def submit_atom_cluster(payload: dict):
         "atom_cluster": {
             "name": cluster_name,
             "managed": True,
-            "nodes": cluster_spec.get("nodes", 1)
-        }
+            "nodes": cluster_spec.get("nodes", 1),
+        },
     }
     jobs[job_id] = job
     return job
 
 
-@app.get("/jobs")
+@app.get("/jobs", dependencies=[Depends(verify_api_key)])
 async def list_jobs():
     return {
         "rom_version": "1.0.0",
         "queue": len(jobs),
         "jobs": list(jobs.values())[-10:],
-        "execution_modes": ["k8s_job", "k8s_persistent", "atom_cluster", "batch"]
+        "execution_modes": ["k8s_job", "k8s_persistent", "atom_cluster", "batch"],
     }
