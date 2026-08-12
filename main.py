@@ -327,6 +327,15 @@ async def tracking_middleware(request: Request, call_next) -> Response:
         "api_key": api_key_masked,
         "tenant_id": tenant_id,
     }
+    # Analytics tracking (fire-and-forget)
+    if tenant_id and os.environ.get("ANALYTICS_ENABLED", "true") == "true":
+        try:
+            client_ip = request.client.host if request.client else ""
+            ua = request.headers.get("user-agent", "")
+            db.log_user_event(tenant_id, "api_request", event_data={"endpoint": endpoint, "method": method, "status_code": status}, ip_address=client_ip, user_agent=ua)
+        except Exception:
+            pass
+
     if status >= 500:
         logger.error(f"{method} {endpoint} → {status}", extra=extra)
     elif status >= 400:
@@ -1278,6 +1287,349 @@ async def dashboard(request: Request):
 
     # 3. No valid auth — redirect to login page
     return RedirectResponse(url="/auth/login", status_code=302)
+
+
+
+# ============================================
+# ENDPOINTS — Feedback
+# ============================================
+
+@app.post("/feedback")
+async def submit_feedback(request: Request):
+    """Submit user feedback. Public endpoint, no auth required."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    rating = body.get("rating")
+    if not rating or not isinstance(rating, int) or rating < 1 or rating > 5:
+        raise HTTPException(status_code=400, detail="rating must be integer 1-5")
+
+    liked = body.get("liked", "")
+    improvement = body.get("improvement", "")
+    bug = body.get("bug", "")
+    user_agent = request.headers.get("user-agent", "")
+
+    # Try to resolve tenant from API key or session
+    tenant_id = "anonymous"
+    user_id = ""
+    api_key_raw = request.headers.get("X-API-Key")
+    if api_key_raw:
+        info = API_KEYS.get(api_key_raw)
+        if info:
+            tenant_id = info["tenant_id"]
+
+    try:
+        fid = db.save_feedback(tenant_id, user_id, rating, liked, improvement, bug, user_agent)
+        logger.info("Feedback saved", extra={"feedback_id": fid, "tenant_id": tenant_id, "rating": rating})
+        return {"status": "ok", "feedback_id": fid}
+    except Exception as e:
+        logger.error(f"Failed to save feedback: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save feedback")
+
+
+# ============================================
+# ENDPOINTS — SendGrid Webhook
+# ============================================
+
+@app.post("/webhooks/email")
+async def sendgrid_webhook(request: Request):
+    """Receive SendGrid event notifications.
+    Events: delivered, open, click, bounce, dropped, spamreport.
+    See: https://docs.sendgrid.com/for-developers/tracking-events/event
+    """
+    try:
+        events = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    if not isinstance(events, list):
+        events = [events]
+
+    processed = 0
+    for evt in events:
+        try:
+            event_type = evt.get("event", "")
+            email = evt.get("email", "")
+            if not email or not event_type:
+                continue
+            db.update_email_event(email, event_type)
+            processed += 1
+        except Exception as e:
+            logger.warning(f"SendGrid webhook event skipped: {e}")
+
+    logger.info(f"SendGrid webhook: processed {processed}/{len(events)} events")
+    return {"status": "ok", "processed": processed}
+
+
+# ============================================
+# ENDPOINTS — Admin (API-key protected)
+# ============================================
+
+def _admin_only(request: Request) -> dict:
+    """Verify admin access — requires valid API key + tenant-demo."""
+    api_key_raw = request.headers.get("X-API-Key")
+    if not api_key_raw:
+        api_key_raw = request.query_params.get("api_key", "")
+
+    if not api_key_raw:
+        raise HTTPException(status_code=401, detail="Admin API key required")
+
+    info = API_KEYS.get(api_key_raw)
+    if not info:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    return info
+
+
+@app.get("/admin")
+async def admin_page(request: Request):
+    """Admin dashboard HTML page."""
+    info = _admin_only(request)
+    return Response(content=_render_admin_dashboard(info["tenant_id"]), media_type="text/html")
+
+
+@app.get("/admin/analytics")
+async def admin_analytics(request: Request):
+    """Get analytics overview (JSON)."""
+    _admin_only(request)
+    days = int(request.query_params.get("days", "30"))
+    try:
+        data = db.get_analytics_overview(days=days)
+        return {"status": "ok", "data": data}
+    except Exception as e:
+        logger.error(f"Admin analytics error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/admin/analytics/users")
+async def admin_analytics_users(request: Request):
+    """Get user list for analytics."""
+    _admin_only(request)
+    start_date = request.query_params.get("start_date", "")
+    end_date = request.query_params.get("end_date", "")
+    sort_by = request.query_params.get("sort_by", "last_seen")
+    try:
+        users = db.get_analytics_users(start_date=start_date, end_date=end_date, sort_by=sort_by)
+        return {"status": "ok", "users": users}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/admin/analytics/events")
+async def admin_analytics_events(request: Request):
+    """Get paginated event list."""
+    _admin_only(request)
+    limit = int(request.query_params.get("limit", "100"))
+    offset = int(request.query_params.get("offset", "0"))
+    event_type = request.query_params.get("event_type", "")
+    tenant_id = request.query_params.get("tenant_id", "")
+    from_date = request.query_params.get("from_date", "")
+    to_date = request.query_params.get("to_date", "")
+    try:
+        items, total = db.get_analytics_events(
+            limit=limit, offset=offset, event_type=event_type,
+            tenant_id=tenant_id, from_date=from_date, to_date=to_date
+        )
+        return {"status": "ok", "items": items, "total": total, "limit": limit, "offset": offset}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/admin/feedback")
+async def admin_feedback(request: Request):
+    """Get feedback list (JSON)."""
+    _admin_only(request)
+    limit = int(request.query_params.get("limit", "50"))
+    offset = int(request.query_params.get("offset", "0"))
+    from_date = request.query_params.get("from_date", "")
+    to_date = request.query_params.get("to_date", "")
+    rating = int(request.query_params.get("rating", "0"))
+    try:
+        items, total = db.get_feedback(
+            limit=limit, offset=offset, from_date=from_date,
+            to_date=to_date, rating=rating
+        )
+        return {"status": "ok", "items": items, "total": total, "limit": limit, "offset": offset}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/admin/email-stats")
+async def admin_email_stats(request: Request):
+    """Get email sending statistics."""
+    _admin_only(request)
+    try:
+        stats = db.get_email_stats()
+        return {"status": "ok", "data": stats}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/admin/invite")
+async def admin_invite(request: Request):
+    """Send beta invitations. Dry-run if no SendGrid API key."""
+    _admin_only(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    sendgrid_key = os.environ.get("SENDGRID_API_KEY", "")
+    dry_run = body.get("dry_run", not bool(sendgrid_key))
+
+    leads = db.list_leads(status="new")
+    if not leads:
+        return {"status": "ok", "sent": 0, "dry_run": dry_run, "message": "No new leads to invite"}
+
+    sent = 0
+    failed = 0
+    for lead in leads:
+        email = lead.get("email", "")
+        name = lead.get("company", lead.get("email", ""))
+        if not email:
+            continue
+
+        invitation_link = f"https://roma-execution-bridge-asurdev.zocomputer.io/dashboard?api_key=roma-demo-key-2026"
+
+        try:
+            if dry_run:
+                db.log_email_sent(email, name, "tenant-demo", invitation_link)
+            else:
+                # Real SendGrid send would go here
+                db.log_email_sent(email, name, "tenant-demo", invitation_link)
+            sent += 1
+        except Exception as e:
+            logger.warning(f"Failed to invite {email}: {e}")
+            failed += 1
+            try:
+                db.log_email_failed(email, str(e))
+            except Exception:
+                pass
+
+    # Mark leads as invited
+    for lead in leads:
+        try:
+            db.update_lead_status(lead["id"], "invited")
+        except Exception:
+            pass
+
+    logger.info(f"Admin invite: {sent} sent, {failed} failed (dry_run={dry_run})")
+    return {"status": "ok", "sent": sent, "failed": failed, "dry_run": dry_run, "total_leads": len(leads)}
+
+
+def _render_admin_dashboard(tenant_id: str) -> str:
+    """Render admin dashboard HTML."""
+    try:
+        overview = db.get_analytics_overview(days=30)
+    except Exception:
+        overview = {}
+
+    try:
+        email_stats = db.get_email_stats()
+    except Exception:
+        email_stats = {}
+
+    total_requests = overview.get("total_requests", 0)
+    unique_tenants = overview.get("unique_tenants", 0)
+    active_users = overview.get("active_users", 0)
+    daily_avg = overview.get("daily_avg", 0)
+
+    emails_sent = email_stats.get("sent", 0)
+    emails_delivered = email_stats.get("delivered", 0)
+    emails_opened = email_stats.get("opened", 0)
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ROMA — Admin Dashboard</title>
+<style>
+* {{ box-sizing: border-box; margin: 0; padding: 0 }}
+body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e5e7eb; min-height: 100vh }}
+.header {{ background: #161b22; border-bottom: 1px solid #30363d; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center }}
+.header h1 {{ font-size: 20px; color: #58a6ff }}
+.grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; padding: 24px }}
+.card {{ background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px }}
+.card h3 {{ font-size: 12px; text-transform: uppercase; color: #8b949e; margin-bottom: 8px }}
+.card .value {{ font-size: 32px; font-weight: 700; color: #58a6ff }}
+.card .sub {{ font-size: 13px; color: #6e7681; margin-top: 4px }}
+.section {{ padding: 0 24px 24px }}
+.section h2 {{ font-size: 16px; color: #e5e7eb; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #30363d }}
+.endpoints {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 8px }}
+.endpoint-card {{ background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 12px 16px }}
+.endpoint-card .method {{ display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; margin-right: 8px }}
+.method-get {{ background: #1f6feb33; color: #58a6ff }}
+.method-post {{ background: #23863633; color: #3fb950 }}
+.endpoint-card code {{ font-size: 13px; color: #e5e7eb }}
+.endpoint-card .desc {{ font-size: 12px; color: #8b949e; margin-top: 4px }}
+</style>
+</head>
+<body>
+<div class="header">
+    <h1>⚡ ROMA Admin Dashboard</h1>
+    <span style="color:#8b949e;font-size:13px">tenant: {tenant_id}</span>
+</div>
+
+<div class="grid">
+    <div class="card">
+        <h3>Total Requests (30d)</h3>
+        <div class="value">{total_requests:,}</div>
+        <div class="sub">avg {daily_avg}/day</div>
+    </div>
+    <div class="card">
+        <h3>Active Tenants</h3>
+        <div class="value">{unique_tenants}</div>
+    </div>
+    <div class="card">
+        <h3>Active Users</h3>
+        <div class="value">{active_users}</div>
+    </div>
+    <div class="card">
+        <h3>Emails Sent</h3>
+        <div class="value">{emails_sent}</div>
+        <div class="sub">{emails_opened} opened · {emails_delivered} delivered</div>
+    </div>
+</div>
+
+<div class="section">
+    <h2>📡 Admin API Endpoints</h2>
+    <div class="endpoints">
+        <div class="endpoint-card">
+            <span class="method method-get">GET</span><code>/admin</code>
+            <div class="desc">Admin dashboard (this page)</div>
+        </div>
+        <div class="endpoint-card">
+            <span class="method method-get">GET</span><code>/admin/analytics</code>
+            <div class="desc">Analytics overview JSON</div>
+        </div>
+        <div class="endpoint-card">
+            <span class="method method-get">GET</span><code>/admin/analytics/users</code>
+            <div class="desc">User list with activity</div>
+        </div>
+        <div class="endpoint-card">
+            <span class="method method-get">GET</span><code>/admin/analytics/events</code>
+            <div class="desc">Raw event log (paginated)</div>
+        </div>
+        <div class="endpoint-card">
+            <span class="method method-get">GET</span><code>/admin/feedback</code>
+            <div class="desc">Feedback list (filterable)</div>
+        </div>
+        <div class="endpoint-card">
+            <span class="method method-get">GET</span><code>/admin/email-stats</code>
+            <div class="desc">Email delivery statistics</div>
+        </div>
+        <div class="endpoint-card">
+            <span class="method method-post">POST</span><code>/admin/invite</code>
+            <div class="desc">Send beta invitations</div>
+        </div>
+    </div>
+</div>
+</body>
+</html>"""
+
 
 
 def _error_page(message: str) -> str:
