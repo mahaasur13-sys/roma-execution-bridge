@@ -144,3 +144,21 @@ HTTP 202
 ```bash
 # Сервис перезапускается автоматически при обновлении через update_user_service
 ```
+
+## OAuth2 (Google / GitHub)
+
+ROMA поддерживает вход через Google и GitHub (опционально). Для включения задайте переменные окружения:
+
+```env
+GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-xxx
+GITHUB_CLIENT_ID=Ov23li...
+GITHUB_CLIENT_SECRET=...
+```
+
+После настройки на странице входа (`/auth/login`) появятся кнопки «Войти через Google» и «Войти через GitHub».
+
+При первом входе создаётся новый tenant, генерируется API-ключ для машинного доступа.
+
+**Callback URL (настройка в Google Cloud Console / GitHub OAuth App):**
+`https://roma-execution-bridge-asurdev.zocomputer.io/auth/oauth/callback/google`

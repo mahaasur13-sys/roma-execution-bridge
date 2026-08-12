@@ -177,6 +177,20 @@ if STRIPE_ENABLED:
 else:
     stripe = None  # type: ignore[assignment]
 
+
+# ============================================
+# OAUTH2 CONFIG — Google + GitHub
+# ============================================
+
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GITHUB_CLIENT_ID = os.environ.get("GITHUB_CLIENT_ID", "")
+GITHUB_CLIENT_SECRET = os.environ.get("GITHUB_CLIENT_SECRET", "")
+OAUTH_ENABLED = bool(GOOGLE_CLIENT_ID or GITHUB_CLIENT_ID)
+
+import httpx
+from urllib.parse import urlencode
+
 # ============================================
 # MODELS
 # ============================================
@@ -917,6 +931,12 @@ button:hover { background:#2ea043 }
         <input type="text" name="api_key" placeholder="roma-demo-key-2026" autofocus required>
         <button type="submit">Sign In</button>
     </form>
+    <p style="margin-top:24px; color:#8b949e; text-align:center">— or sign in with —</p>
+    <div style="display:flex; gap:12px; margin-top:16px">
+        <a href="/auth/oauth/login/google" style="flex:1; text-align:center; padding:10px; background:#1a1f2e; border:1px solid #30363d; border-radius:8px; color:#e5e7eb; text-decoration:none; font-size:14px">🔵 Google</a>
+        <a href="/auth/oauth/login/github" style="flex:1; text-align:center; padding:10px; background:#1a1f2e; border:1px solid #30363d; border-radius:8px; color:#e5e7eb; text-decoration:none; font-size:14px">🐙 GitHub</a>
+    </div>
+
     <div class="hint">Test key: <code>roma-demo-key-2026</code></div>
 </div>
 </body>

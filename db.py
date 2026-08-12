@@ -166,6 +166,47 @@ def update_lead_status(lead_id: int, status: str, notes: str = "") -> None:
     c.close()
 
 
+def upsert_oauth_user(user_id: str, email: str, name: str, provider: str, tenant_id: str, api_key: str) -> dict:
+    c = _conn()
+    now = datetime.now(timezone.utc).isoformat()
+    existing = c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if existing:
+        c.execute(
+            "UPDATE users SET email=?, name=?, updated_at=? WHERE id=?",
+            (email, name, now, user_id),
+        )
+    else:
+        c.execute(
+            "INSERT INTO users (id, email, name, provider, tenant_id, api_key, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+            (user_id, email, name, provider, tenant_id, api_key, now, now),
+        )
+    c.commit()
+    row = c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    c.close()
+    return dict(row) if row else {}
+
+
+def get_user_by_id(user_id: str) -> dict | None:
+    c = _conn()
+    row = c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    c.close()
+    return dict(row) if row else None
+
+
+def get_user_by_email(email: str) -> dict | None:
+    c = _conn()
+    row = c.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+    c.close()
+    return dict(row) if row else None
+
+
+def get_user_by_api_key(api_key: str) -> dict | None:
+    c = _conn()
+    row = c.execute("SELECT * FROM users WHERE api_key = ?", (api_key,)).fetchone()
+    c.close()
+    return dict(row) if row else None
+
+
 def list_tenants() -> list[dict]:
     c = _conn()
     rows = c.execute("SELECT * FROM tenants ORDER BY created_at DESC").fetchall()
