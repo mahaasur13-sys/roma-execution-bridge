@@ -1,117 +1,154 @@
-# Биллинг и тарифные планы
+# ROMA Billing — Stripe Integration
 
-## Обзор
+## Overview
 
-ROMA использует простую модель тарификации: **количество задач в месяц** + **GPU-часы** (эстимированные). Каждый tenant имеет тарифный план с лимитами.
+ROMA uses **Stripe** for subscription billing. Each tenant has a plan (Free / Pro / Enterprise) that determines:
+- Maximum jobs per month
+- GPU priority
+- Support tier
 
-## Тарифные планы
+## Plans
 
-| План | Задач/мес | Цена | Особенности |
-|------|:---------:|------|-------------|
-| **Free** | 50 | $0 | Community support |
-| **Pro** | 1 000 | $49/мес | Priority queue, Email support |
-| **Enterprise** | Unlimited | $299/мес | Dedicated GPU, SSO, SLA 99.9% |
+| Plan | Price | Max Jobs/Month | GPU Priority | Stripe Price ID |
+|------|-------|----------------|-------------|-----------------|
+| **Free** | $0 | 50 | Low | — (no Stripe) |
+| **Pro** | $49/mo | 1 000 | Normal | `price_pro` (env) |
+| **Enterprise** | $299/mo | Unlimited | High | `price_enterprise` (env) |
 
-Конфигурация: `config/plans.json`
+## Architecture
 
-## Как это работает
+```
+Tenant signs up
+    │
+    ▼
+/api_key_manager → assigns tenant_id + plan=free
+    │
+    ▼
+GET /billing/create-checkout-session?plan=pro
+    │
+    ▼
+Stripe Checkout → tenant pays → webhook fires
+    │
+    ▼
+POST /webhooks/stripe → checkout.session.completed
+    │
+    ▼
+tenant.subscription_status = "active"
+tenant.plan = "pro"
+```
 
-### 1. Учёт использования
+## Data Storage
 
-При каждой успешной задаче (`POST /submit`) счётчик `total_jobs` увеличивается для текущего tenant. GPU-задачи также считают `total_gpu_seconds` (пока 300 сек на задачу — эстимейт).
+All subscription data is in SQLite (`data/roma.db`):
 
-Данные хранятся в `config/usage.json`:
+```sql
+CREATE TABLE tenants (
+    tenant_id TEXT PRIMARY KEY,
+    api_key TEXT,
+    name TEXT,
+    plan TEXT DEFAULT 'free',
+    stripe_customer_id TEXT,
+    stripe_subscription_id TEXT,
+    subscription_status TEXT DEFAULT 'inactive',
+    subscription_end_date TEXT,
+    max_jobs_per_month INTEGER DEFAULT 50,
+    created_at TEXT,
+    updated_at TEXT
+);
+```
 
+## Checkout Flow
+
+### Create Session
+
+```
+POST /billing/create-checkout-session
+X-API-Key: roma-demo-key-2026
+
+{
+  "plan": "pro",
+  "success_url": "https://example.com/success",
+  "cancel_url": "https://example.com/cancel"
+}
+```
+
+Returns:
 ```json
 {
-  "tenant-demo": {
-    "total_jobs": 50,
-    "total_gpu_seconds": 0,
-    "last_updated": "2026-08-12T08:01:38.716086"
-  }
+  "session_id": "cs_test_a1b2c3...",
+  "url": "https://checkout.stripe.com/c/pay/cs_test_a1b2c3..."
 }
 ```
 
-### 2. Проверка лимитов
+### Checkout Flow
 
-Перед созданием задачи проверяется:
-- Текущий план tenant'а
-- Текущее использование
-- Если лимит превышен → **402 Payment Required**
+1. **User visits** `session.url` → redirected to Stripe-hosted checkout page
+2. **User enters** card details (Stripe handles PCI compliance)
+3. **On success** → Stripe redirects to `success_url?session_id=cs_test_...`
+4. **Webhook fires** → ROMA receives `checkout.session.completed`
+5. **Tenant updated** → `subscription_status = "active"`, plan upgraded
 
-```
-POST /submit → 402
-{
-  "detail": "Plan 'free' limit reached: 50/50 jobs. Upgrade at ..."
-}
-```
+## Webhook Events
 
-### 3. Stripe-платежи
+See [docs/webhooks.md](webhooks.md) for full event reference.
 
-Stripe находится в режиме **заглушки** (ключи не настроены). При попытке создать checkout-сессию возвращается инструкция по настройке:
+| Event | Action |
+|-------|--------|
+| `checkout.session.completed` | Activate subscription, set `stripe_customer_id` + `stripe_subscription_id` |
+| `invoice.payment_succeeded` | Update `subscription_end_date`, reset usage counter |
+| `invoice.payment_failed` | Mark `subscription_status = "past_due"`, block job creation |
+| `customer.subscription.deleted` | Mark `subscription_status = "canceled"`, block access |
 
-```
-POST /billing/create-checkout-session → 200
-{
-  "status": "billing_disabled",
-  "message": "Stripe is not configured. To enable billing:\n...",
-  "plan": "pro"
-}
-```
+## Subscription Statuses
 
-**Чтобы включить Stripe:**
+| Status | Can Submit Jobs? | Description |
+|--------|-----------------|-------------|
+| `active` | ✅ Yes | Active subscription, limits apply |
+| `trialing` | ✅ Yes | Trial period, limits apply |
+| `inactive` | ⚠️ Free tier only | No paid subscription |
+| `past_due` | ❌ No (402) | Payment failed, access blocked |
+| `canceled` | ❌ No (402) | Subscription ended, access blocked |
 
-1. Добавить `STRIPE_SECRET_KEY` в [Zo Secrets](/?t=settings&s=advanced)
-2. Добавить `STRIPE_PUBLISHABLE_KEY` для фронтенда
-3. Перезапустить сервис ROMA
-
-## API
-
-### GET /usage
-
-Возвращает использование для текущего tenant.
+## Environment Variables
 
 ```bash
-curl -H "X-API-Key: roma-demo-key-2026" \
-  https://roma-execution-bridge-asurdev.zocomputer.io/usage
+# Stripe API Keys
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_PUBLISHABLE_KEY=pk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+
+# Stripe Price IDs
+STRIPE_PRICE_PRO=price_...
+STRIPE_PRICE_ENTERPRISE=price_...
 ```
 
-**Ответ:**
-```json
-{
-  "tenant_id": "tenant-demo",
-  "plan": "free",
-  "usage": {
-    "total_jobs": 50,
-    "total_gpu_seconds": 0,
-    "last_updated": "2026-08-12T08:01:38"
-  },
-  "limits": {
-    "max_jobs_per_month": 50,
-    "max_jobs_per_month_display": "50"
-  }
-}
-```
+## Billing-Disabled Mode
 
-### POST /billing/create-checkout-session
+If `STRIPE_SECRET_KEY` is not set, the service runs in **billing-disabled mode**:
+- `/billing/create-checkout-session` returns a stub message
+- `/webhooks/stripe` returns 200 (no-op)
+- All tenants default to plan=free, subscription_status=active
+- No Stripe calls are made
 
-Создаёт Stripe Checkout Session (или заглушку, если Stripe не настроен).
+## Stripe Setup
 
-```bash
-curl -X POST https://roma-execution-bridge-asurdev.zocomputer.io/billing/create-checkout-session \
-  -H "X-API-Key: roma-demo-key-2026" \
-  -H "Content-Type: application/json" \
-  -d '{"plan": "pro"}'
-```
+1. **Create products** in [Stripe Dashboard → Products](https://dashboard.stripe.com/products):
+   - Pro: $49/month (recurring)
+   - Enterprise: $299/month (recurring)
 
-## Дорожная карта биллинга
+2. **Copy Price IDs** to environment variables:
+   ```bash
+   STRIPE_PRICE_PRO=price_1ABC...
+   STRIPE_PRICE_ENTERPRISE=price_2DEF...
+   ```
 
-- [x] Учёт использования (usage.json)
-- [x] Тарифные планы (plans.json)
-- [x] Проверка лимитов (402)
-- [x] Stripe-заглушка с инструкцией
-- [ ] Реальный Stripe Checkout (нужны ключи)
-- [ ] Stripe Webhook для обработки платежей
-- [ ] Invoice generation
-- [ ] Usage-based pricing (GPU-часы)
-- [ ] Dashboard с графиком использования
+3. **Create webhook endpoint** in [Stripe Dashboard → Webhooks](https://dashboard.stripe.com/webhooks):
+   - URL: `https://roma-execution-bridge-asurdev.zocomputer.io/webhooks/stripe`
+   - Events: `checkout.session.completed`, `invoice.payment_succeeded`, `invoice.payment_failed`, `customer.subscription.deleted`
+   - Copy signing secret to `STRIPE_WEBHOOK_SECRET`
+
+4. **Test locally**:
+   ```bash
+   stripe listen --forward-to localhost:8900/webhooks/stripe
+   stripe trigger checkout.session.completed
+   ```

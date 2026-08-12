@@ -13,11 +13,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import db
+
 from fastapi import Depends, FastAPI, Header, HTTPException
 from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from pydantic import BaseModel, Field, ConfigDict
 from starlette.requests import Request
 from starlette.responses import Response
+
 
 # ============================================
 # JSON LOGGING
@@ -81,6 +84,9 @@ def _load_api_keys() -> dict[str, dict]:
 
 API_KEYS: dict[str, dict] = _load_api_keys()
 
+db.init_db()
+db.seed_tenants(API_KEYS)
+
 def verify_api_key(x_api_key: str = Header(None)) -> dict:
     """Validate API key and return tenant info: {tenant_id, name}."""
     if not x_api_key:
@@ -90,7 +96,7 @@ def verify_api_key(x_api_key: str = Header(None)) -> dict:
         )
     if x_api_key not in API_KEYS:
         raise HTTPException(status_code=401, detail="Invalid API key")
-    return API_KEYS[x_api_key]
+    info = dict(API_KEYS[x_api_key]); info["api_key"] = x_api_key; return info
 
 # ============================================
 # PLANS & USAGE
@@ -127,30 +133,42 @@ def _increment_usage(tenant_id: str, gpu_seconds: int = 0) -> dict:
     return usage[tenant_id]
 
 def _check_limits(tenant_id: str) -> tuple[bool, str]:
-    """Returns (allowed, reason)."""
-    tenant_info = API_KEYS.values()
-    plan_name = "free"  # default
-    for info in API_KEYS.values():
-        if info["tenant_id"] == tenant_id:
-            plan_name = info.get("plan", "free")
-            break
+    """Returns (allowed, reason). Checks subscription status + plan limits."""
+    t = db.get_tenant(tenant_id)
+    if not t:
+        return False, f"Tenant '{tenant_id}' not found"
+
+    sub_status = t.get("subscription_status", "inactive")
+    plan_name = t.get("plan", "free")
+
+    if sub_status == "inactive":
+        return False, f"Tenant '{tenant_id}' has no active subscription. Subscribe at /billing/create-checkout-session"
+
+    if sub_status == "past_due":
+        return False, f"Payment past due. Update billing at /billing/create-checkout-session"
 
     plan = PLANS.get(plan_name, PLANS.get("free", {}))
     max_jobs = plan.get("max_jobs_per_month", 50)
 
-    if max_jobs == -1:  # unlimited
+    if max_jobs == -1:
         return True, ""
 
     tenant_usage = _get_tenant_usage(tenant_id)
     if tenant_usage["total_jobs"] >= max_jobs:
-        return False, f"Plan '{plan_name}' limit reached: {tenant_usage['total_jobs']}/{max_jobs} jobs. Upgrade at https://roma-execution-bridge-asurdev.zocomputer.io"
+        return False, f"Plan '{plan_name}' limit reached: {tenant_usage['total_jobs']}/{max_jobs} jobs. Upgrade at /billing/create-checkout-session"
     return True, ""
 
 # ============================================
-# STRIPE (stub if no keys)
+# STRIPE — real integration with test-mode fallback
 # ============================================
 
 STRIPE_ENABLED = bool(os.environ.get("STRIPE_SECRET_KEY"))
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+
+STRIPE_PRICE_IDS = {
+    "pro": os.environ.get("STRIPE_PRICE_PRO", ""),
+    "enterprise": os.environ.get("STRIPE_PRICE_ENTERPRISE", ""),
+}
 
 if STRIPE_ENABLED:
     import stripe
@@ -421,68 +439,136 @@ async def submit_atom_cluster(payload: dict, key_info: dict = Depends(verify_api
 @app.get("/usage", dependencies=[Depends(verify_api_key)])
 async def get_usage(key_info: dict = Depends(verify_api_key)):
     tenant_id = key_info["tenant_id"]
-
-    # Determine plan
-    plan_name = key_info.get("plan", "free")
+    t = db.get_tenant(tenant_id)
+    plan_name = t["plan"] if t else key_info.get("plan", "free")
     plan = PLANS.get(plan_name, PLANS.get("free", {}))
     usage_data = _get_tenant_usage(tenant_id)
     max_jobs = plan.get("max_jobs_per_month", 50)
+    sub_status = t.get("subscription_status", "inactive") if t else "inactive"
 
-    return UsageResponse(
-        tenant_id=tenant_id,
-        plan=plan_name,
-        usage=usage_data,
-        limits={
+    return {
+        "tenant_id": tenant_id,
+        "plan": plan_name,
+        "subscription_status": sub_status,
+        "usage": usage_data,
+        "limits": {
             "max_jobs_per_month": max_jobs,
             "max_jobs_per_month_display": "unlimited" if max_jobs == -1 else str(max_jobs),
         },
-    )
+    }
 
 
 @app.post("/billing/create-checkout-session", dependencies=[Depends(verify_api_key)])
 async def create_checkout_session(body: CheckoutRequest, key_info: dict = Depends(verify_api_key)):
     tenant_id = key_info["tenant_id"]
     plan_name = body.plan
+    plan = PLANS.get(plan_name, PLANS.get("pro", {}))
 
-    if not STRIPE_ENABLED:
+    if not STRIPE_ENABLED or not STRIPE_PRICE_IDS.get(plan_name):
         return {
             "status": "billing_disabled",
             "message": (
-                "Stripe is not configured. To enable billing:\n"
-                "1. Add STRIPE_SECRET_KEY to Zo Secrets: https://asurdev.zo.computer/?t=settings&s=advanced\n"
-                "2. Add STRIPE_PUBLISHABLE_KEY for frontend checkout\n"
+                "Stripe is not fully configured. To enable:\n"
+                "1. Add STRIPE_SECRET_KEY to Zo Secrets\n"
+                "2. Add STRIPE_PRICE_PRO / STRIPE_PRICE_ENTERPRISE with Stripe Price IDs\n"
                 "3. Restart the ROMA service\n\n"
-                f"Selected plan: {plan_name} (${PLANS.get(plan_name, {}).get('price_monthly', 0)}/month)"
+                f"Selected plan: {plan_name} (${plan.get('price_monthly', 0)}/month)"
             ),
             "plan": plan_name,
             "tenant_id": tenant_id,
         }
 
-    # Real Stripe checkout
     try:
-        plan = PLANS.get(plan_name, PLANS["pro"])
+        if plan_name == "free":
+            db.update_tenant_subscription(tenant_id, "", "", "active", "free", None)
+            return {
+                "status": "subscribed",
+                "plan": "free",
+                "tenant_id": tenant_id,
+                "message": "Free plan activated — no payment required.",
+            }
+
+        price_id = STRIPE_PRICE_IDS[plan_name]
+        success_url = f"https://roma-execution-bridge-asurdev.zocomputer.io/dashboard?api_key={key_info['api_key'] or ''}&session_id={{CHECKOUT_SESSION_ID}}"
+        cancel_url = f"https://roma-execution-bridge-asurdev.zocomputer.io/dashboard?api_key={key_info['api_key'] or ''}"
+
         session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            line_items=[{
-                "price_data": {
-                    "currency": "usd",
-                    "product_data": {"name": f"ROMA {plan['name']} Plan"},
-                    "unit_amount": plan["price_monthly"] * 100,
-                    "recurring": {"interval": "month"},
-                },
-                "quantity": 1,
-            }],
             mode="subscription",
-            success_url="https://roma-execution-bridge-asurdev.zocomputer.io/success",
-            cancel_url="https://roma-execution-bridge-asurdev.zocomputer.io/cancel",
-            metadata={"tenant_id": tenant_id},
+            line_items=[{"price": price_id, "quantity": 1}],
+            success_url=success_url,
+            cancel_url=cancel_url,
+            metadata={
+                "tenant_id": tenant_id,
+                "plan": plan_name,
+            },
         )
-        return CheckoutResponse(url=session.url, plan=plan_name, mode="subscription")
+        return {
+            "status": "checkout_created",
+            "session_id": session.id,
+            "url": session.url,
+            "plan": plan_name,
+            "tenant_id": tenant_id,
+        }
     except Exception as e:
+        logger.error(f"Stripe checkout error for {tenant_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Stripe error: {str(e)}")
 
 
 # ============================================
+
+# ============================================
+# DEMOS — ready-to-run tasks
+# ============================================
+
+DEMOS = {
+    "demo-pytorch-train": {
+        "task": "Train ResNet-18 on CIFAR-10 (dummy — 2 epochs)",
+        "gpu_required": True,
+        "priority": 8,
+        "execution_mode": "k8s_job",
+        "description": "Simple PyTorch model training with gradient descent.",
+        "estimated_time": "~2 min",
+    },
+    "demo-inference": {
+        "task": "Run inference — BERT sentiment classifier on sample reviews",
+        "gpu_required": True,
+        "priority": 6,
+        "execution_mode": "k8s_job",
+        "description": "Batch inference using a pre-trained BERT model.",
+        "estimated_time": "~30 sec",
+    },
+    "demo-batch-processing": {
+        "task": "Batch process 1000 images — resize + normalize",
+        "gpu_required": False,
+        "priority": 5,
+        "execution_mode": "k8s_job",
+        "description": "Mass image processing pipeline — no GPU needed.",
+        "estimated_time": "~1 min",
+    },
+    "demo-gpu-benchmark": {
+        "task": "GPU benchmark — matrix multiplication 4096^2",
+        "gpu_required": True,
+        "priority": 10,
+        "execution_mode": "k8s_job",
+        "description": "Raw GPU compute test — measures FLOPS.",
+        "estimated_time": "~15 sec",
+    },
+}
+
+
+@app.post("/demo/{demo_name}")
+async def run_demo(demo_name: str, key_info: dict = Depends(verify_api_key)):
+    tenant_id = key_info["tenant_id"]
+    if demo_name not in DEMOS:
+        raise HTTPException(status_code=404, detail=f"Demo not found: {demo_name}. Available: {list(DEMOS.keys())}")
+    demo = DEMOS[demo_name]
+    payload = SubmitRequest(
+        task=demo["task"],
+        gpu_required=demo["gpu_required"],
+        priority=demo["priority"],
+        execution_mode=demo["execution_mode"],
+    )
+    return await submit_job(payload, key_info)
 # ENTRY POINT
 # ============================================
 if __name__ == "__main__":
@@ -624,7 +710,8 @@ async def dashboard(request: Request):
             status_code=401,
         )
     tenant_id = key_info["tenant_id"]
-    plan_name = key_info.get("plan", "free")
+    t = db.get_tenant(tenant_id)
+    plan_name = t["plan"] if t else key_info.get("plan", "free")
     html = _render_dashboard(tenant_id, plan_name, api_key_raw)
     return Response(content=html, media_type="text/html")
 
