@@ -44,6 +44,35 @@ def init_db() -> None:
 
         CREATE INDEX IF NOT EXISTS idx_tenants_status ON tenants(subscription_status);
         CREATE INDEX IF NOT EXISTS idx_webhooks_tenant ON webhook_events(tenant_id);
+
+        CREATE TABLE IF NOT EXISTS leads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT NOT NULL,
+            company TEXT DEFAULT '',
+            role TEXT DEFAULT '',
+            use_case TEXT DEFAULT '',
+            source TEXT DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'new',
+            notes TEXT DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
+
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            email TEXT NOT NULL,
+            name TEXT DEFAULT '',
+            provider TEXT NOT NULL,
+            tenant_id TEXT NOT NULL,
+            api_key TEXT NOT NULL,
+            avatar_url TEXT DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+        CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id);
     """)
     c.commit()
     c.close()
