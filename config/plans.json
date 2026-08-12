@@ -1,0 +1,20 @@
+{
+  "free": {
+    "name": "Free",
+    "max_jobs_per_month": 50,
+    "price_monthly": 0,
+    "features": ["50 jobs/month", "Community support"]
+  },
+  "pro": {
+    "name": "Pro",
+    "max_jobs_per_month": 1000,
+    "price_monthly": 49,
+    "features": ["1000 jobs/month", "Priority queue", "Email support"]
+  },
+  "enterprise": {
+    "name": "Enterprise",
+    "max_jobs_per_month": -1,
+    "price_monthly": 299,
+    "features": ["Unlimited jobs", "Dedicated GPU", "SSO", "SLA 99.9%"]
+  }
+}

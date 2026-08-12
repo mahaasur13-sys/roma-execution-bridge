@@ -216,3 +216,55 @@ curl -X POST https://roma-execution-bridge-asurdev.zocomputer.io/submit/cluster 
   "atom_cluster": {"name": "demo-cluster", "managed": true, "nodes": 4}
 }
 ```
+
+---
+
+## Billing & Usage
+
+### GET /usage
+
+Использование текущего tenant.
+
+```bash
+curl -H "X-API-Key: roma-demo-key-2026" \
+  https://roma-execution-bridge-asurdev.zocomputer.io/usage
+```
+
+**Response (200):**
+```json
+{
+  "tenant_id": "tenant-demo",
+  "plan": "free",
+  "usage": {"total_jobs": 50, "total_gpu_seconds": 0, "last_updated": "..."},
+  "limits": {"max_jobs_per_month": 50, "max_jobs_per_month_display": "50"}
+}
+```
+
+### POST /billing/create-checkout-session
+
+Создать Stripe Checkout или заглушку (если Stripe не настроен).
+
+```bash
+curl -X POST https://roma-execution-bridge-asurdev.zocomputer.io/billing/create-checkout-session \
+  -H "X-API-Key: roma-demo-key-2026" \
+  -H "Content-Type: application/json" \
+  -d '{"plan": "pro"}'
+```
+
+**Response (200):**
+```json
+{
+  "status": "billing_disabled",
+  "message": "Stripe is not configured...",
+  "plan": "pro",
+  "tenant_id": "tenant-demo"
+}
+```
+
+При превышении лимита тарифа возвращается **402 Payment Required**:
+
+```json
+{"detail": "Plan 'free' limit reached: 50/50 jobs. Upgrade at ..."}
+```
+
+Подробнее: [billing.md](./billing.md)
