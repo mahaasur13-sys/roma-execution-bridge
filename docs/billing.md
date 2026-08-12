@@ -1,154 +1,97 @@
-# ROMA Billing — Stripe Integration
+# ROMA Billing — Stripe Live Setup
 
-## Overview
+## Quick Start
 
-ROMA uses **Stripe** for subscription billing. Each tenant has a plan (Free / Pro / Enterprise) that determines:
-- Maximum jobs per month
-- GPU priority
-- Support tier
+ROMA uses Stripe for subscription billing. This guide covers moving from test mode to live payments.
 
-## Plans
+## 1. Stripe Dashboard Setup
 
-| Plan | Price | Max Jobs/Month | GPU Priority | Stripe Price ID |
-|------|-------|----------------|-------------|-----------------|
-| **Free** | $0 | 50 | Low | — (no Stripe) |
-| **Pro** | $49/mo | 1 000 | Normal | `price_pro` (env) |
-| **Enterprise** | $299/mo | Unlimited | High | `price_enterprise` (env) |
+### Create Live Products & Prices
 
-## Architecture
+1. Go to [Stripe Dashboard → Products](https://dashboard.stripe.com/products)
+2. Toggle **"Test mode" to OFF** (top-right corner)
+3. Create two products:
 
-```
-Tenant signs up
-    │
-    ▼
-/api_key_manager → assigns tenant_id + plan=free
-    │
-    ▼
-GET /billing/create-checkout-session?plan=pro
-    │
-    ▼
-Stripe Checkout → tenant pays → webhook fires
-    │
-    ▼
-POST /webhooks/stripe → checkout.session.completed
-    │
-    ▼
-tenant.subscription_status = "active"
-tenant.plan = "pro"
-```
+| Product       | Price / Month | Price ID env var          |
+|---------------|---------------|---------------------------|
+| ROMA Pro      | $49           | `STRIPE_PRICE_PRO`        |
+| ROMA Enterprise | $299        | `STRIPE_PRICE_ENTERPRISE` |
 
-## Data Storage
+4. For each product, create a **Recurring** price (monthly, USD)
+5. Copy the Price IDs (e.g., `price_1ABC123xyz`)
+6. Save them in `.env`
 
-All subscription data is in SQLite (`data/roma.db`):
+### Get Live API Keys
 
-```sql
-CREATE TABLE tenants (
-    tenant_id TEXT PRIMARY KEY,
-    api_key TEXT,
-    name TEXT,
-    plan TEXT DEFAULT 'free',
-    stripe_customer_id TEXT,
-    stripe_subscription_id TEXT,
-    subscription_status TEXT DEFAULT 'inactive',
-    subscription_end_date TEXT,
-    max_jobs_per_month INTEGER DEFAULT 50,
-    created_at TEXT,
-    updated_at TEXT
-);
-```
+1. Go to [Stripe Dashboard → API Keys](https://dashboard.stripe.com/apikeys)
+2. Click **"Reveal live key"**
+3. Copy:
+   - **Secret key** → `STRIPE_SECRET_KEY=sk_live_...`
+   - **Publishable key** → `STRIPE_PUBLISHABLE_KEY=pk_live_...`
 
-## Checkout Flow
+### Create Webhook Endpoint
 
-### Create Session
+1. Go to [Stripe Dashboard → Webhooks](https://dashboard.stripe.com/webhooks)
+2. Click **"Add endpoint"**
+3. Endpoint URL: `https://roma-execution-bridge-asurdev.zocomputer.io/webhooks/stripe`
+4. Events to listen for:
+   - `checkout.session.completed`
+   - `customer.subscription.deleted`
+   - `invoice.payment_succeeded`
+   - `invoice.payment_failed`
+5. After creation, click **"Reveal"** to copy Signing Secret → `STRIPE_WEBHOOK_SECRET=whsec_...`
 
-```
-POST /billing/create-checkout-session
-X-API-Key: roma-demo-key-2026
+## 2. Environment Variables
 
-{
-  "plan": "pro",
-  "success_url": "https://example.com/success",
-  "cancel_url": "https://example.com/cancel"
-}
-```
-
-Returns:
-```json
-{
-  "session_id": "cs_test_a1b2c3...",
-  "url": "https://checkout.stripe.com/c/pay/cs_test_a1b2c3..."
-}
-```
-
-### Checkout Flow
-
-1. **User visits** `session.url` → redirected to Stripe-hosted checkout page
-2. **User enters** card details (Stripe handles PCI compliance)
-3. **On success** → Stripe redirects to `success_url?session_id=cs_test_...`
-4. **Webhook fires** → ROMA receives `checkout.session.completed`
-5. **Tenant updated** → `subscription_status = "active"`, plan upgraded
-
-## Webhook Events
-
-See [docs/webhooks.md](webhooks.md) for full event reference.
-
-| Event | Action |
-|-------|--------|
-| `checkout.session.completed` | Activate subscription, set `stripe_customer_id` + `stripe_subscription_id` |
-| `invoice.payment_succeeded` | Update `subscription_end_date`, reset usage counter |
-| `invoice.payment_failed` | Mark `subscription_status = "past_due"`, block job creation |
-| `customer.subscription.deleted` | Mark `subscription_status = "canceled"`, block access |
-
-## Subscription Statuses
-
-| Status | Can Submit Jobs? | Description |
-|--------|-----------------|-------------|
-| `active` | ✅ Yes | Active subscription, limits apply |
-| `trialing` | ✅ Yes | Trial period, limits apply |
-| `inactive` | ⚠️ Free tier only | No paid subscription |
-| `past_due` | ❌ No (402) | Payment failed, access blocked |
-| `canceled` | ❌ No (402) | Subscription ended, access blocked |
-
-## Environment Variables
+Add to `.env` (or Zo Secrets in Settings → Advanced):
 
 ```bash
-# Stripe API Keys
-STRIPE_SECRET_KEY=sk_test_...
-STRIPE_PUBLISHABLE_KEY=pk_test_...
-STRIPE_WEBHOOK_SECRET=whsec_...
-
-# Stripe Price IDs
-STRIPE_PRICE_PRO=price_...
-STRIPE_PRICE_ENTERPRISE=price_...
+STRIPE_SECRET_KEY=sk_live_your_secret_key
+STRIPE_PUBLISHABLE_KEY=pk_live_your_publishable_key
+STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret
+STRIPE_PRICE_PRO=price_your_pro_price_id
+STRIPE_PRICE_ENTERPRISE=price_your_enterprise_price_id
 ```
 
-## Billing-Disabled Mode
+## 3. Verify
 
-If `STRIPE_SECRET_KEY` is not set, the service runs in **billing-disabled mode**:
-- `/billing/create-checkout-session` returns a stub message
-- `/webhooks/stripe` returns 200 (no-op)
-- All tenants default to plan=free, subscription_status=active
-- No Stripe calls are made
+```bash
+# Service should report billing enabled
+curl https://roma-execution-bridge-asurdev.zocomputer.io/health
+# → {"billing": {"stripe_enabled": true}}
 
-## Stripe Setup
+# Create a checkout session
+curl -X POST https://roma-execution-bridge-asurdev.zocomputer.io/billing/create-checkout-session \
+  -H "X-API-Key: roma-demo-key-2026" \
+  -H "Content-Type: application/json" \
+  -d '{"plan": "pro"}'
+# → {"status": "checkout_created", "url": "https://checkout.stripe.com/..."}
+```
 
-1. **Create products** in [Stripe Dashboard → Products](https://dashboard.stripe.com/products):
-   - Pro: $49/month (recurring)
-   - Enterprise: $299/month (recurring)
+## 4. Testing with Live Keys
 
-2. **Copy Price IDs** to environment variables:
-   ```bash
-   STRIPE_PRICE_PRO=price_1ABC...
-   STRIPE_PRICE_ENTERPRISE=price_2DEF...
-   ```
+Stripe allows test card `4242424242424242` even in **live mode** — no real charges are processed until you use a real card.
 
-3. **Create webhook endpoint** in [Stripe Dashboard → Webhooks](https://dashboard.stripe.com/webhooks):
-   - URL: `https://roma-execution-bridge-asurdev.zocomputer.io/webhooks/stripe`
-   - Events: `checkout.session.completed`, `invoice.payment_succeeded`, `invoice.payment_failed`, `customer.subscription.deleted`
-   - Copy signing secret to `STRIPE_WEBHOOK_SECRET`
+## Graceful Degradation
 
-4. **Test locally**:
-   ```bash
-   stripe listen --forward-to localhost:8900/webhooks/stripe
-   stripe trigger checkout.session.completed
-   ```
+If `STRIPE_SECRET_KEY` is not set:
+- `/billing/create-checkout-session` returns `"status": "billing_disabled"` with clear instructions
+- Stripe pricing API is not imported
+- No Stripe SDK errors occur
+
+## Stripe Webhook Events Handled
+
+| Event                         | Action in ROMA                                                     |
+|-------------------------------|--------------------------------------------------------------------|
+| `checkout.session.completed`  | Set `tenants.subscription_status = "active"`, save subscription ID |
+| `customer.subscription.deleted` | Set `tenants.subscription_status = "inactive"`, clear dates      |
+| `invoice.payment_succeeded`   | Log success, update subscription end date                         |
+| `invoice.payment_failed`      | Set `tenants.subscription_status = "past_due"`                    |
+
+## Troubleshooting
+
+**Webhook returns 400:** Check `STRIPE_WEBHOOK_SECRET` matches the dashboard signing secret.
+
+**Checkout returns 500:** Verify `STRIPE_PRICE_PRO` / `STRIPE_PRICE_ENTERPRISE` contain valid Price IDs in the correct Stripe mode (test IDs won't work with live keys).
+
+**Tenant stays inactive after payment:** Check webhook logs — Stripe may not have reached the endpoint. Use `stripe listen --forward-to http://localhost:8900/webhooks/stripe` for local debugging.

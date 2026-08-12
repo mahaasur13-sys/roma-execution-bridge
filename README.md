@@ -1,6 +1,8 @@
 # ROMA — Distributed Execution Platform
 
 [![CI](https://github.com/mahaasur13-sys/roma-execution-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/mahaasur13-sys/roma-execution-bridge/actions/workflows/ci.yml)
+[![Stripe Live](https://img.shields.io/badge/Stripe-Configured%20%E2%86%92%20Live-635bff?logo=stripe)](docs/billing.md)
+[![OAuth2](https://img.shields.io/badge/OAuth2-Google%20%7C%20GitHub-4285F4?logo=google)](docs/oauth-setup.md)
 [![Deploy](https://github.com/mahaasur13-sys/roma-execution-bridge/actions/workflows/deploy.yml/badge.svg)](https://github.com/mahaasur13-sys/roma-execution-bridge/actions/workflows/deploy.yml)
 
 > **ROMA = Closed-Loop Compute Economy OS**

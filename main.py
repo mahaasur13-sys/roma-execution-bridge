@@ -187,6 +187,10 @@ GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 GITHUB_CLIENT_ID = os.environ.get("GITHUB_CLIENT_ID", "")
 GITHUB_CLIENT_SECRET = os.environ.get("GITHUB_CLIENT_SECRET", "")
 OAUTH_ENABLED = bool(GOOGLE_CLIENT_ID or GITHUB_CLIENT_ID)
+OAUTH_REDIRECT_BASE = os.environ.get(
+    "OAUTH_REDIRECT_BASE",
+    "https://roma-execution-bridge-asurdev.zocomputer.io"
+)
 
 import httpx
 from urllib.parse import urlencode
@@ -1033,6 +1037,201 @@ async def logout(request: Request):
     resp.delete_cookie("session_id")
     return resp
 
+
+# ============================================
+# OAUTH2 — Google + GitHub Login
+# ============================================
+
+@app.get("/auth/oauth/login/{provider}")
+async def oauth_login(provider: str):
+    """Redirect to Google or GitHub OAuth authorization page."""
+    if not OAUTH_ENABLED:
+        return Response(
+            content=_error_page(
+                "OAuth is not configured. Add GOOGLE_CLIENT_ID or GITHUB_CLIENT_ID to .env<br>"
+                "See <a href='https://github.com/mahaasur13-sys/roma-execution-bridge/blob/master/docs/oauth-setup.md'>docs/oauth-setup.md</a>"
+            ),
+            media_type="text/html", status_code=503,
+        )
+
+    if provider == "google" and GOOGLE_CLIENT_ID:
+        params = {
+            "client_id": GOOGLE_CLIENT_ID,
+            "redirect_uri": f"{OAUTH_REDIRECT_BASE}/auth/oauth/callback/google",
+            "response_type": "code",
+            "scope": "openid email profile",
+            "access_type": "offline",
+            "prompt": "consent",
+        }
+        auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
+        logger.info(f"OAuth redirect → Google")
+        return RedirectResponse(url=auth_url, status_code=302)
+
+    elif provider == "github" and GITHUB_CLIENT_ID:
+        params = {
+            "client_id": GITHUB_CLIENT_ID,
+            "redirect_uri": f"{OAUTH_REDIRECT_BASE}/auth/oauth/callback/github",
+            "scope": "user:email",
+        }
+        auth_url = f"https://github.com/login/oauth/authorize?{urlencode(params)}"
+        logger.info(f"OAuth redirect → GitHub")
+        return RedirectResponse(url=auth_url, status_code=302)
+
+    return Response(
+        content=_error_page(f"OAuth provider '{provider}' is not configured."),
+        media_type="text/html", status_code=400,
+    )
+
+
+async def _oauth_google_callback(code: str) -> dict:
+    """Exchange Google OAuth code for user info."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        token_resp = await client.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": f"{OAUTH_REDIRECT_BASE}/auth/oauth/callback/google",
+            },
+        )
+        token_data = token_resp.json()
+        if "error" in token_data:
+            raise ValueError(f"Google token error: {token_data.get('error_description', token_data['error'])}")
+
+        access_token = token_data["access_token"]
+        user_resp = await client.get(
+            "https://www.googleapis.com/oauth2/v2/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        user_data = user_resp.json()
+        return {
+            "id": f"google-{user_data['id']}",
+            "email": user_data["email"],
+            "name": user_data.get("name", user_data["email"]),
+            "provider": "google",
+        }
+
+
+async def _oauth_github_callback(code: str) -> dict:
+    """Exchange GitHub OAuth code for user info."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        token_resp = await client.post(
+            "https://github.com/login/oauth/access_token",
+            data={
+                "client_id": GITHUB_CLIENT_ID,
+                "client_secret": GITHUB_CLIENT_SECRET,
+                "code": code,
+                "redirect_uri": f"{OAUTH_REDIRECT_BASE}/auth/oauth/callback/github",
+            },
+            headers={"Accept": "application/json"},
+        )
+        token_data = token_resp.json()
+        if "error" in token_data:
+            raise ValueError(f"GitHub token error: {token_data.get('error_description', token_data['error'])}")
+
+        access_token = token_data["access_token"]
+        user_resp = await client.get(
+            "https://api.github.com/user",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Accept": "application/json",
+            },
+        )
+        user_data = user_resp.json()
+
+        # Get primary email (GitHub may hide it in user object)
+        email = user_data.get("email", "")
+        if not email:
+            emails_resp = await client.get(
+                "https://api.github.com/user/emails",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            emails = emails_resp.json()
+            primary = next((e for e in emails if e.get("primary")), emails[0] if emails else {})
+            email = primary.get("email", "")
+
+        return {
+            "id": f"github-{user_data['id']}",
+            "email": email or f"github-{user_data['id']}@users.noreply.github.com",
+            "name": user_data.get("name", user_data.get("login", email)),
+            "provider": "github",
+        }
+
+
+@app.get("/auth/oauth/callback/{provider}")
+async def oauth_callback(provider: str, code: str = "", error: str = "", request: Request = None):
+    """Handle OAuth callback — exchange code, create/update user, start session."""
+    if error:
+        return Response(
+            content=_error_page(f"OAuth authorization denied: {error}"),
+            media_type="text/html", status_code=400,
+        )
+    if not code:
+        return Response(
+            content=_error_page("No authorization code received from OAuth provider."),
+            media_type="text/html", status_code=400,
+        )
+    if not OAUTH_ENABLED:
+        return Response(
+            content=_error_page("OAuth is not configured."),
+            media_type="text/html", status_code=503,
+        )
+
+    try:
+        if provider == "google":
+            user_info = await _oauth_google_callback(code)
+        elif provider == "github":
+            user_info = await _oauth_github_callback(code)
+        else:
+            return Response(
+                content=_error_page(f"Unknown OAuth provider: {provider}"),
+                media_type="text/html", status_code=400,
+            )
+    except Exception as e:
+        logger.error(f"OAuth callback error ({provider}): {e}")
+        return Response(
+            content=_error_page(f"OAuth login failed: {str(e)}"),
+            media_type="text/html", status_code=500,
+        )
+
+    user_id = user_info["id"]
+    email = user_info["email"]
+    name = user_info.get("name", email)
+    prov = user_info["provider"]
+
+    # Upsert user — if exists, reuse; otherwise create new tenant + API key
+    existing = db.get_user_by_email(email)
+    if existing:
+        api_key = existing["api_key"]
+        tenant_id = existing["tenant_id"]
+        logger.info(f"OAuth login: existing user {email} → tenant={tenant_id}")
+    else:
+        tenant_id = f"tenant-{str(uuid.uuid4())[:8]}"
+        api_key = f"roma-{str(uuid.uuid4())[:12]}"
+        try:
+            db.upsert_oauth_user(user_id, email, name, prov, tenant_id, api_key)
+        except Exception as e:
+            logger.warning(f"upsert_oauth_user failed (non-fatal): {e}")
+        # Seed tenant into DB
+        try:
+            db.seed_tenants({api_key: {"tenant_id": tenant_id, "plan": "free"}})
+        except Exception as e:
+            logger.warning(f"seed_tenants failed (non-fatal): {e}")
+        # Add to in-memory API key registry
+        API_KEYS[api_key] = {
+            "tenant_id": tenant_id,
+            "plan": "free",
+            "subscription_status": "active",
+        }
+        logger.info(f"OAuth login: NEW user {email} → tenant={tenant_id}, api_key={api_key}")
+
+    session_id = create_session(tenant_id, api_key)
+    resp = RedirectResponse(url="/dashboard", status_code=302)
+    resp.set_cookie("session_id", session_id, httponly=True, max_age=3600, samesite="lax")
+    return resp
+
 def _resolve_api_key(request: Request) -> dict | None:
     """Try header first, then query param (for browser access)."""
     key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
@@ -1327,6 +1526,80 @@ async def submit_feedback(request: Request):
     except Exception as e:
         logger.error(f"Failed to save feedback: {e}")
         raise HTTPException(status_code=500, detail="Failed to save feedback")
+
+
+# ============================================
+# ENDPOINTS — Stripe Webhook
+# ============================================
+
+@app.post("/webhooks/stripe")
+async def stripe_webhook(request: Request):
+    """Handle Stripe webhook events.
+    Events: checkout.session.completed, invoice.payment_succeeded,
+            invoice.payment_failed, customer.subscription.deleted.
+
+    Updates tenant subscription status in DB.
+    """
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature", "")
+    webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+
+    # Verify signature if webhook secret is configured
+    if webhook_secret and STRIPE_ENABLED:
+        try:
+            event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
+        except stripe.error.SignatureVerificationError:
+            logger.warning("Stripe webhook: invalid signature")
+            raise HTTPException(status_code=400, detail="Invalid signature")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid payload")
+    else:
+        # Webhook secret not configured — accept unsigned (dev/dry-run mode)
+        try:
+            event = json.loads(payload)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    event_type = event.get("type", "")
+    event_obj = event.get("data", {}).get("object", {})
+    metadata = event_obj.get("metadata", {})
+    tenant_id = metadata.get("tenant_id", "")
+    plan = metadata.get("plan", "")
+
+    logger.info(f"Stripe webhook: {event_type} — tenant={tenant_id}, plan={plan}")
+
+    try:
+        if event_type in ("checkout.session.completed", "invoice.payment_succeeded"):
+            # Activate subscription
+            sub_id = event_obj.get("subscription", "")
+            if tenant_id:
+                end_date = None
+                if event_type == "checkout.session.completed":
+                    # Parse subscription end from current_period_end
+                    current_period_end = event_obj.get("current_period_end", 0)
+                    if current_period_end:
+                        end_date = datetime.utcfromtimestamp(current_period_end).strftime("%Y-%m-%d")
+                db.update_tenant_subscription(tenant_id, sub_id, "", "active", plan or "pro", end_date)
+                logger.info(f"Stripe: subscription activated for {tenant_id}")
+
+        elif event_type == "invoice.payment_failed":
+            if tenant_id:
+                db.set_tenant_inactive(tenant_id)
+                logger.warning(f"Stripe: payment failed for {tenant_id} — set inactive")
+
+        elif event_type == "customer.subscription.deleted":
+            if tenant_id:
+                db.update_tenant_subscription(tenant_id, "", "", "canceled", "free", None)
+                logger.info(f"Stripe: subscription canceled for {tenant_id}")
+
+        else:
+            logger.info(f"Stripe webhook: unhandled event type '{event_type}' — ignored")
+
+    except Exception as e:
+        logger.error(f"Stripe webhook DB update error: {e}")
+        # Don't fail — Stripe will retry
+
+    return {"status": "ok", "event": event_type}
 
 
 # ============================================
