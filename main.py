@@ -191,6 +191,39 @@ OAUTH_ENABLED = bool(GOOGLE_CLIENT_ID or GITHUB_CLIENT_ID)
 import httpx
 from urllib.parse import urlencode
 
+
+# ============================================
+# JAEGER / OPENTELEMETRY TRACING
+# ============================================
+
+JAEGER_ENABLED = os.environ.get("JAEGER_ENABLED", "false").lower() == "true"
+JAEGER_AGENT_HOST = os.environ.get("JAEGER_AGENT_HOST", "localhost")
+JAEGER_AGENT_PORT = int(os.environ.get("JAEGER_AGENT_PORT", "6831"))
+JAEGER_SERVICE_NAME = os.environ.get("JAEGER_SERVICE_NAME", "roma-execution-bridge")
+
+if JAEGER_ENABLED:
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.exporter.jaeger.thrift import JaegerExporter
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+
+    resource = Resource.create({SERVICE_NAME: JAEGER_SERVICE_NAME})
+    provider = TracerProvider(resource=resource)
+
+    jaeger_exporter = JaegerExporter(
+        agent_host_name=JAEGER_AGENT_HOST,
+        agent_port=JAEGER_AGENT_PORT,
+    )
+    provider.add_span_processor(BatchSpanProcessor(jaeger_exporter))
+    trace.set_tracer_provider(provider)
+
+    tracer = trace.get_tracer(__name__)
+else:
+    tracer = None
+
+
 # ============================================
 # MODELS
 # ============================================
@@ -251,6 +284,9 @@ app = FastAPI(
     title="ROMA Execution Platform",
     version="1.0.0",
 )
+
+if JAEGER_ENABLED:
+    FastAPIInstrumentor.instrument_app(app)
 
 # ============================================
 # PROMETHEUS METRICS (with tenant_id label)
@@ -367,6 +403,10 @@ async def metrics():
 async def submit_task(payload: RomaTaskInput, request: Request, key_info: dict = Depends(verify_api_key)):
     global queue_depth
     tenant_id = key_info["tenant_id"]
+    if tracer:
+        span = tracer.start_span("submit_task")
+        span.set_attribute("tenant_id", tenant_id)
+        span.set_attribute("gpu_required", payload.gpu_required)
 
     # Check plan limits
     allowed, reason = _check_limits(tenant_id)

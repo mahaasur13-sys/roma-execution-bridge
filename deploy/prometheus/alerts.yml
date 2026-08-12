@@ -1,0 +1,29 @@
+groups:
+  - name: roma_alerts
+    rules:
+      - alert: HighRequestRate
+        expr: rate(roma_requests_total[5m]) > 1000
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High request rate on ROMA"
+          description: "ROMA is receiving >1000 requests/s (current: {{ $value }})"
+
+      - alert: HighActiveJobs
+        expr: roma_jobs_active > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High number of active jobs"
+          description: "ROMA has {{ $value }} active jobs (> 50 threshold)"
+
+      - alert: HighErrorRate
+        expr: (sum(rate(roma_requests_total{status=~"5.."}[5m])) / sum(rate(roma_requests_total[5m]))) > 0.05
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate on ROMA"
+          description: "Error rate is {{ $value | humanizePercentage }} (> 5% threshold)"

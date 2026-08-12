@@ -132,3 +132,10 @@ Auto-start: ✅ (поднимается после перезапуска Zo)
 - **Plans:** `config/plans.json` — Free (50 jobs) / Pro (1000) / Enterprise (unlimited)
 - **Лимиты:** превышение → 402 Payment Required
 - **Stripe:** заглушка при отсутствии ключей, реальный Checkout при `STRIPE_SECRET_KEY`
+
+## Наблюдаемость
+
+- **Jaeger** — distributed tracing (OpenTelemetry + Jaeger exporter), auto-instrumentation FastAPI + user spans
+- **Prometheus** — 3 alert rules: high request rate, high active jobs, high error rate (>5%)
+- **Alertmanager** — Telegram webhook integration
+- **Logs** — JSON structured logging (все логи через Loki + Grafana)
