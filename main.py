@@ -164,6 +164,7 @@ def _check_limits(tenant_id: str) -> tuple[bool, str]:
 
 STRIPE_ENABLED = bool(os.environ.get("STRIPE_SECRET_KEY"))
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+WORKER_WS_ENABLED = os.environ.get("WORKER_WS_ENABLED", "false").lower() == "true"
 
 STRIPE_PRICE_IDS = {
     "pro": os.environ.get("STRIPE_PRICE_PRO", ""),
@@ -189,6 +190,8 @@ class RomaTaskInput(BaseModel):
     gpu_required: bool = Field(default=False)
     priority: int = Field(default=5, ge=1, le=10)
     execution_mode: str = Field(default="k8s_job")
+    backend: str = Field(default="local", pattern="^(local|slurm|ray)$")
+    instance_type: str = Field(default="any", description="GPU type: any, RTX 3060, A100, H100")
 
 
 class RomaTaskResponse(BaseModel):
@@ -598,6 +601,35 @@ async def slurm_cancel(slurm_job_id: str, key_info: dict = Depends(verify_api_ke
     result = slurm_plugin.cancel(slurm_job_id)
     return result
 
+
+# ============================================
+# ENDPOINTS — Worker Management
+# ============================================
+
+
+@app.get("/workers", dependencies=[Depends(verify_api_key)])
+async def list_workers(key_info: dict = Depends(verify_api_key)):
+    tenant_id = key_info["tenant_id"]
+    workers = db.get_tenant_workers(tenant_id)
+    return {"workers": workers, "count": len(workers)}
+
+@app.get("/workers/{worker_id}", dependencies=[Depends(verify_api_key)])
+async def get_worker(worker_id: str, key_info: dict = Depends(verify_api_key)):
+    tenant_id = key_info["tenant_id"]
+    w = db.get_worker_by_id(worker_id)
+    if not w or w.get("tenant_id") != tenant_id:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    return w
+
+@app.post("/workers/{worker_id}/drain", dependencies=[Depends(verify_api_key)])
+async def drain_worker(worker_id: str, key_info: dict = Depends(verify_api_key)):
+    tenant_id = key_info["tenant_id"]
+    w = db.get_worker_by_id(worker_id)
+    if not w or w.get("tenant_id") != tenant_id:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    db.drain_worker(worker_id)
+    return {"status": "draining", "worker_id": worker_id}
+
 # ENTRY POINT
 # ============================================
 if __name__ == "__main__":
@@ -606,6 +638,88 @@ if __name__ == "__main__":
 
 
 # ============================================
+# ============================================
+# ENDPOINTS — Workers
+# ============================================
+
+@app.get("/workers", dependencies=[Depends(verify_api_key)])
+async def list_workers(key_info: dict = Depends(verify_api_key)):
+    tenant_id = key_info["tenant_id"]
+    workers = db.get_tenant_workers(tenant_id)
+    return {"workers": workers, "count": len(workers)}
+
+@app.get("/workers/{worker_id}", dependencies=[Depends(verify_api_key)])
+async def get_worker(worker_id: str, key_info: dict = Depends(verify_api_key)):
+    tenant_id = key_info["tenant_id"]
+    w = db.get_worker_by_id(worker_id)
+    if not w or w["tenant_id"] != tenant_id:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    return w
+
+@app.post("/workers/{worker_id}/drain", dependencies=[Depends(verify_api_key)])
+async def drain_worker(worker_id: str, key_info: dict = Depends(verify_api_key)):
+    tenant_id = key_info["tenant_id"]
+    w = db.get_worker_by_id(worker_id)
+    if not w or w["tenant_id"] != tenant_id:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    db.drain_worker(worker_id)
+    return {"status": "draining", "worker_id": worker_id}
+
+# ============================================
+# WEBSOCKET — Worker Registration
+# ============================================
+
+from fastapi import WebSocket, WebSocketDisconnect
+import asyncio
+
+active_ws_workers: dict[str, WebSocket] = {}
+
+@app.websocket("/ws/worker")
+async def ws_worker(ws: WebSocket):
+    await ws.accept()
+    worker_id = None
+    tenant_id = None
+    try:
+        while True:
+            data = await ws.receive_json()
+            msg_type = data.get("type")
+            if msg_type == "register":
+                worker_id = data["worker_id"]
+                api_key = data.get("api_key", "")
+                capabilities = data.get("capabilities", {})
+                if api_key not in API_KEYS:
+                    await ws.send_json({"type": "error", "message": "Invalid API key"})
+                    await ws.close(code=4001)
+                    return
+                tenant_id = API_KEYS[api_key]["tenant_id"]
+                db.register_worker(worker_id, tenant_id, capabilities)
+                active_ws_workers[worker_id] = ws
+                await ws.send_json({"type": "registered", "worker_id": worker_id, "tenant_id": tenant_id})
+                logger.info("worker_registered", extra={"tenant_id": tenant_id, "worker_id": worker_id})
+            elif msg_type == "heartbeat":
+                db.update_worker_heartbeat(worker_id)
+                await ws.send_json({"type": "heartbeat_ack", "worker_id": worker_id})
+            elif msg_type == "status_update":
+                job_id = data.get("job_id")
+                status = data.get("status")
+                if job_id in jobs:
+                    jobs[job_id]["status"] = status
+                    if status in ("completed", "failed"):
+                        db.release_worker(worker_id)
+                        if "output" in data:
+                            jobs[job_id]["output"] = data["output"]
+                        if "error" in data:
+                            jobs[job_id]["error"] = data["error"]
+                logger.info("worker_status_update", extra={"tenant_id": tenant_id, "worker_id": worker_id, "job_id": job_id, "status": status})
+    except WebSocketDisconnect:
+        logger.info("worker_disconnected", extra={"tenant_id": tenant_id, "worker_id": worker_id})
+    except Exception as e:
+        logger.error(f"ws_worker error: {e}", extra={"tenant_id": tenant_id, "worker_id": worker_id})
+    finally:
+        if worker_id:
+            active_ws_workers.pop(worker_id, None)
+
+
 # DASHBOARD — HTML page (browser-friendly)
 # ============================================
 
