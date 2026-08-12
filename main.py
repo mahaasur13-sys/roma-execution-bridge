@@ -299,6 +299,37 @@ queue_depth: int = 0
 # ENDPOINTS — Public
 # ============================================
 
+@app.get("/stats/daily")
+async def daily_stats(request: Request):
+    key_info = _resolve_api_key(request)
+    if key_info is None:
+        return JSONResponse(status_code=401, content={"detail": "Missing or invalid API key"})
+    """Aggregated job counts + GPU hours for the last 7 days (tenant-isolated)."""
+    tenant_id = key_info.get("tenant_id", "unknown")
+    from datetime import datetime, timedelta
+
+    today = datetime.utcnow().date()
+    dates = [(today - timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
+    daily_jobs, daily_gpu = dict.fromkeys(dates, 0), dict.fromkeys(dates, 0.0)
+
+    for job_id, job in jobs.items():
+        if job.get("tenant_id") != tenant_id:
+            continue
+        try:
+            jd = datetime.fromisoformat(job["submitted_at"]).date().isoformat()
+        except Exception:
+            continue
+        if jd in daily_jobs:
+            daily_jobs[jd] += 1
+            daily_gpu[jd] += float(job.get("gpu_hours", 0) or 0)
+
+    return {
+        "tenant_id": tenant_id,
+        "dates": dates,
+        "jobs_count": [daily_jobs[d] for d in dates],
+        "gpu_hours": [daily_gpu[d] for d in dates],
+    }
+
 @app.get("/health")
 async def health():
     return {
@@ -857,7 +888,10 @@ header .sub {{ color:#9ca3af; font-size:14px; margin-top:4px }}
 .card h3 {{ font-size:13px; font-weight:600; color:#8b949e; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:12px }}
 .card .value {{ font-size:24px; font-weight:700; color:#f0f6fc }}
 .card .sub {{ font-size:13px; color:#8b949e; margin-top:4px }}
-.bar-container {{ background:#21262d; border-radius:8px; height:10px; margin-top:10px; overflow:hidden }}
+.bar-container {{ background:#21262d
+.charts-row {{ display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:28px }}
+@media(max-width:768px) {{ .charts-row {{ grid-template-columns:1fr }} }}
+.chart-box {{ background:#161b22; border:1px solid #30363d; border-radius:12px; padding:16px; height:300px }}; border-radius:8px; height:10px; margin-top:10px; overflow:hidden }}
 .bar-fill {{ background:{bar_color}; height:100%; width:{pct}%; border-radius:8px; transition:width 0.4s }}
 table {{ width:100%; border-collapse:collapse; margin-top:8px }}
 th {{ text-align:left; padding:10px 12px; font-size:12px; font-weight:600; color:#8b949e; text-transform:uppercase; border-bottom:1px solid #30363d }}
@@ -917,9 +951,115 @@ footer .dot {{ display:inline-block; width:7px; height:7px; border-radius:50%; b
     </div>
 </div>
 
+
+    <!-- 📊 USAGE CHARTS -->
+    <h3 style="margin-bottom:16px">📊 Usage (Last 7 Days)</h3>
+    <div class="charts-row">
+        <div class="chart-box"><canvas id="jobsChart"></canvas></div>
+        <div class="chart-box"><canvas id="gpuChart"></canvas></div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script>
+    (function() {{
+        var apiKey = "";
+        try {{ apiKey = new URLSearchParams(window.location.search).get("api_key") || ""; }} catch(e) {{}}
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", "/stats/daily?api_key=" + encodeURIComponent(apiKey), true);
+        xhr.onload = function() {{
+            if (xhr.status !== 200) return;
+            var data = JSON.parse(xhr.responseText);
+            var dates = data.dates || [];
+            var jobsCount = data.jobs_count || [];
+            var gpuHours = data.gpu_hours || [];
+            var ctx1 = document.getElementById("jobsChart").getContext("2d");
+            new Chart(ctx1, {{
+                type: "bar",
+                data: {{
+                    labels: dates,
+                    datasets: [{{
+                        label: "Jobs",
+                        data: jobsCount,
+                        backgroundColor: "rgba(99,102,241,0.4)",
+                        borderColor: "#6366f1",
+                        borderWidth: 1
+                    }}]
+                }},
+                options: {{
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: {{
+                        title: {{ display: true, text: "Jobs per Day", color: "#f9fafb", font: {{ size: 14 }} }},
+                        legend: {{ labels: {{ color: "#9ca3af" }} }}
+                    }},
+                    scales: {{
+                        x: {{ ticks: {{ color: "#9ca3af" }}, grid: {{ color: "#1f2937" }} }},
+                        y: {{ ticks: {{ color: "#9ca3af", beginAtZero: true }}, grid: {{ color: "#1f2937" }} }}
+                    }}
+                }}
+            }});
+            var ctx2 = document.getElementById("gpuChart").getContext("2d");
+            new Chart(ctx2, {{
+                type: "bar",
+                data: {{
+                    labels: dates,
+                    datasets: [{{
+                        label: "GPU Hours",
+                        data: gpuHours,
+                        backgroundColor: "rgba(34,197,94,0.4)",
+                        borderColor: "#22c55e",
+                        borderWidth: 1
+                    }}]
+                }},
+                options: {{
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: {{
+                        title: {{ display: true, text: "GPU Hours per Day", color: "#f9fafb", font: {{ size: 14 }} }},
+                        legend: {{ labels: {{ color: "#9ca3af" }} }}
+                    }},
+                    scales: {{
+                        x: {{ ticks: {{ color: "#9ca3af" }}, grid: {{ color: "#1f2937" }} }},
+                        y: {{ ticks: {{ color: "#9ca3af", beginAtZero: true }}, grid: {{ color: "#1f2937" }} }}
+                    }}
+                }}
+            }});
+        }};
+        xhr.send();
+    }})();
+    </script>
+
 <footer>
     <span><span class="dot"></span> ROMA v1.0.0 — Phase 0 Pre-Launch</span>
     <span>Uptime: since restart</span>
+
+<div class="charts-row hidden" id="dashboard-chart-box">
+    <div class="chart-box"><canvas id="chartJobs"></canvas></div>
+    <div class="chart-box"><canvas id="chartGPU"></canvas></div>
+</div>
+<script>
+(async function() {{
+    const key = new URLSearchParams(window.location.search).get("api_key") || "";
+    let rows = [];
+    try {{
+        const r = await fetch("/stats/daily?api_key=" + encodeURIComponent(key));
+        if (r.ok) {{
+            const d = await r.json();
+            rows = d.dates.map((date, i) => ({{ date, jobs: d.jobs_count[i], gpu: d.gpu_hours[i] }}));
+        }}
+    }} catch(_) {{}}
+    if (!rows.length) return;
+    document.getElementById("dashboard-chart-box").classList.remove("hidden");
+
+    new Chart(document.getElementById("chartJobs"), {{
+        type: "bar", data: {{ labels: rows.map(r => r.date), datasets: [{{ label: "Jobs", data: rows.map(r => r.jobs), backgroundColor: "#3b82f6" }}] }},
+        options: {{ responsive: true, maintainAspectRatio: false, plugins: {{ legend: {{ display: false }} }} }}
+    }});
+
+    new Chart(document.getElementById("chartGPU"), {{
+        type: "bar", data: {{ labels: rows.map(r => r.date), datasets: [{{ label: "GPU Hours", data: rows.map(r => r.gpu), backgroundColor: "#22c55e" }}] }},
+        options: {{ responsive: true, maintainAspectRatio: false, plugins: {{ legend: {{ display: false }} }} }}
+    }});
+}})();
+</script>
+
 </footer>
 
 </div>
