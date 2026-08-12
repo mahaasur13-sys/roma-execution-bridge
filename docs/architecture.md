@@ -107,3 +107,28 @@ Auto-start: ✅ (поднимается после перезапуска Zo)
 - **Фаза 0 (текущая):** Pre-Launch — аутентификация, метрики, документация
 - **Фаза 1:** Multi-tenancy, Stripe-биллинг, дашборд
 - **Фаза 2:** GPU-воркеры, K8s-оператор, production-кластер
+
+---
+
+## Биллинг (новое)
+
+```
+┌─────────────────────────────────────────────┐
+│              BILLING LAYER                   │
+│                                              │
+│  POST /submit ──► check limits ──► 402?     │
+│       │                    │                 │
+│       ▼                    ▼                 │
+│  usage.json         plans.json               │
+│  (tenant counters)  (Free/Pro/Enterprise)     │
+│                                              │
+│  Stripe (stub)                               │
+│  POST /billing/create-checkout-session       │
+│       └──► Returns URL or setup instructions │
+└─────────────────────────────────────────────┘
+```
+
+- **Usage Tracking:** `config/usage.json` — счётчики `total_jobs`, `total_gpu_seconds` на tenant
+- **Plans:** `config/plans.json` — Free (50 jobs) / Pro (1000) / Enterprise (unlimited)
+- **Лимиты:** превышение → 402 Payment Required
+- **Stripe:** заглушка при отсутствии ключей, реальный Checkout при `STRIPE_SECRET_KEY`

@@ -464,6 +464,16 @@ async def create_checkout_session(body: CheckoutRequest, key_info: dict = Depend
     plan_name = body.plan
     plan = PLANS.get(plan_name, PLANS.get("pro", {}))
 
+    # Free plan — activate immediately, no Stripe needed
+    if plan_name == "free":
+        db.update_tenant_subscription(tenant_id, "", "", "active", "free", None)
+        return {
+            "status": "subscribed",
+            "plan": "free",
+            "tenant_id": tenant_id,
+            "message": "Free plan activated — no payment required.",
+        }
+
     if not STRIPE_ENABLED or not STRIPE_PRICE_IDS.get(plan_name):
         return {
             "status": "billing_disabled",
@@ -479,15 +489,6 @@ async def create_checkout_session(body: CheckoutRequest, key_info: dict = Depend
         }
 
     try:
-        if plan_name == "free":
-            db.update_tenant_subscription(tenant_id, "", "", "active", "free", None)
-            return {
-                "status": "subscribed",
-                "plan": "free",
-                "tenant_id": tenant_id,
-                "message": "Free plan activated — no payment required.",
-            }
-
         price_id = STRIPE_PRICE_IDS[plan_name]
         success_url = f"https://roma-execution-bridge-asurdev.zocomputer.io/dashboard?api_key={key_info['api_key'] or ''}&session_id={{CHECKOUT_SESSION_ID}}"
         cancel_url = f"https://roma-execution-bridge-asurdev.zocomputer.io/dashboard?api_key={key_info['api_key'] or ''}"
@@ -553,6 +554,14 @@ DEMOS = {
         "description": "Raw GPU compute test — measures FLOPS.",
         "estimated_time": "~15 sec",
     },
+    "demo-hello-world": {
+        "task": "Hello World — verify connectivity + task submission",
+        "gpu_required": False,
+        "priority": 1,
+        "execution_mode": "k8s_job",
+        "description": "Simple smoke-test job — prints timestamp and hostname.",
+        "estimated_time": "~5 sec",
+    },
 }
 
 
@@ -562,7 +571,7 @@ async def run_demo(demo_name: str, key_info: dict = Depends(verify_api_key)):
     if demo_name not in DEMOS:
         raise HTTPException(status_code=404, detail=f"Demo not found: {demo_name}. Available: {list(DEMOS.keys())}")
     demo = DEMOS[demo_name]
-    payload = SubmitRequest(
+    payload = RomaTaskInput(
         task=demo["task"],
         gpu_required=demo["gpu_required"],
         priority=demo["priority"],
