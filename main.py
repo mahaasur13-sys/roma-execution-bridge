@@ -488,3 +488,164 @@ async def create_checkout_session(body: CheckoutRequest, key_info: dict = Depend
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8899)
+
+
+# ============================================
+# DASHBOARD — HTML page (browser-friendly)
+# ============================================
+
+def _resolve_api_key(request: Request) -> dict | None:
+    """Try header first, then query param (for browser access)."""
+    key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
+    if not key or key not in API_KEYS:
+        return None
+    return API_KEYS[key]
+
+def _render_dashboard(tenant_id: str, plan_name: str, api_key: str) -> str:
+    usage_data = _get_tenant_usage(tenant_id)
+    plan = PLANS.get(plan_name, PLANS.get("free", {}))
+    max_jobs = plan.get("max_jobs_per_month", 50)
+    used = usage_data["total_jobs"]
+    pct = min(100, round(used / max_jobs * 100, 1)) if max_jobs > 0 else 0
+    limit_display = "∞" if max_jobs == -1 else str(max_jobs)
+    bar_color = "#22c55e" if pct < 60 else "#f59e0b" if pct < 85 else "#ef4444"
+
+    my_jobs = [j for j in jobs.values() if j.get("tenant_id") == tenant_id]
+    recent = my_jobs[-10:][::-1]  # newest first
+
+    jobs_html = ""
+    if recent:
+        for j in recent:
+            status_cls = {"queued": "#3b82f6", "cancelled": "#9ca3af", "completed": "#22c55e"}.get(j["status"], "#6b7280")
+            jobs_html += f"""<tr>
+                <td style="font-family:monospace;font-size:13px">{j['job_id'][:8]}...</td>
+                <td><span style="background:{status_cls};color:#fff;padding:2px 8px;border-radius:10px;font-size:12px">{j['status']}</span></td>
+                <td style="font-size:13px">{j.get('submitted_at','—')[:19]}</td>
+                <td><a href="/status/{j['job_id']}?api_key=' + api_key + '" style="color:#3b82f6">details →</a></td>
+            </tr>"""
+    else:
+        jobs_html = '<tr><td colspan="4" style="color:#9ca3af;padding:20px">No jobs yet. Send your first task!</td></tr>'
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ROMA Dashboard — {tenant_id}</title>
+<style>
+* {{ margin:0; padding:0; box-sizing:border-box }}
+body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background:#0f1117; color:#e5e7eb; min-height:100vh }}
+.container {{ max-width:900px; margin:0 auto; padding:24px 16px }}
+header {{ padding:24px 0; border-bottom:1px solid #1f2937; margin-bottom:28px }}
+header h1 {{ font-size:26px; font-weight:700; color:#f9fafb }}
+header .sub {{ color:#9ca3af; font-size:14px; margin-top:4px }}
+.cards {{ display:grid; grid-template-columns:repeat(auto-fill, minmax(260px,1fr)); gap:16px; margin-bottom:28px }}
+.card {{ background:#161b22; border:1px solid #30363d; border-radius:12px; padding:20px }}
+.card h3 {{ font-size:13px; font-weight:600; color:#8b949e; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:12px }}
+.card .value {{ font-size:24px; font-weight:700; color:#f0f6fc }}
+.card .sub {{ font-size:13px; color:#8b949e; margin-top:4px }}
+.bar-container {{ background:#21262d; border-radius:8px; height:10px; margin-top:10px; overflow:hidden }}
+.bar-fill {{ background:{bar_color}; height:100%; width:{pct}%; border-radius:8px; transition:width 0.4s }}
+table {{ width:100%; border-collapse:collapse; margin-top:8px }}
+th {{ text-align:left; padding:10px 12px; font-size:12px; font-weight:600; color:#8b949e; text-transform:uppercase; border-bottom:1px solid #30363d }}
+td {{ padding:10px 12px; border-bottom:1px solid #1f2937 }}
+th:last-child, td:last-child {{ text-align:right }}
+.actions {{ display:flex; gap:10px; flex-wrap:wrap; margin-top:16px }}
+.actions a {{ color:#3b82f6; text-decoration:none; font-size:14px; padding:6px 14px; border:1px solid #30363d; border-radius:6px; transition:all 0.15s }}
+.actions a:hover {{ border-color:#3b82f6; background:rgba(59,130,246,0.1) }}
+footer {{ margin-top:40px; padding-top:20px; border-top:1px solid #1f2937; color:#6b7280; font-size:13px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px }}
+footer .dot {{ display:inline-block; width:7px; height:7px; border-radius:50%; background:#22c55e; margin-right:6px }}
+.status-badge {{ background:rgba(34,197,94,0.15); color:#22c55e; padding:3px 10px; border-radius:10px; font-size:12px }}
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+    <h1>⚡ ROMA Execution Bridge</h1>
+    <div class="sub">Dashboard for <strong>{tenant_id}</strong> · <span class="status-badge">● connected</span></div>
+</header>
+
+<div class="cards">
+    <div class="card">
+        <h3>Account</h3>
+        <div class="value">{tenant_id}</div>
+        <div class="sub">Plan: <strong>{plan.get('name', plan_name)}</strong> (${plan.get('price_monthly', 0)}/month)</div>
+    </div>
+    <div class="card">
+        <h3>Usage</h3>
+        <div class="value">{used} / {limit_display}</div>
+        <div class="sub">jobs this month</div>
+        <div class="bar-container"><div class="bar-fill"></div></div>
+    </div>
+    <div class="card">
+        <h3>Queue</h3>
+        <div class="value">{queue_depth}</div>
+        <div class="sub">jobs waiting</div>
+    </div>
+</div>
+
+<div class="card" style="margin-bottom:28px">
+    <h3>Recent Jobs</h3>
+    <table>
+        <thead><tr><th>Job ID</th><th>Status</th><th>Created</th><th></th></tr></thead>
+        <tbody>{jobs_html}</tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>Quick Actions</h3>
+    <div class="actions">
+        <a href="/health">♥ /health</a>
+        <a href="/metrics">📊 /metrics</a>
+        <a href="/usage?api_key=' + api_key + '">📈 /usage</a>
+        <a href="/jobs?api_key=' + api_key + '">📋 /jobs</a>
+        <a href="/docs/quickstart.md">📖 Quickstart</a>
+    </div>
+</div>
+
+<footer>
+    <span><span class="dot"></span> ROMA v1.0.0 — Phase 0 Pre-Launch</span>
+    <span>Uptime: since restart</span>
+</footer>
+
+</div>
+</body>
+</html>"""
+
+@app.get("/dashboard")
+async def dashboard(request: Request):
+    api_key_raw = request.headers.get("X-API-Key") or request.query_params.get("api_key", "unknown")
+    key_info = _resolve_api_key(request)
+    if not key_info:
+        return Response(
+            content=_error_page("Missing or invalid API key. Use <code>?api_key=...</code> or <code>X-API-Key</code> header."),
+            media_type="text/html",
+            status_code=401,
+        )
+    tenant_id = key_info["tenant_id"]
+    plan_name = key_info.get("plan", "free")
+    html = _render_dashboard(tenant_id, plan_name, api_key_raw)
+    return Response(content=html, media_type="text/html")
+
+
+def _error_page(message: str) -> str:
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ROMA — Unauthorized</title>
+<style>
+body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#0f1117; color:#e5e7eb; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0 }}
+.box {{ text-align:center; padding:40px; background:#161b22; border:1px solid #ef4444; border-radius:12px; max-width:500px }}
+h1 {{ font-size:48px; color:#ef4444; margin-bottom:8px }}
+p {{ color:#9ca3af; font-size:16px }}
+code {{ background:#1f2937; padding:2px 8px; border-radius:4px; font-size:14px }}
+a {{ color:#3b82f6 }}
+</style></head>
+<body>
+<div class="box">
+    <h1>401</h1>
+    <p>{message}</p>
+    <p style="margin-top:16px"><a href="/dashboard">Try again</a></p>
+</div>
+</body></html>"""
