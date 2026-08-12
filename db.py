@@ -210,11 +210,11 @@ def list_webhook_events(limit: int = 20) -> list[dict]:
 
 def add_lead(email: str, company: str = "", role: str = "", use_case: str = "", source: str = "") -> int:
     c = _conn()
-    c.execute(
+    cur = c.execute(
         "INSERT INTO leads (email, company, role, use_case, source) VALUES (?, ?, ?, ?, ?)",
         (email, company, role, use_case, source),
     )
-    lead_id = c.lastrowid
+    lead_id = cur.lastrowid
     c.commit()
     c.close()
     return lead_id
@@ -282,11 +282,11 @@ def get_user_by_api_key(api_key: str) -> dict | None:
 
 def log_email_sent(recipient_email: str, recipient_name: str, tenant_id: str, invitation_link: str) -> int:
     c = _conn()
-    c.execute(
+    cur = c.execute(
         "INSERT INTO email_logs (recipient_email, recipient_name, tenant_id, invitation_link, status) VALUES (?, ?, ?, ?, 'sent')",
         (recipient_email, recipient_name, tenant_id, invitation_link),
     )
-    log_id = c.lastrowid
+    log_id = cur.lastrowid
     c.commit()
     c.close()
     return log_id
@@ -294,11 +294,11 @@ def log_email_sent(recipient_email: str, recipient_name: str, tenant_id: str, in
 
 def log_email_failed(recipient_email: str, error_message: str) -> int:
     c = _conn()
-    c.execute(
+    cur = c.execute(
         "INSERT INTO email_logs (recipient_email, status, error_message) VALUES (?, 'failed', ?)",
         (recipient_email, error_message),
     )
-    log_id = c.lastrowid
+    log_id = cur.lastrowid
     c.commit()
     c.close()
     return log_id
@@ -338,11 +338,11 @@ def get_email_stats() -> dict:
 def log_user_event(tenant_id: str, event_type: str, user_id: str = "", event_data: dict = None, ip_address: str = "", user_agent: str = "") -> int:
     c = _conn()
     data_json = json.dumps(event_data or {})
-    c.execute(
+    cur = c.execute(
         "INSERT INTO user_events (tenant_id, user_id, event_type, event_data, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?)",
         (tenant_id, user_id, event_type, data_json, ip_address, user_agent),
     )
-    eid = c.lastrowid
+    eid = cur.lastrowid
     c.commit()
     c.close()
     return eid
@@ -444,11 +444,11 @@ def get_analytics_events(limit: int = 100, offset: int = 0, event_type: str = ""
 
 def save_feedback(tenant_id: str, user_id: str, rating: int, liked: str = "", improvement: str = "", bug: str = "", user_agent: str = "") -> int:
     c = _conn()
-    c.execute(
+    cur = c.execute(
         "INSERT INTO feedback (tenant_id, user_id, rating, liked, improvement, bug, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?)",
         (tenant_id, user_id, rating, liked, improvement, bug, user_agent),
     )
-    fid = c.lastrowid
+    fid = cur.lastrowid
     c.commit()
     c.close()
     return fid
