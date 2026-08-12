@@ -134,6 +134,37 @@ def list_webhook_events(limit: int = 20) -> list[dict]:
     c.close()
     return [dict(r) for r in rows]
 
+def add_lead(email: str, company: str = "", role: str = "", use_case: str = "", source: str = "") -> int:
+    c = _conn()
+    c.execute(
+        "INSERT INTO leads (email, company, role, use_case, source) VALUES (?, ?, ?, ?, ?)",
+        (email, company, role, use_case, source),
+    )
+    lead_id = c.lastrowid
+    c.commit()
+    c.close()
+    return lead_id
+
+
+def list_leads(status: str = "") -> list[dict]:
+    c = _conn()
+    if status:
+        rows = c.execute("SELECT * FROM leads WHERE status = ? ORDER BY created_at DESC", (status,)).fetchall()
+    else:
+        rows = c.execute("SELECT * FROM leads ORDER BY created_at DESC").fetchall()
+    c.close()
+    return [dict(r) for r in rows]
+
+
+def update_lead_status(lead_id: int, status: str, notes: str = "") -> None:
+    c = _conn()
+    c.execute(
+        "UPDATE leads SET status = ?, notes = ?, updated_at = datetime('now') WHERE id = ?",
+        (status, notes, lead_id),
+    )
+    c.commit()
+    c.close()
+
 
 def list_tenants() -> list[dict]:
     c = _conn()

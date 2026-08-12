@@ -1,0 +1,16 @@
+email,company,role,use_case,source
+ml.lead@example.com,Acme AI Labs,ML Engineer,Training large models on A100 cluster,LinkedIn
+researcher@airesearch.org,AI Research Institute,Research Scientist,Hyperparameter optimization for LLMs,GitHub
+devops@cloudscale.io,CloudScale,DevOps/MLOps,Batch inference pipeline automation,Recommendation
+cto@genstartup.com,GenStartup Inc,CTO,Scheduled fine-tuning jobs for production models,Twitter/X
+phd.candidate@university.edu,University of Zurich,Student/Researcher,Dissertation — transformer architecture comparison,GitHub
+data.sci@enterprise.co,EnterpriseCo,Data Scientist,Weekly model retraining + evaluation dashboard,Search
+engineer@quantedge.ltd,QuantEdge Ltd,Quant Developer,Real-time inference for trading signals,Recommendation
+founder@deepml.ai,DeepML,Founder,Multi-GPU training orchestration,LinkedIn
+sre@platformops.com,PlatformOps,SRE,GPU resource scheduling + cost optimization,GitHub
+grad.student@mit.edu,MIT,Student,GNN training for molecular dynamics,Twitter/X
+lead@biotech_vision.com,BiotechVision,ML Lead,Medical image classification pipeline,Recommendation
+ops@scalestartup.io,ScaleStartup,VP Engineering,10x engineer productivity — GPU utilization,LinkedIn
+prof@cs_department.edu,Stanford CS,Associate Professor,Distributed training research projects,GitHub
+ai@game.studio.com,GameStudio,AI Developer,Real-time NPC inference at scale,Search
+ml.ops@fintech.com,FinTechCo,MLOps Engineer,Automated A/B + canary deployment for model updates,Recommendation
