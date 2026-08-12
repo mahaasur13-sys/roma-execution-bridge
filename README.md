@@ -1,5 +1,8 @@
 # ROMA — Distributed Execution Platform
 
+[![CI](https://github.com/mahaasur13-sys/roma-execution-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/mahaasur13-sys/roma-execution-bridge/actions/workflows/ci.yml)
+[![Deploy](https://github.com/mahaasur13-sys/roma-execution-bridge/actions/workflows/deploy.yml/badge.svg)](https://github.com/mahaasur13-sys/roma-execution-bridge/actions/workflows/deploy.yml)
+
 > **ROMA = Closed-Loop Compute Economy OS**
 > Autonomous GPU workload orchestration with cost-aware scheduling, event sourcing, and multi-tenant SaaS control plane.
 
