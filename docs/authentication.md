@@ -21,6 +21,33 @@ ROMA использует аутентификацию через заголов
 | `roma-test-key-alpha` | Для тестирования |
 | `roma-test-key-bravo` | Для тестирования |
 
+## Связь ключа и Tenant
+
+Каждый API-ключ привязан к `tenant_id` через `config/api_keys.json`:
+
+```json
+{
+  "roma-demo-key-2026": {"tenant_id": "tenant-demo", "name": "Demo Key"},
+  "roma-test-key-alpha": {"tenant_id": "tenant-alpha", "name": "Alpha Test Key"},
+  "roma-test-key-bravo": {"tenant_id": "tenant-bravo", "name": "Bravo Test Key"}
+}
+```
+
+**Tenant isolation:**
+- Каждый tenant видит только свои задачи
+- Попытка доступа к чужой задаче → **404** (не 403 — чужой job_id не раскрывается)
+- `/jobs` возвращает только задачи текущего tenant
+
+**Добавление нового tenant'а:**
+
+```bash
+# 1. Сгенерировать ключ
+python3 -c "import uuid; print('roma-key-' + uuid.uuid4().hex[:12])"
+
+# 2. Добавить в config/api_keys.json
+# 3. Перезапустить сервис
+```
+
 ## Публичные эндпоинты (без ключа)
 
 | Метод | Путь | Описание |

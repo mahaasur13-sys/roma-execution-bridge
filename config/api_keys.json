@@ -1,7 +1,5 @@
 {
-  "keys": [
-    "roma-demo-key-2026",
-    "roma-test-key-alpha",
-    "roma-test-key-bravo"
-  ]
+  "roma-demo-key-2026": {"tenant_id": "tenant-demo", "name": "Demo Key"},
+  "roma-test-key-alpha": {"tenant_id": "tenant-alpha", "name": "Alpha Test Key"},
+  "roma-test-key-bravo": {"tenant_id": "tenant-bravo", "name": "Bravo Test Key"}
 }

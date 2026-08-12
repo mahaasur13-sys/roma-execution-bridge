@@ -93,6 +93,8 @@ roma_request_duration_seconds_bucket{endpoint="/submit",method="POST",le="0.005"
 
 ## Protected Endpoints
 
+> ⚠️ **Tenant Isolation:** Все защищённые эндпоинты изолированы по tenant_id. API-ключ связан с конкретным tenant. Задачи других tenant'ов возвращают 404 (не 403) для предотвращения утечки информации о существовании job_id. Ответ `/jobs` фильтруется только по задачам текущего tenant.
+
 ### POST /submit
 
 Отправить задачу на выполнение.
