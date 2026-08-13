@@ -337,6 +337,12 @@ roma_requests_total = Counter("roma_requests_total", "Total HTTP requests", ["en
 roma_request_duration = Histogram("roma_request_duration_seconds", "Request duration in seconds", ["endpoint", "method"])
 
 # Business metrics (P2-4)
+roma_billing_events = Counter("roma_billing_events_total", "Billing events", ["event_type", "plan"])
+roma_errors_total = Counter("roma_errors_total", "Errors by endpoint", ["endpoint", "status_code"])
+roma_cloudpayments_success = Counter("roma_cloudpayments_success_total", "CloudPayments successful payments")
+roma_cloudpayments_failure = Counter("roma_cloudpayments_failure_total", "CloudPayments failed payments")
+
+# Business metrics (P2-4)
 roma_billing_events = Counter("roma_billing_events_total", "Billing events (checkout/webhook)", ["event_type", "plan"])
 roma_auth_failures = Counter("roma_auth_failures_total", "Authentication failures", ["reason"])
 roma_errors_by_endpoint = Counter("roma_errors_total", "Errors by endpoint", ["endpoint", "status"])

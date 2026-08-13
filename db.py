@@ -482,23 +482,12 @@ def get_feedback(limit: int = 50, offset: int = 0, from_date: str = "", to_date:
 
 
 def get_tenant_workers(tenant_id: str) -> list[dict]:
-    """Return workers belonging to a tenant."""
     c = _conn()
     try:
-        rows = c.execute('SELECT * FROM workers WHERE tenant_id = ? ORDER BY last_heartbeat DESC', (tenant_id,)).fetchall()
+        rows = c.execute("SELECT * FROM workers WHERE tenant_id = ? ORDER BY created_at DESC", (tenant_id,)).fetchall()
         return [dict(r) for r in rows]
     finally:
         c.close()
-
-def get_worker_by_id(worker_id: str) -> dict | None:
-    """Return a worker by its id."""
-    c = _conn()
-    try:
-        row = c.execute('SELECT * FROM workers WHERE id = ?', (worker_id,)).fetchone()
-        return dict(row) if row else None
-    finally:
-        c.close()
-
 def drain_worker(worker_id: str) -> None:
     """Mark a worker status as draining."""
     c = _conn()
