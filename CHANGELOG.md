@@ -5,17 +5,17 @@
 **Audit-driven security hardening.** All P0/P1/P2 from AUDIT-2026-08-13 closed.
 
 ### Безопасность (P0)
-- **CloudPayments replaces Stripe** — , checkout + webhook endpoints
-- **API key leak fixed** — masked in OAuth log ()
-- **Admin auth fixed** —  gate now checks 
-- **Multi-tenant data isolation** — analytics filtered by 
+- **CloudPayments replaces Stripe** — `billing/cloudpayments_client.py`, checkout + webhook endpoints
+- **API key leak fixed** — masked in OAuth log (`api_key[:8]***`)
+- **Admin auth fixed** — `_admin_only()` gate now checks `tenant-demo`
+- **Multi-tenant data isolation** — analytics filtered by `tenant_id`
 
 ### Надёжность (P1)
 - **Rate limiting** — slowapi on 6 critical endpoints (submit/billing/admin/auth/beta)
-- **EmailStr validation** — Pydantic v2 in 
-- **SQLite connection leak fixed** — try/finally in 
-- **SQL injection fixed** — parameterized query in 
-- **PostgreSQL migration ready** —  detection, placeholder replacement
+- **EmailStr validation** — Pydantic v2 in `/beta/apply`
+- **SQLite connection leak fixed** — try/finally in `get_analytics_events()`
+- **SQL injection fixed** — parameterized query in `get_analytics_overview()`
+- **PostgreSQL migration ready** — `DATABASE_URL` detection, placeholder replacement
 
 ### Observability (P2)
 - **CORS middleware** — configurable origins
@@ -24,9 +24,9 @@
 - **InstanceType enum** — Literal validation
 
 ### Breaking Changes
--  env vars → 
--  → 
-- :  → 
+- `STRIPE_*` env vars → `CLOUDPAYMENTS_*`
+- `/webhooks/stripe` → `/webhooks/cloudpayments`
+- `/health`: `stripe_enabled` → `cloudpayments_enabled`
 
 ## v1.0.0 (2026-04-17) — First Stable Release
 
@@ -39,7 +39,7 @@
 - Event Sourcing (append-only log, deterministic replay)
 - Raft Consensus (leader election, log replication)
 - K8s Integration (CRD, operator SDK, RayJob)
-- Billing Engine (metering, Stripe, invoicing, ledger)
+- Billing Engine (metering, invoicing, ledger)
 
 ### Enterprise
 - API Keys (scoped, HMAC, rotation)
