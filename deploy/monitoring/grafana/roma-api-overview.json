@@ -1,0 +1,88 @@
+{
+  "dashboard": {
+    "title": "ROMA API Overview",
+    "uid": "roma-api-overview",
+    "tags": ["roma", "api", "production"],
+    "timezone": "browser",
+    "refresh": "15s",
+    "panels": [
+      {
+        "id": 1, "title": "Request Rate (RPS)", "type": "timeseries",
+        "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+        "targets": [{
+          "expr": "sum(rate(roma_requests_total[1m])) by (endpoint)",
+          "legendFormat": "{{endpoint}}"
+        }],
+        "fieldConfig": {"defaults": {"unit": "reqps"}}
+      },
+      {
+        "id": 2, "title": "Latency p50/p95/p99", "type": "timeseries",
+        "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+        "targets": [
+          {"expr": "histogram_quantile(0.50, sum(rate(roma_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p50"},
+          {"expr": "histogram_quantile(0.95, sum(rate(roma_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p95"},
+          {"expr": "histogram_quantile(0.99, sum(rate(roma_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p99"}
+        ],
+        "fieldConfig": {"defaults": {"unit": "s"}}
+      },
+      {
+        "id": 3, "title": "Error Rate (4xx + 5xx)", "type": "timeseries",
+        "gridPos": {"x": 0, "y": 8, "w": 8, "h": 8},
+        "targets": [{
+          "expr": "sum(rate(roma_requests_total{status=~\"4..|5..\"}[5m])) / sum(rate(roma_requests_total[5m])) * 100",
+          "legendFormat": "error %"
+        }],
+        "fieldConfig": {"defaults": {"unit": "percent", "max": 100}},
+        "thresholds": [{"value": 5, "color": "red", "op": "gt"}, {"value": 2, "color": "yellow", "op": "gt"}]
+      },
+      {
+        "id": 4, "title": "Status Codes Breakdown", "type": "bargauge",
+        "gridPos": {"x": 8, "y": 8, "w": 8, "h": 8},
+        "targets": [{
+          "expr": "sum(increase(roma_requests_total[5m])) by (status)",
+          "legendFormat": "HTTP {{status}}"
+        }]
+      },
+      {
+        "id": 5, "title": "Requests by Endpoint (table)", "type": "table",
+        "gridPos": {"x": 16, "y": 8, "w": 8, "h": 8},
+        "targets": [{
+          "expr": "sum(rate(roma_requests_total[5m])) by (endpoint, method)",
+          "format": "table", "instant": true
+        }],
+        "transformations": [{"id": "organize", "options": {"excludeByName": {"Time": true}}}]
+      },
+      {
+        "id": 6, "title": "Auth Failures", "type": "stat",
+        "gridPos": {"x": 0, "y": 16, "w": 6, "h": 4},
+        "targets": [{
+          "expr": "sum(increase(roma_auth_failures_total[5m]))",
+          "legendFormat": "auth failures"
+        }],
+        "thresholds": [{"value": 0, "color": "green"}, {"value": 3, "color": "orange"}, {"value": 10, "color": "red"}]
+      },
+      {
+        "id": 7, "title": "Errors by Endpoint", "type": "barchart",
+        "gridPos": {"x": 6, "y": 16, "w": 10, "h": 4},
+        "targets": [{
+          "expr": "sum(increase(roma_errors_total[5m])) by (endpoint, status_code)",
+          "legendFormat": "{{endpoint}} {{status_code}}"
+        }]
+      },
+      {
+        "id": 8, "title": "Uptime", "type": "stat",
+        "gridPos": {"x": 16, "y": 16, "w": 4, "h": 4},
+        "targets": [{"expr": "up{job=~\"roma.*\"}"}],
+        "fieldConfig": {"defaults": {"mappings": [{"type": "value", "value": "1", "text": "UP"}, {"type": "value", "value": "0", "text": "DOWN"}]}}
+      },
+      {
+        "id": 9, "title": "Recent Errors (Loki)", "type": "logs",
+        "gridPos": {"x": 0, "y": 20, "w": 24, "h": 8},
+        "targets": [{
+          "expr": "{filename=\"/dev/shm/roma-execution-bridge.log\"} |~ \"(?i)error|5[0-9]{2}|exception|traceback\"",
+          "refId": "A"
+        }]
+      }
+    ]
+  }
+}

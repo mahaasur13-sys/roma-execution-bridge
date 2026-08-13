@@ -1,80 +1,58 @@
-# ROMA Execution Bridge — Prometheus Alert Rules
-# Drop into your Prometheus config or Grafana Cloud rule group.
-# v1.2.0 — 2026-08-13
+# ROMA Execution Bridge v1.2.0 — Alert Rules
+# Provider: Grafana Unified Alerting (Prometheus datasource)
+# Contact point: telegram-alerts (Telegram Bot @IDIA_TELEPORT_Bot, chat 1022845958)
 
 groups:
   - name: roma-critical
     rules:
-      # ── Service Health ──
-      - alert: ROMAServiceDown
-        expr: up{job="roma-execution-bridge"} == 0
-        for: 1m
-        labels: {severity: critical, category: service}
-        annotations:
-          summary: "ROMA service is down"
-          description: "ROMA has been unreachable for 1 minute."
-
-      # ── Error Rate ──
       - alert: ROMAHighErrorRate
         expr: |
           sum(rate(roma_requests_total{status=~"5.."}[5m]))
           / sum(rate(roma_requests_total[5m])) > 0.05
-        for: 3m
-        labels: {severity: warning, category: reliability}
-        annotations:
-          summary: "ROMA error rate > 5% ({{ $value | humanizePercentage }})"
-          description: "5xx errors are elevated. Check logs for /submit, /billing, /workers."
-
-      # ── Billing ──
-      - alert: ROMACloudPaymentsFailureRate
-        expr: |
-          rate(roma_cloudpayments_failure_total[10m])
-          / (rate(roma_cloudpayments_success_total[10m]) + rate(roma_cloudpayments_failure_total[10m])) > 0.10
         for: 5m
+        labels: {severity: critical, category: api}
+        annotations:
+          summary: "ROMA error rate above 5% ({{ $value | humanizePercentage }})"
+          description: "5xx errors spiking. Check /metrics and Loki logs for /dev/shm/roma-execution-bridge.log"
+
+      - alert: ROMABillingWebhookDown
+        expr: |
+          (sum(increase(roma_cloudpayments_failure_total[10m])) > 0)
+          or (absent(roma_cloudpayments_webhooks_total))
+        for: 3m
         labels: {severity: critical, category: billing}
         annotations:
-          summary: "CloudPayments failure rate > 10% ({{ $value | humanizePercentage }})"
-          description: "Webhooks may be failing or API is rejecting requests. Check CLOUDPAYMENTS_API_SECRET and network."
+          summary: "CloudPayments webhook failures detected"
+          description: "investigate immediately — tenants cannot complete payments"
 
-      - alert: ROMANoBillingEvents
-        expr: increase(roma_billing_events_total[30m]) == 0 and roma_cloudpayments_success_total > 0
-        for: 30m
-        labels: {severity: warning, category: billing}
+      - alert: ROMANoMetrics
+        expr: roma_requests_total or absent(roma_requests_total)
+        for: 2m
+        labels: {severity: critical, category: monitoring}
         annotations:
-          summary: "No billing events in 30 minutes despite prior activity"
+          summary: "ROMA /metrics endpoint not responding"
 
-      # ── Auth ──
-      - alert: ROMAHighAuthFailureRate
-        expr: rate(roma_auth_failures_total[10m]) > 5
+  - name: roma-warning
+    rules:
+      - alert: ROMAHighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(roma_request_duration_seconds_bucket[5m])) by (le)) > 1.0
+        for: 5m
+        labels: {severity: warning, category: api}
+        annotations:
+          summary: "p95 latency > 1s ({{ $value }}s)"
+
+      - alert: ROMADeepQueue
+        expr: roma_queue_depth > 10
+        for: 3m
+        labels: {severity: warning, category: resources}
+        annotations:
+          summary: "Queue depth {{ $value }} ≥ 10 — backends may be slow"
+
+      - alert: ROMAAuthSpike
+        expr: rate(roma_auth_failures_total[5m]) > 0.2
         for: 5m
         labels: {severity: warning, category: security}
         annotations:
-          summary: "High authentication failure rate ({{ $value | humanize }} / sec)"
-          description: "Possible brute-force attempt or expired API keys. Check admin/analytics for suspicious activity."
-
-      # ── Queue Depth ──
-      - alert: ROMAQueueBacklog
-        expr: sum(roma_queue_depth) > 100
-        for: 10m
-        labels: {severity: warning, category: performance}
-        annotations:
-          summary: "ROMA queue depth > 100 for 10 minutes ({{ $value }})"
-          description: "Workers may be down or insufficient. Check /workers and Slurm/Ray backends."
-
-      # ── Worker Health ──
-      - alert: ROMANoActiveWorkers
-        expr: sum(roma_jobs_active) == 0 and sum(roma_jobs_total) > 0
-        for: 5m
-        labels: {severity: warning, category: workers}
-        annotations:
-          summary: "No active workers despite job submissions"
-          description: "All workers may be idle or disconnected. Check /workers endpoint."
-
-      # ── Latency ──
-      - alert: ROMAHighLatency
-        expr: histogram_quantile(0.95, sum(rate(roma_request_duration_seconds_bucket[5m])) by (le, endpoint)) > 2
-        for: 5m
-        labels: {severity: warning, category: performance}
-        annotations:
-          summary: "ROMA p95 latency > 2s on {{ $labels.endpoint }} ({{ $value }}s)"
-          description: "Check DB performance (SQLite connection pool) and network latency."
+          summary: "Auth failures spiking: {{ $value }} failures/sec — possible brute force"
