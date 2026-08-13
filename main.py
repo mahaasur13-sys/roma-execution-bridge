@@ -19,6 +19,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from pydantic import BaseModel, Field, ConfigDict
 from starlette.requests import Request
+from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import Response
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -316,6 +317,10 @@ app = FastAPI(
     version="1.0.0",
 )
 app.state.limiter = limiter
+
+# CORS (P2-1)
+CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
+app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 if JAEGER_ENABLED:
@@ -330,6 +335,13 @@ roma_jobs_active = Gauge("roma_jobs_active", "Currently active jobs", ["tenant_i
 roma_queue_depth = Gauge("roma_queue_depth", "Current queue depth", ["tenant_id"])
 roma_requests_total = Counter("roma_requests_total", "Total HTTP requests", ["endpoint", "method", "status"])
 roma_request_duration = Histogram("roma_request_duration_seconds", "Request duration in seconds", ["endpoint", "method"])
+
+# Business metrics (P2-4)
+roma_billing_events = Counter("roma_billing_events_total", "Billing events (checkout/webhook)", ["event_type", "plan"])
+roma_auth_failures = Counter("roma_auth_failures_total", "Authentication failures", ["reason"])
+roma_errors_by_endpoint = Counter("roma_errors_total", "Errors by endpoint", ["endpoint", "status"])
+roma_cloudpayments_checkouts = Counter("roma_cloudpayments_checkouts_total", "CloudPayments checkout sessions", ["plan"])
+roma_cloudpayments_webhooks = Counter("roma_cloudpayments_webhooks_total", "CloudPayments webhook events", ["event_type"])
 
 # ============================================
 # MIDDLEWARE — structured logging + metrics
