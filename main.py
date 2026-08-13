@@ -162,20 +162,42 @@ def _check_limits(tenant_id: str) -> tuple[bool, str]:
 # STRIPE — real integration with test-mode fallback
 # ============================================
 
-STRIPE_ENABLED = bool(os.environ.get("STRIPE_SECRET_KEY"))
-STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+# ============================================
+# CLOUDPAYMENTS BILLING INTEGRATION
+# ============================================
+
+CLOUDPAYMENTS_ENABLED = bool(
+    os.environ.get("CLOUDPAYMENTS_PUBLIC_ID") and
+    os.environ.get("CLOUDPAYMENTS_API_SECRET")
+)
 WORKER_WS_ENABLED = os.environ.get("WORKER_WS_ENABLED", "false").lower() == "true"
 
-STRIPE_PRICE_IDS = {
-    "pro": os.environ.get("STRIPE_PRICE_PRO", ""),
-    "enterprise": os.environ.get("STRIPE_PRICE_ENTERPRISE", ""),
+CLOUDPAYMENTS_PLANS = {
+    "pro": {
+        "amount": 4900.00,       # RUB
+        "currency": "RUB",
+        "interval": "Month",
+        "period": 1,
+        "description": "ROMA Pro — 500 задач/мес",
+    },
+    "enterprise": {
+        "amount": 29900.00,      # RUB
+        "currency": "RUB",
+        "interval": "Month",
+        "period": 1,
+        "description": "ROMA Enterprise — безлимит",
+    },
 }
 
-if STRIPE_ENABLED:
-    import stripe
-    stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
-else:
-    stripe = None  # type: ignore[assignment]
+cloudpayments_client = None
+if CLOUDPAYMENTS_ENABLED:
+    from billing.cloudpayments_client import CloudPaymentsConfig, CloudPaymentsClient
+    _cp_cfg = CloudPaymentsConfig(
+        public_id=os.environ["CLOUDPAYMENTS_PUBLIC_ID"],
+        api_secret=os.environ["CLOUDPAYMENTS_API_SECRET"],
+        webhook_secret=os.environ.get("CLOUDPAYMENTS_API_SECRET", ""),
+    )
+    cloudpayments_client = CloudPaymentsClient(_cp_cfg)
 
 
 # ============================================
@@ -399,7 +421,7 @@ async def health():
         "status": "ok",
         "queue_depth": queue_depth,
         "jobs": len(jobs),
-        "billing": {"stripe_enabled": STRIPE_ENABLED},
+        "billing": {"cloudpayments_enabled": CLOUDPAYMENTS_ENABLED},
     }
 
 
@@ -559,64 +581,67 @@ async def get_usage(key_info: dict = Depends(verify_api_key)):
     }
 
 
-@app.post("/billing/create-checkout-session", dependencies=[Depends(verify_api_key)])
-async def create_checkout_session(body: CheckoutRequest, key_info: dict = Depends(verify_api_key)):
-    tenant_id = key_info["tenant_id"]
+@app.post("/billing/create-checkout-session")
+async def create_checkout_session(
+    request: Request,
+    body: CheckoutRequest,
+    key_info: dict = Depends(verify_api_key),
+):
+    """
+    Создаёт платёжную ссылку CloudPayments (hosted page).
+    Возвращает {"url": "https://..."}.
+    """
+    tenant_id = key_info.get("tenant_id", "")
     plan_name = body.plan
-    plan = PLANS.get(plan_name, PLANS.get("pro", {}))
 
-    # Free plan — activate immediately, no Stripe needed
+    # Free plan — activate immediately
     if plan_name == "free":
         db.update_tenant_subscription(tenant_id, "", "", "active", "free", None)
-        return {
-            "status": "subscribed",
-            "plan": "free",
-            "tenant_id": tenant_id,
-            "message": "Free plan activated — no payment required.",
-        }
+        return {"url": "", "plan": "free", "tenant_id": tenant_id, "message": "Free plan activated"}
 
-    if not STRIPE_ENABLED or not STRIPE_PRICE_IDS.get(plan_name):
+    if not CLOUDPAYMENTS_ENABLED or cloudpayments_client is None:
+        plan_example = CLOUDPAYMENTS_PLANS.get(plan_name, {})
         return {
-            "status": "billing_disabled",
-            "message": (
-                "Stripe is not fully configured. To enable:\n"
-                "1. Add STRIPE_SECRET_KEY to Zo Secrets\n"
-                "2. Add STRIPE_PRICE_PRO / STRIPE_PRICE_ENTERPRISE with Stripe Price IDs\n"
-                "3. Restart the ROMA service\n\n"
-                f"Selected plan: {plan_name} (${plan.get('price_monthly', 0)}/month)"
-            ),
+            "url": f"https://example.com/billing/success?plan={plan_name}&dry_run=1",
+            "session_id": f"dry_run_{uuid.uuid4().hex[:12]}",
             "plan": plan_name,
             "tenant_id": tenant_id,
+            "dry_run": True,
+            "message": (
+                "CloudPayments is not configured. To enable:\n"
+                "1. Add CLOUDPAYMENTS_PUBLIC_ID to .env\n"
+                "2. Add CLOUDPAYMENTS_API_SECRET to .env\n"
+                "3. Restart the ROMA service\n\n"
+                f"Selected plan: {plan_name} ({plan_example.get('amount', 0)} RUB/month)"
+            ),
         }
+
+    plan_cfg = CLOUDPAYMENTS_PLANS.get(plan_name)
+    if not plan_cfg:
+        raise HTTPException(status_code=400, detail="Invalid plan")
+
+    email = key_info.get("email", "")
 
     try:
-        price_id = STRIPE_PRICE_IDS[plan_name]
-        success_url = f"https://roma-execution-bridge-asurdev.zocomputer.io/dashboard?api_key={key_info['api_key'] or ''}&session_id={{CHECKOUT_SESSION_ID}}"
-        cancel_url = f"https://roma-execution-bridge-asurdev.zocomputer.io/dashboard?api_key={key_info['api_key'] or ''}"
-
-        session = stripe.checkout.Session.create(
-            mode="subscription",
-            line_items=[{"price": price_id, "quantity": 1}],
-            success_url=success_url,
-            cancel_url=cancel_url,
-            metadata={
-                "tenant_id": tenant_id,
-                "plan": plan_name,
-            },
+        result = cloudpayments_client.create_order(
+            amount=plan_cfg["amount"],
+            currency=plan_cfg["currency"],
+            description=plan_cfg["description"],
+            email=email,
+            subscription_plan=plan_name,
         )
+
         return {
-            "status": "checkout_created",
-            "session_id": session.id,
-            "url": session.url,
+            "url": result.get("Url", ""),
+            "session_id": result.get("Id") or result.get("Model", {}).get("Id"),
             "plan": plan_name,
             "tenant_id": tenant_id,
+            "dry_run": False,
         }
     except Exception as e:
-        logger.error(f"Stripe checkout error for {tenant_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Stripe error: {str(e)}")
+        logger.error(f"CloudPayments create_order failed for {tenant_id}: {e}")
+        raise HTTPException(status_code=502, detail=f"Payment provider error: {str(e)}")
 
-
-# ============================================
 
 # ============================================
 # DEMOS — ready-to-run tasks
@@ -1225,7 +1250,7 @@ async def oauth_callback(provider: str, code: str = "", error: str = "", request
             "plan": "free",
             "subscription_status": "active",
         }
-        logger.info(f"OAuth login: NEW user {email} → tenant={tenant_id}, api_key={api_key}")
+        logger.info(f"OAuth login: NEW user {email} → tenant={tenant_id}, api_key={api_key[:8]}***")
 
     session_id = create_session(tenant_id, api_key)
     resp = RedirectResponse(url="/dashboard", status_code=302)
@@ -1529,81 +1554,82 @@ async def submit_feedback(request: Request):
 
 
 # ============================================
-# ENDPOINTS — Stripe Webhook
+# ENDPOINTS — CloudPayments Webhook
 # ============================================
 
-@app.post("/webhooks/stripe")
-async def stripe_webhook(request: Request):
-    """Handle Stripe webhook events.
-    Events: checkout.session.completed, invoice.payment_succeeded,
-            invoice.payment_failed, customer.subscription.deleted.
+@app.post("/webhooks/cloudpayments")
+async def cloudpayments_webhook(request: Request):
+    """Handle CloudPayments webhook notifications.
+    Verifies Content-HMAC signature and updates tenant subscription.
 
-    Updates tenant subscription status in DB.
+    Events handled: Pay, Recurrent, Fail, Cancel, Unsubscribe.
     """
-    payload = await request.body()
-    sig_header = request.headers.get("stripe-signature", "")
-    webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+    raw_body = await request.body()
+    signature = request.headers.get("Content-HMAC") or request.headers.get("Content-Hmac") or ""
 
-    # Verify signature if webhook secret is configured
-    if webhook_secret and STRIPE_ENABLED:
-        try:
-            event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
-        except stripe.error.SignatureVerificationError:
-            logger.warning("Stripe webhook: invalid signature")
-            raise HTTPException(status_code=400, detail="Invalid signature")
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid payload")
-    else:
-        # Webhook secret not configured — accept unsigned (dev/dry-run mode)
-        try:
-            event = json.loads(payload)
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Invalid JSON payload")
+    if not CLOUDPAYMENTS_ENABLED or cloudpayments_client is None:
+        logger.warning("CloudPayments webhook received but billing is disabled")
+        return {"code": 0}
 
-    event_type = event.get("type", "")
-    event_obj = event.get("data", {}).get("object", {})
-    metadata = event_obj.get("metadata", {})
-    tenant_id = metadata.get("tenant_id", "")
-    plan = metadata.get("plan", "")
-
-    logger.info(f"Stripe webhook: {event_type} — tenant={tenant_id}, plan={plan}")
+    if not cloudpayments_client.verify_webhook(raw_body, signature):
+        logger.warning("CloudPayments webhook: invalid signature")
+        raise HTTPException(status_code=400, detail="Invalid signature")
 
     try:
-        if event_type in ("checkout.session.completed", "invoice.payment_succeeded"):
-            # Activate subscription
-            sub_id = event_obj.get("subscription", "")
-            if tenant_id:
-                end_date = None
-                if event_type == "checkout.session.completed":
-                    # Parse subscription end from current_period_end
-                    current_period_end = event_obj.get("current_period_end", 0)
-                    if current_period_end:
-                        end_date = datetime.utcfromtimestamp(current_period_end).strftime("%Y-%m-%d")
-                db.update_tenant_subscription(tenant_id, sub_id, "", "active", plan or "pro", end_date)
-                logger.info(f"Stripe: subscription activated for {tenant_id}")
+        payload = json.loads(raw_body)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
 
-        elif event_type == "invoice.payment_failed":
-            if tenant_id:
-                db.set_tenant_inactive(tenant_id)
-                logger.warning(f"Stripe: payment failed for {tenant_id} — set inactive")
+    event_type = payload.get("OperationType") or payload.get("Status") or ""
+    account_id = payload.get("AccountId", "")
+    invoice_id = payload.get("InvoiceId", "")
+    data = payload.get("Data") or {}
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except Exception:
+            data = {}
 
-        elif event_type == "customer.subscription.deleted":
-            if tenant_id:
-                db.update_tenant_subscription(tenant_id, "", "", "canceled", "free", None)
-                logger.info(f"Stripe: subscription canceled for {tenant_id}")
+    tenant_id = account_id or data.get("tenant_id", "")
+    plan = data.get("plan", "")
 
-        else:
-            logger.info(f"Stripe webhook: unhandled event type '{event_type}' — ignored")
+    logger.info(
+        f"CloudPayments webhook: {event_type} tenant={tenant_id} plan={plan}",
+    )
 
-    except Exception as e:
-        logger.error(f"Stripe webhook DB update error: {e}")
-        # Don't fail — Stripe will retry
+    if not tenant_id:
+        logger.warning("Webhook without tenant_id — ignored")
+        return {"code": 0}
 
-    return {"status": "ok", "event": event_type}
+    status = payload.get("Status", "")
+
+    # Successful payment / subscription activated
+    if event_type in ("Payment", "Pay", "Completed") or status in ("Completed", "Authorized"):
+        if plan in ("pro", "enterprise"):
+            db.update_tenant_subscription(tenant_id, invoice_id, "", "active", plan, None)
+            logger.info(f"CloudPayments: subscription activated — {tenant_id} → {plan}")
+
+    # Recurring payment succeeded
+    elif event_type == "Recurrent" and status == "Completed":
+        if plan:
+            db.update_tenant_subscription(tenant_id, invoice_id, "", "active", plan, None)
+            logger.info(f"CloudPayments: recurrent payment OK — {tenant_id}")
+
+    # Payment failed / declined
+    elif event_type in ("Fail", "Declined") or status in ("Declined", "Cancelled"):
+        db.set_tenant_inactive(tenant_id)
+        logger.warning(f"CloudPayments: payment failed — {tenant_id}")
+
+    # Subscription cancelled
+    elif event_type in ("Cancel", "Unsubscribe"):
+        db.update_tenant_subscription(tenant_id, "", "", "canceled", "free", None)
+        logger.info(f"CloudPayments: subscription canceled — {tenant_id}")
+
+    return {"code": 0}
 
 
 # ============================================
-# ENDPOINTS — SendGrid Webhook
+# ENDPOINTS — SendGrid Webhook# ENDPOINTS — SendGrid Webhook
 # ============================================
 
 @app.post("/webhooks/email")
@@ -1652,6 +1678,9 @@ def _admin_only(request: Request) -> dict:
     info = API_KEYS.get(api_key_raw)
     if not info:
         raise HTTPException(status_code=401, detail="Invalid API key")
+
+    if info.get("tenant_id") != "tenant-demo":
+        raise HTTPException(status_code=403, detail="Admin access requires tenant-demo API key")
 
     return info
 
