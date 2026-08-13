@@ -889,40 +889,7 @@ async def beta_leads(key_info: dict = Depends(verify_api_key)):
     all_leads = db.list_leads()
     return {"total": len(all_leads), "leads": all_leads}
 
-# ENTRY POINT
-# ============================================
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8899)
 
-
-# ============================================
-# ============================================
-# ENDPOINTS — Workers
-# ============================================
-
-@app.get("/workers", dependencies=[Depends(verify_api_key)])
-async def list_workers(key_info: dict = Depends(verify_api_key)):
-    tenant_id = key_info["tenant_id"]
-    workers = db.get_tenant_workers(tenant_id)
-    return {"workers": workers, "count": len(workers)}
-
-@app.get("/workers/{worker_id}", dependencies=[Depends(verify_api_key)])
-async def get_worker(worker_id: str, key_info: dict = Depends(verify_api_key)):
-    tenant_id = key_info["tenant_id"]
-    w = db.get_worker_by_id(worker_id)
-    if not w or w["tenant_id"] != tenant_id:
-        raise HTTPException(status_code=404, detail="Worker not found")
-    return w
-
-@app.post("/workers/{worker_id}/drain", dependencies=[Depends(verify_api_key)])
-async def drain_worker(worker_id: str, key_info: dict = Depends(verify_api_key)):
-    tenant_id = key_info["tenant_id"]
-    w = db.get_worker_by_id(worker_id)
-    if not w or w["tenant_id"] != tenant_id:
-        raise HTTPException(status_code=404, detail="Worker not found")
-    db.drain_worker(worker_id)
-    return {"status": "draining", "worker_id": worker_id}
 
 # ============================================
 # WEBSOCKET — Worker Registration
