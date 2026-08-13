@@ -1057,7 +1057,6 @@ async def logout(request: Request):
 # OAUTH2 — Google + GitHub Login
 # ============================================
 
-@limiter.limit("10/minute")
 @app.get("/auth/oauth/login/{provider}")
 async def oauth_login(provider: str):
     """Redirect to Google or GitHub OAuth authorization page."""
