@@ -24,6 +24,8 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
+limiter = Limiter(key_func=get_remote_address)
+
 
 # ============================================
 # JSON LOGGING
@@ -313,6 +315,8 @@ app = FastAPI(
     title="ROMA Execution Platform",
     version="1.0.0",
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 if JAEGER_ENABLED:
     FastAPIInstrumentor.instrument_app(app)
@@ -437,6 +441,7 @@ async def metrics():
 # ENDPOINTS — Protected: Jobs
 # ============================================
 
+@limiter.limit("30/minute")
 @app.post("/submit", response_model=RomaTaskResponse, status_code=202, dependencies=[Depends(verify_api_key)])
 async def submit_task(payload: RomaTaskInput, request: Request, key_info: dict = Depends(verify_api_key)):
     global queue_depth
@@ -584,6 +589,7 @@ async def get_usage(key_info: dict = Depends(verify_api_key)):
     }
 
 
+@limiter.limit("10/minute")
 @app.post("/billing/create-checkout-session")
 async def create_checkout_session(
     request: Request,
@@ -1072,6 +1078,7 @@ async def logout(request: Request):
 # OAUTH2 — Google + GitHub Login
 # ============================================
 
+@limiter.limit("10/minute")
 @app.get("/auth/oauth/login/{provider}")
 async def oauth_login(provider: str):
     """Redirect to Google or GitHub OAuth authorization page."""
@@ -1190,6 +1197,7 @@ async def _oauth_github_callback(code: str) -> dict:
         }
 
 
+@limiter.limit("10/minute")
 @app.get("/auth/oauth/callback/{provider}")
 async def oauth_callback(provider: str, code: str = "", error: str = "", request: Request = None):
     """Handle OAuth callback — exchange code, create/update user, start session."""
@@ -1523,6 +1531,7 @@ async def dashboard(request: Request):
 # ENDPOINTS — Feedback
 # ============================================
 
+@limiter.limit("10/minute")
 @app.post("/feedback")
 async def submit_feedback(request: Request):
     """Submit user feedback. Public endpoint, no auth required."""
@@ -1562,6 +1571,7 @@ async def submit_feedback(request: Request):
 # ENDPOINTS — CloudPayments Webhook
 # ============================================
 
+@limiter.limit("20/minute")
 @app.post("/webhooks/cloudpayments")
 async def cloudpayments_webhook(request: Request):
     """Handle CloudPayments webhook notifications.
@@ -1637,6 +1647,7 @@ async def cloudpayments_webhook(request: Request):
 # ENDPOINTS — SendGrid Webhook# ENDPOINTS — SendGrid Webhook
 # ============================================
 
+@limiter.limit("20/minute")
 @app.post("/webhooks/email")
 async def sendgrid_webhook(request: Request):
     """Receive SendGrid event notifications.
