@@ -20,6 +20,9 @@ from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTEN
 from pydantic import BaseModel, Field, ConfigDict
 from starlette.requests import Request
 from starlette.responses import Response
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 
 # ============================================
@@ -859,6 +862,7 @@ async def beta_page():
     return Response(content=BETA_FORM_HTML, media_type="text/html")
 
 
+@limiter.limit("5/minute")
 @app.post("/beta/apply")
 async def beta_apply(payload: dict):
     email = (payload.get("email") or "").strip()
@@ -1031,6 +1035,7 @@ async def login_page(request: Request):
     return Response(content=LOGIN_PAGE, media_type="text/html")
 
 
+@limiter.limit("15/minute")
 @app.post("/auth/login")
 async def login(request: Request):
     """Process login form submission."""
@@ -1758,6 +1763,7 @@ async def admin_feedback(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@limiter.limit("20/minute")
 @app.get("/admin/email-stats")
 async def admin_email_stats(request: Request):
     """Get email sending statistics."""
@@ -1769,6 +1775,7 @@ async def admin_email_stats(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@limiter.limit("20/minute")
 @app.post("/admin/invite")
 async def admin_invite(request: Request):
     """Send beta invitations. Dry-run if no SendGrid API key."""
