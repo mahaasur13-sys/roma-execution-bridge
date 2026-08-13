@@ -343,12 +343,6 @@ roma_cloudpayments_success = Counter("roma_cloudpayments_success_total", "CloudP
 roma_cloudpayments_failure = Counter("roma_cloudpayments_failure_total", "CloudPayments failed payments")
 
 # Business metrics (P2-4)
-roma_billing_events = Counter("roma_billing_events_total", "Billing events (checkout/webhook)", ["event_type", "plan"])
-roma_auth_failures = Counter("roma_auth_failures_total", "Authentication failures", ["reason"])
-roma_errors_by_endpoint = Counter("roma_errors_total", "Errors by endpoint", ["endpoint", "status"])
-roma_cloudpayments_checkouts = Counter("roma_cloudpayments_checkouts_total", "CloudPayments checkout sessions", ["plan"])
-roma_cloudpayments_webhooks = Counter("roma_cloudpayments_webhooks_total", "CloudPayments webhook events", ["event_type"])
-
 # ============================================
 # MIDDLEWARE — structured logging + metrics
 # ============================================
@@ -888,7 +882,7 @@ async def beta_page():
 
 @limiter.limit("5/minute")
 @app.post("/beta/apply")
-async def beta_apply(payload: dict):
+async def beta_apply(request: Request, payload: dict):
     email = (payload.get("email") or "").strip()
     if not email:
         raise HTTPException(status_code=400, detail="Email is required")
