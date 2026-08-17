@@ -20,7 +20,7 @@ from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTEN
 from pydantic import BaseModel, Field, ConfigDict
 from starlette.requests import Request
 from starlette.middleware.cors import CORSMiddleware
-from starlette.responses import Response
+from starlette.responses import FileResponse, Response
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -325,6 +325,12 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 if JAEGER_ENABLED:
     FastAPIInstrumentor.instrument_app(app)
+
+STATIC_INDEX = Path(__file__).parent / "static" / "index.html"
+
+@app.get("/", include_in_schema=False)
+async def landing_page():
+    return FileResponse(STATIC_INDEX, media_type="text/html")
 
 # ============================================
 # PROMETHEUS METRICS (with tenant_id label)
