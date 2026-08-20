@@ -1,0 +1,10 @@
+{
+  "test-key-12345": {
+    "tenant_id": "demo",
+    "name": "test"
+  },
+  "demo-key": {
+    "tenant_id": "demo",
+    "name": "demo-tenant"
+  }
+}

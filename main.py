@@ -35,6 +35,7 @@ from monitoring.metrics import (
     track_spend_cap,
     track_spend_cap_blocked,
 )
+from alerts import AlertDispatcher, Alert, AlertLevel
 
 # === BILLING SINGLETONS (v2.1.0) ===
 from billing.metering import MeteringEngine
@@ -42,6 +43,10 @@ from billing.ledger import BillingLedger
 
 metering_engine = MeteringEngine()
 billing_ledger = BillingLedger()
+alert_dispatcher = AlertDispatcher()
+_burn_tracker: dict[str, list[tuple[float, float]]] = {}
+_http_request_count = 0
+_billing_event_count = 0
 
 def _increment_usage(
     tenant_id: str,
@@ -101,6 +106,21 @@ def _increment_usage(
     if total_cost > 0:
         job_cost.labels(tenant_id=tenant_id, plan=plan_name).observe(total_cost)
 
+    # Burn-rate tracking: alert if >$1/hour over recent window
+    _burn_tracker.setdefault(tenant_id, []).append((time.time(), total_cost))
+    _burn_tracker[tenant_id] = [(t, c) for t, c in _burn_tracker[tenant_id] if time.time() - t < 3600]
+    recent_cost = sum(c for t, c in _burn_tracker[tenant_id] if time.time() - t < 600)
+    burn_rate_hourly = recent_cost * 6 if recent_cost > 0 else 0
+    if burn_rate_hourly > 1.0:
+        alert_dispatcher.send(Alert(
+            level=AlertLevel.WARNING,
+            title="🔥 High GPU Burn Rate",
+            body=f"Tenant `{tenant_id}` (plan `{plan_name}`) burn rate: **${burn_rate_hourly:.2f}/hour**\n"
+                 f"Last 10 min cost: ${recent_cost:.4f} → projected ${burn_rate_hourly:.2f}/hour\n"
+                 f"Threshold: $1.00/hour",
+            tags={"tenant_id": tenant_id, "plan": plan_name, "event": "high_burn_rate"},
+        ))
+
     return total_cost
 
 
@@ -118,9 +138,27 @@ def _check_spend_cap(tenant_id: str, estimated_cost: float, plan_name: str = "fr
         reason = f"Spend cap exceeded: ${balance:.4f}/${cap:.2f} ({pct}%). Job ${estimated_cost:.6f} exceeds cap."
         logger.warning("spend_cap_blocked tenant=%s plan=%s balance=%.4f cap=%.2f", tenant_id, plan_name, balance, cap)
         track_spend_cap_blocked(tenant_id, plan_name)
+        alert_dispatcher.send(Alert(
+            level=AlertLevel.CRITICAL,
+            title="🚫 Spend-Cap Exceeded",
+            body=f"Tenant `{tenant_id}` (plan `{plan_name}`) exceeded spend-cap.\n"
+                 f"Balance: **${balance:.4f}** / Cap: **${cap:.2f}** ({pct}%)\n"
+                 f"Attempted job cost: ${estimated_cost:.6f}\n"
+                 f"Projected: ${projected:.6f} → BLOCKED",
+            tags={"tenant_id": tenant_id, "plan": plan_name, "event": "spend_cap_exceeded"},
+        ))
         return False, reason
     if cap > 0 and balance / cap >= 0.9:
+        pct = int(balance / cap * 100) if cap > 0 else 0
         logger.warning("spend_cap_90%% tenant=%s plan=%s balance=%.4f cap=%.2f", tenant_id, plan_name, balance, cap)
+        alert_dispatcher.send(Alert(
+            level=AlertLevel.WARNING,
+            title="⚠️ Spend-Cap 90% Reached",
+            body=f"Tenant `{tenant_id}` (plan `{plan_name}`) approaching spend-cap.\n"
+                 f"Balance: **${balance:.4f}** / Cap: **${cap:.2f}** ({pct}%)\n"
+                 f"Remaining: **${cap - balance:.4f}**",
+            tags={"tenant_id": tenant_id, "plan": plan_name, "event": "spend_cap_90"},
+        ))
     return True, ""
 
 from pydantic import BaseModel, Field, ConfigDict
@@ -476,6 +514,9 @@ async def tracking_middleware(request: Request, call_next) -> Response:
 
     roma_requests_total.labels(endpoint=endpoint, method=method, status=str(status)).inc()
     roma_request_duration.labels(endpoint=endpoint, method=method).observe(duration_ms / 1000)
+
+    global _http_request_count
+    _http_request_count += 1
 
     extra = {
         "endpoint": endpoint,
@@ -1101,6 +1142,37 @@ async def get_balance_endpoint(
             "max_jobs_per_month": plan.get("max_jobs_per_month", 50),
             "max_gpu_seconds": plan.get("max_gpu_seconds", 0),
         },
+    }
+
+
+
+# ============================================
+# ADMIN — Test Alerts (internal)
+# ============================================
+
+class TestAlertRequest(BaseModel):
+    """Запрос на тестовую отправку алерта."""
+    channel: str | None = None  # telegram, discord, email или None = все
+    message: str = "🧪 Тестовый алерт ROMA Execution Bridge v2.1.0"
+
+@limiter.limit("5/minute")
+@app.post("/admin/test-alert")
+async def test_alert(
+    request: Request,
+    body: TestAlertRequest = TestAlertRequest(),
+    key_info: dict = Depends(verify_api_key),
+):
+    """Отправить тестовый алерт через заданный канал (или все)."""
+    alert = Alert(
+        level=AlertLevel.INFO,
+        title="Тестовый алерт ROMA",
+        body=body.message,
+    )
+    alert_dispatcher.send(alert)
+    return {
+        "sent": True,
+        "channel": body.channel or "all",
+        "preview": alert.format_markdown().split(chr(10))[0],
     }
 
 
