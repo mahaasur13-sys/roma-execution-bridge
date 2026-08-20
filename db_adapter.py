@@ -10,8 +10,13 @@ import logging
 import os
 import threading
 
-import psycopg2
-import psycopg2.pool
+try:
+    import psycopg2
+    import psycopg2.pool
+    _HAS_PSYCOPG2 = True
+except ImportError:
+    psycopg2 = None  # type: ignore
+    _HAS_PSYCOPG2 = False
 
 logger = logging.getLogger("roma.db")
 
