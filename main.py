@@ -425,25 +425,40 @@ if AsyncOpenAI and DEEPSEEK_API_KEY:
         base_url=DEEPSEEK_BASE_URL,
     )
 
-SYSTEM_PROMPT = """Ты — ROMA AI, ассистент ROMA Execution Bridge.
+SYSTEM_PROMPT = """Ты — ROMA AI, ассистент ROMA Execution Bridge v2.1.0.
 Отвечай по-русски, кратко и конкретно. Не утверждай результат действия, пока tool не вернул его.
-Для операций с задачами, воркерами, Slurm, использованием, статистикой и биллингом используй соответствующий tool.
-Никогда не проси пользователя вставлять секрет в сообщение. X-API-Key уже передан сервером от имени пользователя.
+
+## Твои знания о биллинге ROMA
+- **Планы:** free ($0), start ($0.04), pro ($0.36/mo), enterprise (безлимит)
+- **GPU:** $0.00001/сек (≈$0.036/час). Тариф зависит от плана.
+- **Токены:** $1 за 1M input, $2 за 1M output. Считаются через tiktoken.
+- **Spend-cap:** жёсткий лимит. При превышении — 402 Payment Required.
+- **Баланс:** списывается через _increment_usage() при submit и complete.
+- **90% алерт:** система предупреждает, когда баланс достигает 90% лимита.
+
+## Когда использовать tools
+- «сколько я потратил», «какой баланс», «покажи usage» → get_usage
+- «какой у меня план», «какие лимиты» → get_usage
+- «история платежей», «за что списано» → get_billing_ledger
+- «хватит ли денег на задачу» → check_spend_cap
+- «запусти задачу», «отправь job» → submit_task
+- «покажи задачи», «какие jobs» → list_jobs
+- «отмени задачу» → cancel_job
+- «какие воркеры» → list_workers
+- «статистика за сегодня» → get_daily_stats
+
+Никогда не проси пользователя вставлять секрет в сообщение. X-API-Key уже передан.
 
 Если пользователь пишет «помощь» или «help», не вызывай tools. Ответь ровно этим текстом:
-Привет! Я AI-ассистент ROMA.
+Привет! Я AI-ассистент ROMA v2.1.0.
 
-Просто пиши обычным языком, например:
-• Запусти задачу python train.py
-• Покажи мои задачи
-• Какие воркеры свободны?
-• Сколько я потратил?
-• Отмени задачу abc-123
+Вот что я умею:
+• 💰 Биллинг — «сколько я потратил?», «какой у меня план?», «проверь лимит»
+• 🚀 Задачи — «запусти задачу train.py», «покажи мои задачи», «отмени abc-123»
+• 📊 Статистика — «покажи usage», «статистика за сегодня»
+• ⚙️ Воркеры — «какие воркеры свободны?»
 
-Enter — отправить
-Shift+Enter — новая строка
-Stop — остановить ответ
-🗑 — очистить историю"""
+Enter — отправить | Shift+Enter — новая строка | Stop — остановить | 🗑 — очистить"""
 
 
 def _tool_schema(name: str, description: str, properties: dict, required: list[str] | None = None) -> dict:
@@ -468,6 +483,9 @@ ROMA_TOOLS = [
     _tool_schema("get_usage", "Получить использование и лимиты.", {}),
     _tool_schema("create_checkout_session", "Создать checkout-сессию CloudPayments для плана.", {"plan": {"type": "string", "enum": ["free", "pro", "enterprise"]}}, ["plan"]),
     _tool_schema("get_daily_stats", "Получить дневную статистику.", {}),
+    _tool_schema("get_balance", "Получить текущий баланс и spend-cap тенанта.", {}),
+    _tool_schema("get_billing_ledger", "Получить историю списаний (дебет/кредит).", {"limit": {"type": "integer", "minimum": 1, "maximum": 100}}),
+    _tool_schema("check_spend_cap", "Проверить, хватит ли бюджета на задачу с указанной стоимостью.", {"estimated_cost_usd": {"type": "number"}}, ["estimated_cost_usd"]),
 ]
 
 
@@ -484,6 +502,8 @@ async def execute_tool(name: str, arguments: dict, api_key: str | None = None) -
         "slurm_status": ("GET", "/slurm/status/{slurm_job_id}"), "slurm_cancel": ("POST", "/slurm/cancel/{slurm_job_id}"),
         "get_usage": ("GET", "/usage"), "create_checkout_session": ("POST", "/billing/create-checkout-session"),
         "get_daily_stats": ("GET", "/stats/daily"),
+        "get_balance": ("GET", "/usage"), "get_billing_ledger": ("GET", "/billing/ledger"),
+        "check_spend_cap": ("GET", "/billing/spend-cap"),
     }
     if name not in routes:
         return json.dumps({"error": f"Unknown tool: {name}"}, ensure_ascii=False)
