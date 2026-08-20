@@ -6,10 +6,6 @@ language: ru-RU
 reviews:
   profile: assertive
   request_changes_workflow: false
-  high_level_summary: true
-  collapse_walkthrough: false
-  sequence_diagrams: true
-  changed_files_summary: true
 
 path_filters:
   - "!docs/**"
@@ -22,46 +18,23 @@ path_instructions:
   - path: "plugins/core/**"
     instructions: |
       CRITICAL: PluginManager, Sandbox, Trace.
-      Check:
-      1. Thread safety (asyncio.Lock).
-      2. Lifecycle: register->load->enable->disable->unload - all states.
-      3. Dependency resolution - no circular dependencies.
+      Check: thread safety (asyncio.Lock), lifecycle states, dependency resolution.
 
   - path: "plugins/dashbeam/**"
     instructions: |
       CRITICAL: DashBeam P2P Transfer Plugin.
-      Check:
-      1. Monero spend keys NEVER in code/logs (MoneroSharingValidator.FORBIDDEN_KEYS).
-      2. Pydantic v2 frozen models (DashBeamTicket, DashBeamSession, PairedDevice).
-      3. IrohAdapter: QUIC/TLS 1.3 handshake.
-      4. Ticket lifecycle: CREATED->PENDING->ACCEPTED->TRANSFERRING->COMPLETED.
-      5. Enterprise relay: tokens not logged.
-
-  - path: "plugins/domain/**"
-    instructions: |
-      PluginManifest (semver regex), PluginInstance (8 states),
-      PluginCategory, PluginTier. All models frozen.
-
-  - path: "plugins/builtin/**"
-    instructions: |
-      Built-in plugins: policy_engine, decision_gate, crypto_payments, support_chat.
-      Check: correct arguments, no hardcoded keys.
+      Check: no Monero spend keys in code/logs, Pydantic v2 frozen models,
+      IrohAdapter QUIC/TLS handshake, ticket lifecycle, no token logging.
 
   - path: "billing/**"
     instructions: |
       Stripe + CloudPayments.
-      Check: webhook handler idempotency, no CVV/PAN in logs.
-      Secrets not hardcoded.
+      Check: webhook handler idempotency, no CVV/PAN in logs, no hardcoded secrets.
 
   - path: "auth/**"
     instructions: |
       API keys, RBAC, OIDC.
       Check: timing-safe comparison, no hardcoded keys, JWT claims.
-
-  - path: "ha/**"
-    instructions: |
-      Raft consensus, leader election, split-brain protection.
-      Check: correct term/log indexes, election timeouts, consistency guarantees.
 
   - path: "main.py"
     instructions: |
@@ -70,4 +43,4 @@ path_instructions:
 
   - path: "tests/**"
     instructions: |
-      Check: coverage of all PluginInstance states, edge cases (empty lists, timeouts), async tests.
+      Check: coverage of PluginInstance states, edge cases, async tests.
