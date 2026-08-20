@@ -1,0 +1,252 @@
+{
+  "title": "ROMA Execution Bridge — Billing v2.1",
+  "uid": "roma-billing-v21",
+  "tags": [
+    "roma",
+    "billing",
+    "v2.1"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Total GPU Seconds (rate)",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(roma_gpu_seconds_total[5m])",
+          "legendFormat": "{{tenant_id}} ({{plan}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "sps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "Total Tokens (input + output, rate)",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(roma_tokens_total[5m])",
+          "legendFormat": "{{tenant_id}} {{direction}} ({{plan}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "tps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "Billing Cost ($/min)",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(roma_billing_cost_total[5m]) * 60",
+          "legendFormat": "{{tenant_id}} ({{plan}}) {{cost_type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "USD",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "Spend-Cap Usage % (by tenant)",
+      "type": "gauge",
+      "gridPos": {
+        "x": 8,
+        "y": 8,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "roma_spend_cap_pct",
+          "legendFormat": "{{tenant_id}} ({{plan}})"
+        }
+      ],
+      "options": {
+        "minVizHeight": 75,
+        "minVizWidth": 75,
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "orange",
+                "value": 80
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "Jobs Blocked by Spend-Cap (total)",
+      "type": "stat",
+      "gridPos": {
+        "x": 16,
+        "y": 8,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "roma_spend_cap_blocked_total",
+          "legendFormat": "{{tenant_id}} ({{plan}})"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "title": "Per-Job Cost Distribution (histogram)",
+      "type": "heatmap",
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(roma_job_cost_usd_bucket[5m])) by (le)",
+          "format": "heatmap"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "USD"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "title": "GPU vs Token Cost Breakdown ($/min stacked)",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(roma_billing_cost_total{cost_type=\"gpu\"}[5m]) * 60",
+          "legendFormat": "GPU — {{tenant_id}}"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(roma_billing_cost_total{cost_type=\"tokens\"}[5m]) * 60",
+          "legendFormat": "Tokens — {{tenant_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "USD",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

@@ -76,5 +76,42 @@ Total: 87 Python files across:
 
 ## ROMA Version
 
-v1.0.0 — SaaS MVP Complete (2026-04-17)
-v1.1.0 — K8s Production Ready (2026-04-18)
+v2.1.0 — Full Billing + Monitoring (2026-08-20)
+
+## Monitoring & Observability (v2.1.0)
+
+### Prometheus Metrics
+
+Exported at `/metrics`. Core billing metrics:
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `roma_gpu_seconds_total` | Counter | tenant_id, plan | GPU seconds consumed |
+| `roma_tokens_total` | Counter | tenant_id, plan, direction | Tokens processed (input/output) |
+| `roma_billing_cost_total` | Counter | tenant_id, plan, cost_type | Total cost in USD (gpu/tokens) |
+| `roma_spend_cap_balance_usd` | Gauge | tenant_id, plan | Current balance for spend-cap tenants |
+| `roma_spend_cap_pct` | Gauge | tenant_id, plan | Spend-cap usage percentage |
+| `roma_spend_cap_blocked_total` | Counter | tenant_id, plan | Jobs blocked by spend-cap |
+| `roma_job_cost_usd` | Histogram | tenant_id, plan | Per-job cost distribution |
+
+### Instrumentation Points
+
+- `_increment_usage()` — increments GPU/token/cost metrics
+- `_check_spend_cap()` — updates spend-cap gauges, blocks counter
+
+### Alert Rules
+
+Location: `deploy/monitoring/alert-rules-roma.yml`
+
+- **ROMASpendCap90** — warning at 90% spend-cap
+- **ROMASpendCapExceeded** — critical when cap exceeded
+- **ROMABillingErrorRate** — critical when billing errors spike
+- **ROMANoMetrics** — critical when /metrics not responding
+
+### Grafana Dashboards
+
+Location: `deploy/monitoring/grafana/`
+
+- `roma-dashboard.json` — API overview (10 panels)
+- `roma-billing-dashboard.json` — Billing metrics (8 panels)
+- `roma-billing-cloudpayments.json` — CloudPayments billing

@@ -23,6 +23,106 @@ from audit.event_store import write_event, on_job_created
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from monitoring.metrics import (
+    gpu_seconds_total,
+    tokens_total,
+    billing_cost_total,
+    spend_cap_balance,
+    spend_cap_pct,
+    spend_cap_blocked_total,
+    job_cost,
+    track_billing,
+    track_spend_cap,
+    track_spend_cap_blocked,
+)
+
+# === BILLING SINGLETONS (v2.1.0) ===
+from billing.metering import MeteringEngine
+from billing.ledger import BillingLedger
+
+metering_engine = MeteringEngine()
+billing_ledger = BillingLedger()
+
+def _increment_usage(
+    tenant_id: str,
+    gpu_sec: float = 0.0,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    plan_name: str = "free",
+    job_id: str | None = None,
+):
+    """Единая точка списания денег: GPU-sec + token counting."""
+    if not tenant_id:
+        return 0.0
+
+    total_cost = 0.0
+
+    # GPU cost
+    if gpu_sec > 0:
+        gpu_rate = 0.00001
+        gpu_cost = round(gpu_sec * gpu_rate, 8)
+        metering_engine.record(
+            event_type="gpu_usage", tenant=tenant_id,
+            gpu_seconds=gpu_sec, job_id=job_id or "auto",
+        )
+        billing_ledger.append(
+            tenant_id=tenant_id, entry_type="debit", amount=gpu_cost,
+            metadata={"gpu_sec": gpu_sec, "plan": plan_name, "job_id": job_id},
+        )
+        total_cost += gpu_cost
+        gpu_seconds_total.labels(tenant_id=tenant_id, plan=plan_name).inc(gpu_sec)
+        billing_cost_total.labels(tenant_id=tenant_id, plan=plan_name, cost_type="gpu").inc(gpu_cost)
+
+    # Token cost
+    if input_tokens > 0 or output_tokens > 0:
+        in_rate = 0.000001
+        out_rate = 0.000002
+        token_cost = round(input_tokens * in_rate + output_tokens * out_rate, 8)
+        metering_engine.record(
+            event_type="token_usage", tenant=tenant_id,
+            gpu_seconds=0, job_id=job_id or "auto",
+        )
+        billing_ledger.append(
+            tenant_id=tenant_id, entry_type="debit", amount=token_cost,
+            metadata={"input_tokens": input_tokens, "output_tokens": output_tokens, "job_id": job_id},
+        )
+        total_cost += token_cost
+        if input_tokens > 0:
+            tokens_total.labels(tenant_id=tenant_id, plan=plan_name, direction="input").inc(input_tokens)
+        if output_tokens > 0:
+            tokens_total.labels(tenant_id=tenant_id, plan=plan_name, direction="output").inc(output_tokens)
+        token_cost_input = input_tokens * in_rate
+        token_cost_output = output_tokens * out_rate
+        if token_cost_input > 0:
+            billing_cost_total.labels(tenant_id=tenant_id, plan=plan_name, cost_type="tokens").inc(token_cost_input)
+        if token_cost_output > 0:
+            billing_cost_total.labels(tenant_id=tenant_id, plan=plan_name, cost_type="tokens").inc(token_cost_output)
+
+    if total_cost > 0:
+        job_cost.labels(tenant_id=tenant_id, plan=plan_name).observe(total_cost)
+
+    return total_cost
+
+
+def _check_spend_cap(tenant_id: str, estimated_cost: float, plan_name: str = "free"):
+    """Проверка spend-cap ПЕРЕД созданием job."""
+    plan = PLANS.get(plan_name, PLANS.get("free", {}))
+    cap = plan.get("spend_cap_usd", 0)
+    if cap <= 0:
+        return True, ""
+    balance = billing_ledger.get_tenant_balance(tenant_id) if hasattr(billing_ledger, "get_tenant_balance") else billing_ledger.get_balance(tenant_id) if hasattr(billing_ledger, "get_balance") else 0.0
+    projected = balance + estimated_cost
+    track_spend_cap(tenant_id, plan_name, balance, cap)
+    if projected > cap:
+        pct = int(balance / cap * 100) if cap > 0 else 0
+        reason = f"Spend cap exceeded: ${balance:.4f}/${cap:.2f} ({pct}%). Job ${estimated_cost:.6f} exceeds cap."
+        logger.warning("spend_cap_blocked tenant=%s plan=%s balance=%.4f cap=%.2f", tenant_id, plan_name, balance, cap)
+        track_spend_cap_blocked(tenant_id, plan_name)
+        return False, reason
+    if cap > 0 and balance / cap >= 0.9:
+        logger.warning("spend_cap_90%% tenant=%s plan=%s balance=%.4f cap=%.2f", tenant_id, plan_name, balance, cap)
+    return True, ""
+
 from pydantic import BaseModel, Field, ConfigDict
 from starlette.requests import Request
 from starlette.middleware.cors import CORSMiddleware
@@ -114,10 +214,10 @@ def verify_api_key(x_api_key: str = Header(None)) -> dict:
 # ============================================
 
 PLANS: dict = {
-    "free": {"max_jobs_per_month": 50, "max_gpu_seconds": 0},
-    "start": {"max_jobs_per_month": 50, "max_gpu_seconds": 3600},
-    "pro": {"max_jobs_per_month": 150, "max_gpu_seconds": 36000},
-    "enterprise": {"max_jobs_per_month": -1, "max_gpu_seconds": -1},
+    "free": {"max_jobs_per_month": 50, "max_gpu_seconds": 0, "spend_cap_usd": 0.00, "overage_rate": 0.0},
+    "start": {"max_jobs_per_month": 50, "max_gpu_seconds": 3600, "spend_cap_usd": 5.00, "overage_rate": 0.000005},
+    "pro": {"max_jobs_per_month": 150, "max_gpu_seconds": 36000, "spend_cap_usd": 50.00, "overage_rate": 0.000003},
+    "enterprise": {"max_jobs_per_month": -1, "max_gpu_seconds": -1, "spend_cap_usd": -1.0, "overage_rate": 0.0},
 }
 
 # ============================================

@@ -37,6 +37,10 @@ class BillingLedger:
                     balance -= e["amount"]
         return balance
 
+    def get_balance(self, tenant_id: str) -> float:
+        """Alias for get_tenant_balance — used by _check_spend_cap."""
+        return self.get_tenant_balance(tenant_id)
+
     def get_tenant_entries(self, tenant_id: str) -> list[dict]:
         return [e for e in self._entries if e["tenant_id"] == tenant_id]
 

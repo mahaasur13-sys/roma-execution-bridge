@@ -56,3 +56,36 @@ groups:
         labels: {severity: warning, category: security}
         annotations:
           summary: "Auth failures spiking: {{ $value }} failures/sec — possible brute force"
+
+  - name: roma-billing
+    rules:
+      - alert: ROMASpendCap90Pct
+        expr: roma_spend_cap_pct > 90
+        for: 1m
+        labels: {severity: warning, category: billing}
+        annotations:
+          summary: "Tenant {{ $labels.tenant_id }} spend-cap at {{ $value }}% (plan {{ $labels.plan }})"
+          description: "Balance ${{ query \"roma_spend_cap_balance_usd{tenant_id='$labels.tenant_id'}\" | first | value }} / ${{ query \"label_replace(roma_spend_cap_pct{tenant_id='$labels.tenant_id',plan='$labels.plan'},'cap','$value','','')\" | first | value }}. Consider upgrading plan."
+
+      - alert: ROMASpendCapExceeded
+        expr: rate(roma_spend_cap_blocked_total[5m]) > 0
+        for: 1m
+        labels: {severity: critical, category: billing}
+        annotations:
+          summary: "Tenant {{ $labels.tenant_id }} jobs BLOCKED by spend-cap"
+          description: "Plan {{ $labels.plan }} has reached its limit. Tenant needs to upgrade or wait for reset."
+
+      - alert: ROMAHighGPUCost
+        expr: rate(roma_gpu_seconds_total[15m]) * 0.00001 * 3600 > 1.0
+        for: 5m
+        labels: {severity: warning, category: billing}
+        annotations:
+          summary: "Tenant {{ $labels.tenant_id }} GPU burn rate > $1/hr"
+          description: "GPU seconds accumulating fast. Current rate: ${{ $value }}/hr."
+
+      - alert: ROMANoBillingEvents
+        expr: rate(roma_billing_cost_total[30m]) == 0 and rate(roma_requests_total[30m]) > 0
+        for: 10m
+        labels: {severity: warning, category: billing}
+        annotations:
+          summary: "Requests flowing but no billing events — _increment_usage may be broken"
