@@ -1,9 +1,8 @@
 """Support Chat — Chat Service (message persistence + WebSocket manager)."""
 from __future__ import annotations
 
-import asyncio
 import json
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from structlog import get_logger
 

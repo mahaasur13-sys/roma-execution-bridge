@@ -1,9 +1,7 @@
 """Crypto Payments — Wallet Management Service."""
 from __future__ import annotations
 
-import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from datetime import datetime, timezone
 
 from structlog import get_logger
 
@@ -17,7 +15,6 @@ from crypto_payments.wallets.models import (
     GenerateAddressResponse,
     GenerateMoneroSubaddressRequest,
     GenerateMoneroSubaddressResponse,
-    MoneroViewOnlyConfig,
     RotateWalletRequest,
     RotateWalletResponse,
     WalletMode,

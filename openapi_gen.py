@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """DecisionOS — Generate enhanced OpenAPI schema (Week 4)."""
-import json, sys
+import json
+import sys
 
 try:
     from main import app

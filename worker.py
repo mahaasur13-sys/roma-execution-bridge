@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """ROMA Local Worker — простой воркер для выполнения задач из очереди API"""
-import time, json, subprocess, urllib.request, urllib.error
+import time
+import json
+import subprocess
+import urllib.request
+import urllib.error
 
 API_BASE = "http://localhost:8900"
 API_KEY = "test-key-12345"

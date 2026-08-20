@@ -1,6 +1,5 @@
 """DecisionOS — /v1/jobs router (Week 4 decomposited)."""
-from fastapi import APIRouter, Depends, Header, HTTPException
-import uuid
+from fastapi import APIRouter, Header, HTTPException
 import logging
 from datetime import datetime, timezone
 

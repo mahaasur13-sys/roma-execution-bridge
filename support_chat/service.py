@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from uuid import UUID, uuid4
 
 from structlog import get_logger
 
@@ -10,8 +9,8 @@ from support_chat.chat_service import ChatService
 from support_chat.models import (
     AssignTicketRequest, ChatMessage, ChatParticipant, CreateMessageRequest,
     CreateTicketRequest, CreateTicketResponse, CsatRating, CsatSubmitRequest,
-    MessageType, ParticipantRole, SupportTicket, TicketAttachment, TicketDetailResponse,
-    TicketListResponse, TicketPriority, TicketStatus,
+    ParticipantRole, SupportTicket, TicketAttachment, TicketDetailResponse,
+    TicketListResponse, TicketStatus,
 )
 from support_chat.settings import SupportSettings
 

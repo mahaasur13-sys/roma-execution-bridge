@@ -11,11 +11,11 @@ output = []
 
 output.append("# ROMA Execution Bridge v1.2.0 — API Reference")
 output.append("")
-output.append(f"**Base URL:** https://roma-execution-bridge-asurdev.zocomputer.io")
-output.append(f"**Local:** http://localhost:8900")
+output.append("**Base URL:** https://roma-execution-bridge-asurdev.zocomputer.io")
+output.append("**Local:** http://localhost:8900")
 output.append(f"**OpenAPI:** 3.1.0 | **Endpoints:** {len(paths)}")
-output.append(f"**Docs:** /docs (Swagger UI) | /redoc (ReDoc)")
-output.append(f"**Auth:** API key (X-API-Key header) + OAuth2 (Google/GitHub)")
+output.append("**Docs:** /docs (Swagger UI) | /redoc (ReDoc)")
+output.append("**Auth:** API key (X-API-Key header) + OAuth2 (Google/GitHub)")
 output.append("")
 
 sections = {}

@@ -1,6 +1,5 @@
 """DecisionOS — White-label branding per tenant (Week 4)."""
 import db_adapter as db
-from typing import Optional
 
 DEFAULT_BRANDING = {
     "product_title": "DecisionOS",

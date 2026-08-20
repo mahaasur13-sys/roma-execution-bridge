@@ -5,7 +5,7 @@ import db
 
 class WorkerBridge:
     """Locates and assigns workers to jobs."""
-    
+
     def find_worker(self, tenant_id: str, instance_type: str = "any") -> dict | None:
         return db.find_worker(tenant_id, instance_type)
 

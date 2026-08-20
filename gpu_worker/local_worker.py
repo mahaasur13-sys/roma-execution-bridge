@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """ROMA Local Worker — финальная версия с памятью сессии"""
-import time, json, subprocess, urllib.request, urllib.error
+import time
+import json
+import subprocess
+import urllib.request
+import urllib.error
 
 API_BASE = "http://localhost:8900"
 API_KEY = "test-key-12345"
@@ -47,7 +51,7 @@ while True:
                      'bash','sh','zsh','htop','neofetch','lscpu','lsmem','lsusb','lspci'}
             has_shell = any(c in task for c in '";|&`$()[]{}<>!#=\\')
             if first not in known and not has_shell and '/' not in task:
-                print(f"   ⏭️  Пропущено: не команда")
+                print("   ⏭️  Пропущено: не команда")
                 processed_ids.add(jid)
                 print("-" * 60)
                 continue
@@ -59,7 +63,7 @@ while True:
             for line in result["out"].strip().split("\n")[:6]:
                 print(f"      📤 {line[:90]}")
             if len(result["out"].strip().split("\n")) > 6:
-                print(f"      ...")
+                print("      ...")
         else:
             print(f"   ❌ Ошибка: {result.get('error', result.get('err','?'))[:100]}")
         print("-" * 60)

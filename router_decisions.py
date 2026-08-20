@@ -1,8 +1,7 @@
 """DecisionOS — /v1/decisions router (Week 4 decomposited)."""
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Header, HTTPException, Query
 import uuid
 import logging
-from datetime import datetime, timezone
 
 import db_adapter as db
 from cost.gate import EnterpriseDecisionGate

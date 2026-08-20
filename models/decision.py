@@ -4,10 +4,9 @@ Models mirror the PG schema from migrations/001_decisionos_schema.sql.
 All are dataclasses — no ORM, no SQLAlchemy. DB layer uses raw SQL.
 """
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
 from uuid import UUID, uuid4
 
 

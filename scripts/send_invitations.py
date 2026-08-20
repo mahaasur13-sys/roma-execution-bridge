@@ -11,7 +11,6 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent

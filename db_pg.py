@@ -12,7 +12,6 @@ Usage:
         row = await conn.fetchrow("SELECT * FROM tenants WHERE id=$1", tenant_id)
 """
 
-import asyncio
 import json
 import logging
 import os

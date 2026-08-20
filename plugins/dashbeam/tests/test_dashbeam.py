@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
 
 import pytest
 
 from plugins.dashbeam.domain import (
     DashBeamTicket, DashBeamSession, DashBeamRelayConfig,
-    PairedDevice, TicketState, TicketType, TicketVisibility,
+    PairedDevice, TicketState, TicketType,
 )
 from plugins.dashbeam.relay_manager import RelayManager, DEFAULT_RELAY
 from plugins.dashbeam.policy_actions import (

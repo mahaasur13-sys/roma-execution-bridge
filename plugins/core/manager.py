@@ -19,7 +19,6 @@ from plugins.domain.plugin import (
     PluginInstance,
     PluginManifest,
     PluginState,
-    PluginTier,
     ThoughtStep,
     ThoughtTrace,
 )

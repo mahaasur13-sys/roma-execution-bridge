@@ -19,7 +19,6 @@ from typing import Protocol
 
 from plugins.dashbeam.domain import (
     DashBeamTicket, DashBeamSession, DashBeamRelayConfig, PairedDevice,
-    TicketState,
 )
 
 

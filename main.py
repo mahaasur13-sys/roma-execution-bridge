@@ -3,7 +3,6 @@ ROMA Execution Bridge – FastAPI + Pydantic v2
 Multi-tenant execution platform with API-Key auth, tenant isolation, and billing.
 """
 
-import asyncio
 import json
 import logging
 import os
@@ -18,16 +17,16 @@ from typing import Any, Optional
 import db_adapter as db
 
 # DecisionOS — Week 1 foundation
-from models.decision import DecisionRequest, DecisionRecord, ExecutionJob
+from models.decision import DecisionRequest
 from cost.gate import EnterpriseDecisionGate
-from audit.event_store import write_event, on_decision_allowed, on_decision_denied, on_job_created
+from audit.event_store import write_event, on_job_created
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from pydantic import BaseModel, Field, ConfigDict
 from starlette.requests import Request
 from starlette.middleware.cors import CORSMiddleware
-from starlette.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from starlette.responses import FileResponse, Response, StreamingResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -1144,7 +1143,6 @@ async def beta_leads(key_info: dict = Depends(verify_api_key)):
 # ============================================
 
 from fastapi import WebSocket, WebSocketDisconnect
-import asyncio
 
 active_ws_workers: dict[str, WebSocket] = {}
 
@@ -1315,7 +1313,7 @@ async def oauth_login(provider: str):
             "prompt": "consent",
         }
         auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
-        logger.info(f"OAuth redirect → Google")
+        logger.info("OAuth redirect → Google")
         return RedirectResponse(url=auth_url, status_code=302)
 
     elif provider == "github" and GITHUB_CLIENT_ID:
@@ -1325,7 +1323,7 @@ async def oauth_login(provider: str):
             "scope": "user:email",
         }
         auth_url = f"https://github.com/login/oauth/authorize?{urlencode(params)}"
-        logger.info(f"OAuth redirect → GitHub")
+        logger.info("OAuth redirect → GitHub")
         return RedirectResponse(url=auth_url, status_code=302)
 
     return Response(
@@ -2074,7 +2072,7 @@ async def admin_invite(request: Request):
         if not email:
             continue
 
-        invitation_link = f"https://roma-execution-bridge-asurdev.zocomputer.io/dashboard?api_key=roma-demo-key-2026"
+        invitation_link = "https://roma-execution-bridge-asurdev.zocomputer.io/dashboard?api_key=roma-demo-key-2026"
 
         try:
             if dry_run:

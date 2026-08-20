@@ -1,5 +1,5 @@
 """DecisionOS v1.0 Plugin Architecture — 15 smoke tests."""
-import sys, uuid
+import sys
 sys.path.insert(0, "/home/workspace/roma-execution-bridge")
 
 from plugins.domain.plugin import (

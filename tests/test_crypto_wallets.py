@@ -1,9 +1,7 @@
 """DecisionOS Crypto Wallets — 8 smoke tests (3+ Monero)."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from uuid import UUID
-from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -11,8 +9,6 @@ import pytest
 
 from crypto_payments.wallets.models import (
     CreateWalletRequest,
-    CryptoWallet,
-    DepositAddress,
     WalletType,
     WalletMode,
     WalletStatus,
@@ -140,7 +136,7 @@ class TestMoneroWallet:
             address="8Abc...monero_subaddress",
             label="DecisionOS-w1",
         ))
-        
+
         with patch("crypto_payments.wallets.service.MoneroWalletAdapter", return_value=mock_adapter):
             wallet = await svc.create_wallet(req)
             sub_req = GenerateMoneroSubaddressRequest(
@@ -211,10 +207,10 @@ class TestWalletRotation:
         )
         mock_adapter = MagicMock(spec=MoneroWalletAdapter)
         mock_adapter.health_check = AsyncMock(return_value=True)
-        
+
         with patch("crypto_payments.wallets.service.MoneroWalletAdapter", return_value=mock_adapter):
             wallet = await svc.create_wallet(req)
-        
+
         rotate_req = RotateWalletRequest(
             reason="compliance_rekey",
             new_public_address="4New...monero_rotated_address",

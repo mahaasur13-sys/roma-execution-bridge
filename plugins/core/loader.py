@@ -5,9 +5,7 @@ from __future__ import annotations
 import importlib
 import json
 import logging
-import sys
 from pathlib import Path
-from typing import Any
 
 from plugins.domain.plugin import PluginManifest, PluginCategory, PluginTier
 

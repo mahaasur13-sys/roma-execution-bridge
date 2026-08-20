@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 import logging
-from datetime import datetime, timezone
 
 import db_adapter as db
 from cost.gate import EnterpriseDecisionGate, GateResult, estimate_cost

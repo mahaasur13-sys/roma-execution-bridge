@@ -3,8 +3,8 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
 
-from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, ForeignKey, Text, JSON
-from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy import Column, String, Integer, Boolean, DateTime, JSON
+from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
 

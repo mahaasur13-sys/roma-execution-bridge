@@ -1,19 +1,16 @@
 """DecisionOS Support Chat — 12 smoke tests."""
 from __future__ import annotations
 
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
 from support_chat.models import (
-    SupportTicket, ChatMessage, ChatParticipant, TicketAttachment, CsatRating,
-    TicketStatus, TicketPriority, ParticipantRole, MessageType,
-    CreateTicketRequest, CreateMessageRequest, AssignTicketRequest, CsatSubmitRequest,
+    CsatRating,
+    TicketStatus, TicketPriority, ParticipantRole, CreateTicketRequest, CreateMessageRequest, AssignTicketRequest, CsatSubmitRequest,
 )
 from support_chat.service import SupportTicketService
-from support_chat.chat_service import ChatService, ConnectionManager
+from support_chat.chat_service import ChatService
 from support_chat.settings import SupportSettings
 
 

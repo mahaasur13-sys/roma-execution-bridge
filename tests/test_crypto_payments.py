@@ -13,7 +13,6 @@ from crypto_payments.models import (
     CryptoCurrency,
     CryptoInvoice,
     CryptoNetwork,
-    CryptoPayment,
     CryptoWebhookEvent,
     InvoiceStatus,
     InvoiceStatusResponse,

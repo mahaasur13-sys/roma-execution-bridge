@@ -220,7 +220,8 @@ CMD ["python3", "-m", "uvicorn", "gpu_worker.server:app", "--host", "0.0.0.0", "
 
 
 if __name__ == "__main__":
-    import os, sys, time
+    import os
+    import time
     roma_url = os.environ.get("ROMA_API_URL", "http://localhost:8900")
     registry_url = os.environ.get("ROMA_GPU_WORKER_URL", "http://localhost:8765")
     worker_id = os.environ.get("ROMA_WORKER_ID", f"worker-{os.getpid()}")

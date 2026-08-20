@@ -1107,7 +1107,6 @@ def _insert_tenant_sqlite(tenant_id, name, api_key_hash, tier):
 
 def migrate_all_tenants_to_pg(api_keys: dict):
     """One-shot: copy tenants from api_keys dict into PG."""
-    import json
     for tenant_id, key_data in api_keys.items():
         if isinstance(key_data, dict):
             name = key_data.get("account_name", tenant_id)
@@ -1444,7 +1443,7 @@ def count_jobs_for_tenant(tenant_id: str) -> int:
             c.close()
 
 def _load_plans() -> dict:
-    import json, os
+    import json
     try:
         with open("plans.json", "r") as f:
             return json.load(f)
@@ -1553,7 +1552,7 @@ def list_jobs(tenant_id: str, limit: int = 100) -> list[dict]:
 
 def find_tenant_by_key(api_key: str) -> dict | None:
     """Look up tenant by raw API key. Matches against api_key_hash."""
-    
+
     if _pg_enabled():
         return _run_async(_find_tenant_by_key_pg(api_key))
     return _find_tenant_by_key_sqlite(api_key)

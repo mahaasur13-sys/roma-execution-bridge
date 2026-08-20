@@ -1,7 +1,7 @@
 """Crypto Payments — Wallet Management API Router."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from crypto_payments.settings import CryptoSettings
 from crypto_payments.wallets.models import (

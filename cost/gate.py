@@ -5,7 +5,6 @@ before allowing execution.  Week 1 implementation.
 
 from __future__ import annotations
 
-import uuid
 import logging
 from dataclasses import dataclass
 from enum import Enum

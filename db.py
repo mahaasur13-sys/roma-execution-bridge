@@ -369,7 +369,7 @@ def log_user_event(tenant_id: str, event_type: str, user_id: str = "", event_dat
 def get_analytics_overview(days: int = 30) -> dict:
     c = _conn()
     cutoff = f"datetime('now', '-{days} days')"
-    
+
     total_users = c.execute("SELECT COUNT(DISTINCT tenant_id) FROM user_events").fetchone()[0]
     active_today = c.execute("SELECT COUNT(DISTINCT tenant_id) FROM user_events WHERE created_at >= datetime('now', '-1 day')").fetchone()[0]
     active_week = c.execute("SELECT COUNT(DISTINCT tenant_id) FROM user_events WHERE created_at >= datetime('now', '-7 days')").fetchone()[0]

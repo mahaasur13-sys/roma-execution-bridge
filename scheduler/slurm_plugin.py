@@ -7,7 +7,6 @@ import logging
 import os
 import re
 import tempfile
-from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger("roma.slurm")
@@ -101,7 +100,6 @@ class SlurmPlugin:
                 f.flush()
                 script_path = f.name
 
-            import paramiko
             sftp = self._ssh_client.open_sftp()
             remote_path = f"/tmp/roma-{job.get('job_id', 'tmp')[:8]}.sh"
             sftp.put(script_path, remote_path)

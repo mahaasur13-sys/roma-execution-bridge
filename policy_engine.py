@@ -100,7 +100,7 @@ def evaluate_policies(tenant_id: str, action: str, context: dict | None = None) 
             return {"result": "denied", "reason": f"Unknown webhook provider: {provider}", "policy_name": "crypto_webhook_provider"}
         return {"result": "allowed", "reason": "Crypto webhook processing allowed", "policy_name": "crypto_webhook"}
 
-    
+
 
     if action == "crypto:wallet:create":
         tenant_id = context.get("tenant_id", "")

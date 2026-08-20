@@ -15,14 +15,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, Path, Query
+from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from plugins.core.manager import (
     PluginError,
     PluginNotFoundError,
-    PluginDependencyError,
-    PluginLoadError,
     get_plugin_manager,
 )
 
