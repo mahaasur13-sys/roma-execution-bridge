@@ -1,23 +1,96 @@
 # ROMA — Distributed Execution Platform
 
 [![CI](https://github.com/mahaasur13-sys/roma-execution-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/mahaasur13-sys/roma-execution-bridge/actions/workflows/ci.yml)
-[![Stripe Live](https://img.shields.io/badge/Stripe-Configured%20%E2%86%92%20Live-635bff?logo=stripe)](docs/billing.md)
-[![OAuth2](https://img.shields.io/badge/OAuth2-Google%20%7C%20GitHub-4285F4?logo=google)](docs/oauth-setup.md)
-[![Deploy](https://github.com/mahaasur13-sys/roma-execution-bridge/actions/workflows/deploy.yml/badge.svg)](https://github.com/mahaasur13-sys/roma-execution-bridge/actions/workflows/deploy.yml)
 
-> **ROMA = Closed-Loop Compute Economy OS**
-> Autonomous GPU workload orchestration with cost-aware scheduling, event sourcing, and multi-tenant SaaS control plane.
-
-[![CI](https://github.com/mahaasur13-sys/roma-execution-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/mahaasur13-sys/roma-execution-bridge/actions)
+> **ROMA = Closed-Loop Compute Economy OS v2.1.0**
+> Autonomous GPU + LLM workload orchestration with full billing flow: GPU-sec counting, tiktoken-based token counting, spend-caps, and per-second/per-token charging.
 
 ---
 
 ## 🚀 Quick Start
 
 ```bash
-pip install typer rich requests pyyaml plotly dash
-python roma_cli.py run "train YOLOv8"
-python roma_cli.py explain "train YOLOv8"
+# Start ROMA
+python main.py
+
+# Health check
+curl http://localhost:8900/health
+
+# API docs
+open http://localhost:8900/docs    # Swagger UI
+open http://localhost:8900/redoc   # ReDoc
+```
+
+---
+
+## 💰 Billing (NEW in v2.1.0)
+
+ROMA charges for **GPU seconds** and **LLM tokens** with enterprise spend-caps.
+
+### Pricing (default rates)
+
+| Resource | Rate | Plan Limit |
+|----------|------|-------------|
+| GPU-second | $0.00001/s ($0.036/h) | Free: 0s, Start: 3600s, Pro: 36000s, Enterprise: unlimited |
+| Input tokens | $1 / 1M tokens | Counted via tiktoken (cl100k_base) |
+| Output tokens | $2 / 1M tokens | Updated on job completion |
+
+### Billing Flow
+
+```
+POST /submit (with input_tokens, plan)
+  → _check_spend_cap()            # Refuse if over limit
+  → _increment_usage()            # Estimate cost
+  → MeteringEngine.record()       # Log usage event
+  → BillingLedger.append()        # Debit tenant balance
+
+POST /complete/{job_id}
+  → Recalculate actual GPU-sec (elapsed time)
+  → Update output_tokens
+  → Final _increment_usage() call
+```
+
+### Spend-Cap Enforcement
+
+| Plan | Monthly GPU | Spend Cap | 402 Response |
+|------|------------|-----------|--------------|
+| `free` | 0s | $0.00 | Immediate |
+| `start` | 3600s | $0.04 | At cap |
+| `pro` | 36000s | $0.36 | At cap |
+| `enterprise` | Unlimited | Unlimited | Never |
+
+Exceeding spend-cap returns `402 Payment Required`:
+
+```json
+{
+  "code": "SPEND_CAP_EXCEEDED",
+  "message": "Spend cap: $0.36/$0.36 (100%). Job exceeds cap.",
+  "current_balance": 0.36,
+  "spend_cap": 0.36
+}
+```
+
+### API Examples
+
+**Submit GPU job:**
+```bash
+curl -X POST http://localhost:8900/submit \
+  -H "x-api-key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"task": "train YOLOv8", "gpu_required": true, "plan": "pro", "input_tokens": 0}'
+```
+
+**Submit LLM job:**
+```bash
+curl -X POST http://localhost:8900/submit \
+  -H "x-api-key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"task": "Summarize document", "gpu_required": false, "plan": "pro", "input_tokens": 1500}'
+```
+
+**Check billing:**
+```bash
+curl http://localhost:8900/usage -H "x-api-key: $API_KEY"
 ```
 
 ---
@@ -37,9 +110,10 @@ roma status                 # System status
 
 ```
 CLI → Input Contract → ROMA Planner → Event Sourcing
-    → Decision Gate (cost + quota) → Raft Consensus
+    → Decision Gate (cost + quota + spend_cap) → Raft Consensus
     → Plugin Executor → GPU Scheduler → K8s/Ray
-    → Billing → Dashboard
+    → _increment_usage (GPU-sec + tokens) → BillingLedger
+    → MeteringEngine → Dashboard
 ```
 
 ---
@@ -55,7 +129,7 @@ CLI → Input Contract → ROMA Planner → Event Sourcing
 | `durability/` | Event store + event sourcing |
 | `ha/` | Raft consensus + leader election |
 | `k8s/` | K8s CRD + operator SDK |
-| `billing/` | Metering + Stripe + invoicing |
+| `billing/` | MeteringEngine + BillingLedger + tiktoken counting |
 | `tenancy/` | Multi-tenant isolation |
 | `dashboard/` | Plotly Dash UI |
 
@@ -65,11 +139,13 @@ CLI → Input Contract → ROMA Planner → Event Sourcing
 
 - **GPU-aware scheduling** — automatic CUDA node selection
 - **Cost prediction** — estimated cost before execution
+- **Token counting** — tiktoken-based LLM token metering
+- **Spend-caps** — per-plan budget enforcement with 402 responses
 - **Event-sourced execution** — full audit trail, deterministic replay
 - **Raft consensus** — fault-tolerant multi-node coordination
 - **Plugin ecosystem** — extensible via `IPlugin` interface
 - **Multi-tenant SaaS** — org/project hierarchy with quota isolation
-- **Billing engine** — metering, Stripe, invoice ledger
+- **Billing engine** — GPU-sec + token metering, Stripe, CloudPayments
 - **Enterprise RBAC** — role-based access with org scopes
 - **CLI + Dashboard** — human CLI and visual UI
 
@@ -87,5 +163,5 @@ CLI → Input Contract → ROMA Planner → Event Sourcing
 
 ## 📄 Version
 
-**v1.0.0** — First stable release (2026-04-17)  
+**v2.1.0** — Full billing flow (GPU-sec + tokens + spend-caps) — 2026-08-20
 See [CHANGELOG.md](./CHANGELOG.md) for release history.

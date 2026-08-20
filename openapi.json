@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "DecisionOS API v1",
-    "version": "1.0.0",
-    "description": "DecisionOS — Enterprise Platform for Managed Decision & Execution.\n\nAuthentication: Header `X-API-Key: <your-key>`\n\nSupported endpoints:\n- `/submit` — Submit job (backward compatible)\n- `/v1/decisions` — Decision create/list/evaluate\n- `/v1/jobs/{id}/...` — Job retry/cancel/complete/worker-ack\n- `/status/{id}` — Job status\n- `/jobs` — List jobs\n- `/usage` — Tenant usage metrics\n- `/billing/create-checkout-session` — Stripe checkout\n- `/health` — Health & PG status\n- `/api/chat/stream` — AI Assistant with tool calling"
+    "title": "ROMA Execution Bridge — DecisionOS v2.1.0",
+    "version": "2.1.0",
+    "description": "Multi-tenant GPU + LLM execution platform with full billing flow (GPU-sec, token counting, spend-caps, CloudPayments, Stripe)"
   },
   "paths": {
     "/ping": {
@@ -16,6 +16,1131 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/decisions": {
+      "post": {
+        "tags": [
+          "decisions"
+        ],
+        "summary": "Create Decision",
+        "operationId": "create_decision_v1_decisions_post",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "decisions"
+        ],
+        "summary": "List Decisions",
+        "operationId": "list_decisions_v1_decisions_get",
+        "parameters": [
+          {
+            "name": "result",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "Result"
+            }
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "Date From"
+            }
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "Date To"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/decisions/{decision_id}": {
+      "get": {
+        "tags": [
+          "decisions"
+        ],
+        "summary": "Get Decision",
+        "operationId": "get_decision_v1_decisions__decision_id__get",
+        "parameters": [
+          {
+            "name": "decision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Decision Id"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/decisions/evaluate": {
+      "post": {
+        "tags": [
+          "decisions"
+        ],
+        "summary": "Evaluate Decision",
+        "operationId": "evaluate_decision_v1_decisions_evaluate_post",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/jobs/{job_id}/retry": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Retry Job",
+        "operationId": "retry_job_v1_jobs__job_id__retry_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "default": {},
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/jobs/{job_id}/cancel": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Cancel Job",
+        "operationId": "cancel_job_v1_jobs__job_id__cancel_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/jobs/{job_id}/complete": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Complete Job",
+        "operationId": "complete_job_v1_jobs__job_id__complete_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "default": {},
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/jobs/{job_id}/worker-ack": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Worker Ack",
+        "operationId": "worker_ack_v1_jobs__job_id__worker_ack_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/crypto/invoices": {
+      "post": {
+        "tags": [
+          "crypto_payments"
+        ],
+        "summary": "Create Invoice",
+        "operationId": "create_invoice_v1_crypto_invoices_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateInvoiceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateInvoiceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/crypto/invoices/{invoice_id}": {
+      "get": {
+        "tags": [
+          "crypto_payments"
+        ],
+        "summary": "Get Invoice",
+        "operationId": "get_invoice_v1_crypto_invoices__invoice_id__get",
+        "parameters": [
+          {
+            "name": "invoice_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Invoice Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoiceStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/crypto/webhooks/nowpayments": {
+      "post": {
+        "tags": [
+          "crypto_payments"
+        ],
+        "summary": "Nowpayments Webhook",
+        "operationId": "nowpayments_webhook_v1_crypto_webhooks_nowpayments_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Nowpayments Webhook V1 Crypto Webhooks Nowpayments Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/crypto/wallets": {
+      "post": {
+        "tags": [
+          "crypto_wallets"
+        ],
+        "summary": "Create Wallet",
+        "operationId": "create_wallet_v1_crypto_wallets_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWalletRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateWalletResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/crypto/wallets/{wallet_id}/addresses": {
+      "post": {
+        "tags": [
+          "crypto_wallets"
+        ],
+        "summary": "Generate Address",
+        "operationId": "generate_address_v1_crypto_wallets__wallet_id__addresses_post",
+        "parameters": [
+          {
+            "name": "wallet_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Wallet Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateAddressRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateAddressResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/crypto/wallets/{wallet_id}/monero/subaddress": {
+      "post": {
+        "tags": [
+          "crypto_wallets"
+        ],
+        "summary": "Generate Monero Subaddress",
+        "operationId": "generate_monero_subaddress_v1_crypto_wallets__wallet_id__monero_subaddress_post",
+        "parameters": [
+          {
+            "name": "wallet_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Wallet Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateMoneroSubaddressRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateMoneroSubaddressResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/crypto/wallets/{wallet_id}/rotate": {
+      "post": {
+        "tags": [
+          "crypto_wallets"
+        ],
+        "summary": "Rotate Wallet",
+        "operationId": "rotate_wallet_v1_crypto_wallets__wallet_id__rotate_post",
+        "parameters": [
+          {
+            "name": "wallet_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Wallet Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RotateWalletRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RotateWalletResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/support/tickets": {
+      "post": {
+        "tags": [
+          "support_chat"
+        ],
+        "summary": "Create Ticket",
+        "operationId": "create_ticket_v1_support_tickets_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTicketRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateTicketResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "support_chat"
+        ],
+        "summary": "List Tickets",
+        "operationId": "list_tickets_v1_support_tickets_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/support/tickets/{ticket_id}": {
+      "get": {
+        "tags": [
+          "support_chat"
+        ],
+        "summary": "Get Ticket",
+        "operationId": "get_ticket_v1_support_tickets__ticket_id__get",
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/support/tickets/{ticket_id}/messages": {
+      "post": {
+        "tags": [
+          "support_chat"
+        ],
+        "summary": "Add Message",
+        "operationId": "add_message_v1_support_tickets__ticket_id__messages_post",
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMessageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/support/tickets/{ticket_id}/assign": {
+      "post": {
+        "tags": [
+          "support_chat"
+        ],
+        "summary": "Assign Agent",
+        "operationId": "assign_agent_v1_support_tickets__ticket_id__assign_post",
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignTicketRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/support/tickets/{ticket_id}/transition": {
+      "post": {
+        "tags": [
+          "support_chat"
+        ],
+        "summary": "Transition Status",
+        "operationId": "transition_status_v1_support_tickets__ticket_id__transition_post",
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Id"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/support/tickets/{ticket_id}/csat": {
+      "post": {
+        "tags": [
+          "support_chat"
+        ],
+        "summary": "Submit Csat",
+        "operationId": "submit_csat_v1_support_tickets__ticket_id__csat_post",
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CsatSubmitRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -144,7 +1269,7 @@
     },
     "/submit": {
       "post": {
-        "summary": "Submit Task",
+        "summary": "Submit GPU/LLM job (with billing enforcement)",
         "operationId": "submit_task_submit_post",
         "parameters": [
           {
@@ -184,6 +1309,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Spend cap exceeded. Payment required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingError"
                 }
               }
             }
@@ -287,7 +1422,7 @@
     },
     "/complete/{job_id}": {
       "post": {
-        "summary": "Complete Job",
+        "summary": "Complete job — triggers actual billing recalculation with real GPU-seconds",
         "operationId": "complete_job_complete__job_id__post",
         "parameters": [
           {
@@ -327,8 +1462,19 @@
                 }
               }
             }
+          },
+          "402": {
+            "description": "Spend cap exceeded during completion billing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingError"
+                }
+              }
+            }
           }
-        }
+        },
+        "description": "When called, recalculates billing based on actual elapsed time (created_at → completed_at) and updates token counts."
       }
     },
     "/jobs": {
@@ -419,7 +1565,7 @@
     },
     "/usage": {
       "get": {
-        "summary": "Get Usage",
+        "summary": "Get tenant usage and billing stats",
         "operationId": "get_usage_usage_get",
         "parameters": [
           {
@@ -437,7 +1583,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/BillingUsage"
+                }
               }
             }
           },
@@ -1195,6 +2343,19 @@
   },
   "components": {
     "schemas": {
+      "AssignTicketRequest": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id"
+        ],
+        "title": "AssignTicketRequest"
+      },
       "ChatMessage": {
         "properties": {
           "role": {
@@ -1263,6 +2424,578 @@
         "type": "object",
         "title": "CheckoutRequest"
       },
+      "CreateInvoiceRequest": {
+        "properties": {
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "tier": {
+            "$ref": "#/components/schemas/TierName"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/CryptoCurrency",
+            "default": "USDT_TRC20"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "tier"
+        ],
+        "title": "CreateInvoiceRequest"
+      },
+      "CreateInvoiceResponse": {
+        "properties": {
+          "invoice_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Invoice Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/InvoiceStatus"
+          },
+          "pay_address": {
+            "type": "string",
+            "title": "Pay Address"
+          },
+          "amount_crypto": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Amount Crypto"
+          },
+          "amount_usd": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Amount Usd"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/CryptoCurrency"
+          },
+          "network": {
+            "$ref": "#/components/schemas/CryptoNetwork"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "invoice_id",
+          "status",
+          "pay_address",
+          "amount_crypto",
+          "amount_usd",
+          "currency",
+          "network",
+          "expires_at"
+        ],
+        "title": "CreateInvoiceResponse"
+      },
+      "CreateMessageRequest": {
+        "properties": {
+          "ticket_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Ticket Id"
+          },
+          "body": {
+            "type": "string",
+            "title": "Body"
+          },
+          "sender_id": {
+            "type": "string",
+            "title": "Sender Id"
+          },
+          "sender_role": {
+            "$ref": "#/components/schemas/ParticipantRole"
+          },
+          "message_type": {
+            "$ref": "#/components/schemas/MessageType",
+            "default": "text"
+          },
+          "is_internal": {
+            "type": "boolean",
+            "title": "Is Internal",
+            "default": false
+          },
+          "attachment_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Attachment Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticket_id",
+          "body",
+          "sender_id",
+          "sender_role"
+        ],
+        "title": "CreateMessageRequest"
+      },
+      "CreateTicketRequest": {
+        "properties": {
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "body": {
+            "type": "string",
+            "title": "Body",
+            "default": ""
+          },
+          "priority": {
+            "$ref": "#/components/schemas/TicketPriority",
+            "default": "medium"
+          },
+          "context_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Type"
+          },
+          "context_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Id"
+          },
+          "context_data": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Context Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "subject"
+        ],
+        "title": "CreateTicketRequest"
+      },
+      "CreateTicketResponse": {
+        "properties": {
+          "ticket_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Ticket Id"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TicketStatus"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/TicketPriority"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "context_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Type"
+          },
+          "context_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticket_id",
+          "tenant_id",
+          "subject",
+          "status",
+          "priority",
+          "created_at",
+          "context_type",
+          "context_id"
+        ],
+        "title": "CreateTicketResponse"
+      },
+      "CreateWalletRequest": {
+        "properties": {
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "wallet_type": {
+            "$ref": "#/components/schemas/WalletType"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/WalletMode",
+            "default": "view_only"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "public_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Address"
+          },
+          "rpc_endpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rpc Endpoint"
+          },
+          "view_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "View Key"
+          },
+          "monero_config": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MoneroViewOnlyConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "label",
+          "wallet_type"
+        ],
+        "title": "CreateWalletRequest"
+      },
+      "CreateWalletResponse": {
+        "properties": {
+          "wallet_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Wallet Id"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "wallet_type": {
+            "$ref": "#/components/schemas/WalletType"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/WalletMode"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WalletStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "wallet_id",
+          "tenant_id",
+          "label",
+          "wallet_type",
+          "mode",
+          "status",
+          "created_at"
+        ],
+        "title": "CreateWalletResponse"
+      },
+      "CryptoCurrency": {
+        "type": "string",
+        "enum": [
+          "USDT_TRC20",
+          "USDT_ERC20",
+          "USDC",
+          "BTC",
+          "TON",
+          "SOL"
+        ],
+        "title": "CryptoCurrency"
+      },
+      "CryptoNetwork": {
+        "type": "string",
+        "enum": [
+          "TRC20",
+          "ERC20",
+          "BTC",
+          "TON",
+          "SOL"
+        ],
+        "title": "CryptoNetwork"
+      },
+      "CsatSubmitRequest": {
+        "properties": {
+          "score": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Score"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          }
+        },
+        "type": "object",
+        "required": [
+          "score"
+        ],
+        "title": "CsatSubmitRequest"
+      },
+      "GenerateAddressRequest": {
+        "properties": {
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "network": {
+            "type": "string",
+            "title": "Network"
+          },
+          "invoice_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice Id"
+          },
+          "ttl_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttl Seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "currency",
+          "network"
+        ],
+        "title": "GenerateAddressRequest"
+      },
+      "GenerateAddressResponse": {
+        "properties": {
+          "address_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Address Id"
+          },
+          "wallet_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Wallet Id"
+          },
+          "address": {
+            "type": "string",
+            "title": "Address"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "network": {
+            "type": "string",
+            "title": "Network"
+          },
+          "is_monero_subaddress": {
+            "type": "boolean",
+            "title": "Is Monero Subaddress"
+          },
+          "subaddress_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subaddress Index"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "address_id",
+          "wallet_id",
+          "address",
+          "currency",
+          "network",
+          "is_monero_subaddress",
+          "subaddress_index",
+          "created_at"
+        ],
+        "title": "GenerateAddressResponse"
+      },
+      "GenerateMoneroSubaddressRequest": {
+        "properties": {
+          "account_index": {
+            "type": "integer",
+            "title": "Account Index",
+            "default": 0
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "invoice_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice Id"
+          }
+        },
+        "type": "object",
+        "title": "GenerateMoneroSubaddressRequest"
+      },
+      "GenerateMoneroSubaddressResponse": {
+        "properties": {
+          "subaddress_index": {
+            "type": "integer",
+            "title": "Subaddress Index"
+          },
+          "address": {
+            "type": "string",
+            "title": "Address"
+          },
+          "account_index": {
+            "type": "integer",
+            "title": "Account Index"
+          },
+          "address_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Address Id"
+          },
+          "wallet_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Wallet Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "subaddress_index",
+          "address",
+          "account_index",
+          "address_id",
+          "wallet_id"
+        ],
+        "title": "GenerateMoneroSubaddressResponse"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1275,6 +3008,171 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "InvoiceStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "confirming",
+          "paid",
+          "overpaid",
+          "underpaid",
+          "expired",
+          "failed"
+        ],
+        "title": "InvoiceStatus"
+      },
+      "InvoiceStatusResponse": {
+        "properties": {
+          "invoice_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Invoice Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/InvoiceStatus"
+          },
+          "tier": {
+            "$ref": "#/components/schemas/TierName"
+          },
+          "amount_crypto": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Crypto"
+          },
+          "amount_usd": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Amount Usd"
+          },
+          "pay_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pay Address"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "paid_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid At"
+          },
+          "tx_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tx Hash"
+          }
+        },
+        "type": "object",
+        "required": [
+          "invoice_id",
+          "status",
+          "tier",
+          "amount_crypto",
+          "amount_usd",
+          "pay_address",
+          "created_at",
+          "expires_at",
+          "paid_at"
+        ],
+        "title": "InvoiceStatusResponse"
+      },
+      "MessageType": {
+        "type": "string",
+        "enum": [
+          "text",
+          "system",
+          "internal_note",
+          "file"
+        ],
+        "title": "MessageType"
+      },
+      "MoneroViewOnlyConfig": {
+        "properties": {
+          "primary_address": {
+            "type": "string",
+            "title": "Primary Address"
+          },
+          "view_key_private": {
+            "type": "string",
+            "title": "View Key Private"
+          },
+          "rpc_url": {
+            "type": "string",
+            "title": "Rpc Url",
+            "default": "http://127.0.0.1:18082/json_rpc"
+          },
+          "wallet_rpc_url": {
+            "type": "string",
+            "title": "Wallet Rpc Url",
+            "default": "http://127.0.0.1:18084/json_rpc"
+          },
+          "poll_interval_seconds": {
+            "type": "integer",
+            "title": "Poll Interval Seconds",
+            "default": 30
+          },
+          "min_confirmations": {
+            "type": "integer",
+            "title": "Min Confirmations",
+            "default": 10
+          },
+          "subaddress_index": {
+            "type": "integer",
+            "title": "Subaddress Index",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "primary_address",
+          "view_key_private"
+        ],
+        "title": "MoneroViewOnlyConfig"
+      },
+      "ParticipantRole": {
+        "type": "string",
+        "enum": [
+          "tenant_user",
+          "tenant_admin",
+          "support_agent",
+          "super_admin"
+        ],
+        "title": "ParticipantRole"
       },
       "RomaStatusResponse": {
         "properties": {
@@ -1379,6 +3277,27 @@
             "title": "Instance Type",
             "description": "GPU type: any, RTX 3060, A100, H100",
             "default": "any"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "default": 0,
+            "description": "Number of input tokens (LLM tasks). Charged at $1/M input."
+          },
+          "output_tokens": {
+            "type": "integer",
+            "default": 0,
+            "description": "Number of output tokens (LLM tasks). Charged at $2/M output. Updated on job completion."
+          },
+          "plan": {
+            "type": "string",
+            "default": "free",
+            "enum": [
+              "free",
+              "start",
+              "pro",
+              "enterprise"
+            ],
+            "description": "Billing plan for spend-cap enforcement."
           }
         },
         "additionalProperties": false,
@@ -1420,6 +3339,16 @@
           "tenant_id": {
             "type": "string",
             "title": "Tenant Id"
+          },
+          "estimated_cost_usd": {
+            "type": "number",
+            "format": "float",
+            "description": "Estimated cost for this job (GPU-sec + tokens)."
+          },
+          "spend_cap_remaining": {
+            "type": "number",
+            "format": "float",
+            "description": "Remaining spend cap budget after this job."
           }
         },
         "type": "object",
@@ -1433,6 +3362,186 @@
           "tenant_id"
         ],
         "title": "RomaTaskResponse"
+      },
+      "RotateWalletRequest": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": "manual_rotation"
+          },
+          "new_public_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Public Address"
+          }
+        },
+        "type": "object",
+        "title": "RotateWalletRequest"
+      },
+      "RotateWalletResponse": {
+        "properties": {
+          "wallet_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Wallet Id"
+          },
+          "old_status": {
+            "$ref": "#/components/schemas/WalletStatus"
+          },
+          "new_wallet_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Wallet Id"
+          },
+          "rotation_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Rotation Id"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "wallet_id",
+          "old_status",
+          "new_wallet_id",
+          "rotation_id",
+          "message"
+        ],
+        "title": "RotateWalletResponse"
+      },
+      "TicketDetailResponse": {
+        "properties": {
+          "ticket": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Ticket"
+          },
+          "messages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Messages"
+          },
+          "participants": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Participants"
+          },
+          "attachments": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Attachments"
+          },
+          "csat": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Csat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticket",
+          "messages",
+          "participants",
+          "attachments",
+          "csat"
+        ],
+        "title": "TicketDetailResponse"
+      },
+      "TicketListResponse": {
+        "properties": {
+          "tickets": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Tickets"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tickets",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "TicketListResponse"
+      },
+      "TicketPriority": {
+        "type": "string",
+        "enum": [
+          "low",
+          "medium",
+          "high",
+          "critical"
+        ],
+        "title": "TicketPriority"
+      },
+      "TicketStatus": {
+        "type": "string",
+        "enum": [
+          "open",
+          "in_progress",
+          "waiting_customer",
+          "resolved",
+          "closed"
+        ],
+        "title": "TicketStatus"
+      },
+      "TierName": {
+        "type": "string",
+        "enum": [
+          "start",
+          "pro",
+          "enterprise"
+        ],
+        "title": "TierName"
       },
       "ValidationError": {
         "properties": {
@@ -1466,45 +3575,96 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WalletMode": {
+        "type": "string",
+        "enum": [
+          "hot",
+          "view_only",
+          "cold"
+        ],
+        "title": "WalletMode"
+      },
+      "WalletStatus": {
+        "type": "string",
+        "enum": [
+          "active",
+          "rotating",
+          "retired",
+          "compromised"
+        ],
+        "title": "WalletStatus"
+      },
+      "WalletType": {
+        "type": "string",
+        "enum": [
+          "provider",
+          "self_hosted",
+          "hardware",
+          "monero"
+        ],
+        "title": "WalletType"
+      },
+      "BillingUsage": {
+        "type": "object",
+        "properties": {
+          "tenant_id": {
+            "type": "string"
+          },
+          "total_gpu_seconds": {
+            "type": "number",
+            "description": "Cumulative GPU seconds used"
+          },
+          "total_input_tokens": {
+            "type": "integer",
+            "description": "Cumulative input tokens"
+          },
+          "total_output_tokens": {
+            "type": "integer",
+            "description": "Cumulative output tokens"
+          },
+          "total_cost_usd": {
+            "type": "number",
+            "description": "Total USD charged"
+          },
+          "spend_cap_usd": {
+            "type": "number",
+            "description": "Plan spend cap (0=free, -1=unlimited)"
+          },
+          "plan": {
+            "type": "string",
+            "enum": [
+              "free",
+              "start",
+              "pro",
+              "enterprise"
+            ]
+          },
+          "balance_usd": {
+            "type": "number",
+            "description": "Current balance in ledger"
+          }
+        }
+      },
+      "BillingError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "SPEND_CAP_EXCEEDED"
+          },
+          "message": {
+            "type": "string",
+            "example": "Spend cap: $45.00/$50.00 (90%). Job exceeds cap."
+          },
+          "current_balance": {
+            "type": "number"
+          },
+          "spend_cap": {
+            "type": "number"
+          }
+        }
       }
-    },
-    "securitySchemes": {
-      "ApiKeyAuth": {
-        "type": "apiKey",
-        "in": "header",
-        "name": "X-API-Key"
-      }
     }
-  },
-  "security": [
-    {
-      "ApiKeyAuth": []
-    }
-  ],
-  "tags": [
-    {
-      "name": "decisions",
-      "description": "Decision lifecycle: create, read, evaluate"
-    },
-    {
-      "name": "jobs",
-      "description": "Execution jobs: retry, cancel, complete, worker acknowledgement"
-    },
-    {
-      "name": "execution",
-      "description": "Job submit, status, listing (backward compatible)"
-    },
-    {
-      "name": "billing",
-      "description": "Usage and Stripe billing"
-    },
-    {
-      "name": "health",
-      "description": "System health and connectivity checks"
-    },
-    {
-      "name": "ai",
-      "description": "AI assistant with tool calling"
-    }
-  ]
+  }
 }
