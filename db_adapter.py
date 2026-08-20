@@ -1577,10 +1577,10 @@ async def _find_tenant_by_key_pg(api_key_hash: str) -> dict | None:
 def _find_tenant_by_key_sqlite(api_key_hash: str) -> dict | None:
     with _sqlite_conn() as conn:
         row = conn.execute(
-            "SELECT tenant_id, name, tier, api_key_hash FROM tenants WHERE api_key_hash = ?",
+            "SELECT id, name, plan, api_key FROM tenants WHERE api_key = ?",
             (api_key_hash,),
         ).fetchone()
     if not row:
         return None
-    return {"tenant_id": row[0], "name": row[1], "tier": row[2], "api_key_hash": row[3]}
+    return {"tenant_id": row[0], "name": row[1], "plan": row[2], "api_key": row[3]}
 

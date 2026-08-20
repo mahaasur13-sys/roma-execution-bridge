@@ -602,7 +602,7 @@ async def execute_tool(name: str, arguments: dict, api_key: str | None = None) -
         "slurm_status": ("GET", "/slurm/status/{slurm_job_id}"), "slurm_cancel": ("POST", "/slurm/cancel/{slurm_job_id}"),
         "get_usage": ("GET", "/usage"), "create_checkout_session": ("POST", "/billing/create-checkout-session"),
         "get_daily_stats": ("GET", "/stats/daily"),
-        "get_balance": ("GET", "/usage"), "get_billing_ledger": ("GET", "/billing/ledger"),
+        "get_balance": ("GET", "/billing/balance"), "get_billing_ledger": ("GET", "/billing/ledger"),
         "check_spend_cap": ("GET", "/billing/spend-cap"),
     }
     if name not in routes:
@@ -981,8 +981,114 @@ async def create_checkout_session(
         logger.error(f"CloudPayments create_order failed for {tenant_id}: {e}")
         raise HTTPException(status_code=502, detail=f"Payment provider error: {str(e)}")
 
+# ============================================
+# BILLING — Ledger & Spend-Cap (v2.1.0)
+# ============================================
+
+@limiter.limit("30/minute")
+@app.get("/billing/ledger")
+async def get_billing_ledger(
+    request: Request,
+    limit: int = 20,
+    key_info: dict = Depends(verify_api_key),
+):
+    """История списаний (дебет/кредит) для текущего tenant."""
+    tenant_id = key_info["tenant_id"]
+    entries = billing_ledger.get_tenant_entries(tenant_id)
+    entries = entries[-limit:] if limit > 0 else entries
+    balance = billing_ledger.get_balance(tenant_id)
+    plan_name = key_info.get("plan", "free")
+    plan = PLANS.get(plan_name, PLANS.get("free", {}))
+    return {
+        "tenant_id": tenant_id,
+        "plan": plan_name,
+        "balance_usd": round(balance, 6),
+        "spend_cap_usd": plan.get("spend_cap_usd", 0),
+        "entries": [
+            {
+                "type": e["type"],
+                "amount": e["amount"],
+                "timestamp": e.get("timestamp", 0),
+                "description": e.get("description", ""),
+                "metadata": e.get("metadata", {}),
+            }
+            for e in entries
+        ],
+        "total_entries": len(entries),
+    }
+
+
+@limiter.limit("30/minute")
+@app.get("/billing/spend-cap")
+async def check_spend_cap_endpoint(
+    request: Request,
+    estimated_cost_usd: float = 0.0,
+    key_info: dict = Depends(verify_api_key),
+):
+    """Проверить, хватит ли бюджета на задачу с указанной стоимостью."""
+    tenant_id = key_info["tenant_id"]
+    plan_name = key_info.get("plan", "free")
+    plan = PLANS.get(plan_name, PLANS.get("free", {}))
+    cap = plan.get("spend_cap_usd", 0)
+    if cap <= 0:
+        return {
+            "tenant_id": tenant_id,
+            "plan": plan_name,
+            "spend_cap_usd": cap,
+            "current_balance": 0.0,
+            "estimated_cost": estimated_cost_usd,
+            "allowed": True,
+            "reason": "No spend-cap (enterprise/unlimited)",
+            "remaining": "unlimited",
+        }
+    balance = billing_ledger.get_balance(tenant_id)
+    projected = balance + estimated_cost_usd
+    allowed = projected <= cap
+    pct = round(balance / cap * 100, 1) if cap > 0 else 0
+    return {
+        "tenant_id": tenant_id,
+        "plan": plan_name,
+        "spend_cap_usd": cap,
+        "current_balance": round(balance, 6),
+        "estimated_cost": estimated_cost_usd,
+        "allowed": allowed,
+        "remaining": round(max(0, cap - balance), 6),
+        "usage_pct": pct,
+        "reason": "" if allowed else f"Spend cap exceeded: ${balance:.4f}/${cap:.2f} ({pct}%). Job ${estimated_cost_usd:.6f} exceeds cap.",
+    }
+
+
+
 
 # ============================================
+
+@limiter.limit("30/minute")
+@app.get("/billing/balance")
+async def get_balance_endpoint(
+    request: Request,
+    key_info: dict = Depends(verify_api_key),
+):
+    """Текущий баланс, план и spend-cap тенанта (короткий ответ для AI)."""
+    tenant_id = key_info["tenant_id"]
+    plan_name = key_info.get("plan", "free")
+    plan = PLANS.get(plan_name, PLANS.get("free", {}))
+    cap = plan.get("spend_cap_usd", 0)
+    balance = billing_ledger.get_balance(tenant_id)
+    pct = round(balance / cap * 100, 1) if cap > 0 else 0
+    return {
+        "tenant_id": tenant_id,
+        "plan": plan_name,
+        "balance_usd": round(balance, 6),
+        "spend_cap_usd": cap,
+        "usage_pct": pct,
+        "remaining": round(max(0, cap - balance), 6) if cap > 0 else "unlimited",
+        "limits": {
+            "max_jobs_per_month": plan.get("max_jobs_per_month", 50),
+            "max_gpu_seconds": plan.get("max_gpu_seconds", 0),
+        },
+    }
+
+
 # DEMOS — ready-to-run tasks
 # ============================================
 
