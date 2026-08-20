@@ -516,6 +516,13 @@ roma_request_duration = Histogram("roma_request_duration_seconds", "Request dura
 # Business metrics (P2-4)
 roma_billing_events = Counter("roma_billing_events_total", "Billing events", ["event_type", "plan"])
 roma_errors_total = Counter("roma_errors_total", "Errors by endpoint", ["endpoint", "status_code"])
+
+from monitoring.verification_metrics import (
+    roma_email_verification_total, roma_email_send_total,
+    roma_email_resend_total, roma_unverified_api_key_blocked_total,
+    roma_verification_token_expired_total, roma_verification_token_invalid_total,
+)
+VERIFICATION_METRICS_LOADED = True
 roma_cloudpayments_success = Counter("roma_cloudpayments_success_total", "CloudPayments successful payments")
 roma_cloudpayments_failure = Counter("roma_cloudpayments_failure_total", "CloudPayments failed payments")
 
@@ -2598,6 +2605,39 @@ async def admin_page(request: Request):
     return Response(content=_render_admin_dashboard(info["tenant_id"]), media_type="text/html")
 
 
+
+@app.get("/admin/verification-stats")
+
+def get_verification_stats():
+    """Return verification statistics for the last 24h."""
+    try:
+        from db_adapter import _pg_conn, _pg_return
+        conn = _pg_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT
+                COUNT(*) AS total_users,
+                COUNT(*) FILTER (WHERE email_verified = true) AS verified,
+                COUNT(*) FILTER (WHERE email_verified = false) AS pending
+            FROM users
+            WHERE created_at >= now() - interval '24 hours'
+        """)
+        row = cur.fetchone()
+        _pg_return(conn)
+        total, verified, pending = row if row else (0, 0, 0)
+        return {
+            "period": "24h",
+            "users_total": total,
+            "users_verified": verified,
+            "users_pending": pending,
+            "verification_rate_pct": round(verified / max(total, 1) * 100, 1),
+        }
+    except Exception as e:
+        logger.warning("verification_stats_failed", extra={"error": str(e)})
+        return {"error": str(e), "period": "24h"}
+async def admin_verification_stats():
+    """Return email verification statistics for the last 24 hours."""
+    return get_verification_stats()
 @app.get("/admin/backends", dependencies=[Depends(verify_api_key)])
 async def admin_backends(key_info: dict = Depends(verify_api_key)):
     """List available execution backends and their status."""
