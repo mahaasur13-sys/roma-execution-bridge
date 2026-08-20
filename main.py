@@ -2,6 +2,19 @@
 ROMA Execution Bridge – FastAPI + Pydantic v2
 Multi-tenant execution platform with API-Key auth, tenant isolation, and billing.
 """
+# ── Load .env BEFORE all imports ─────────────────────────────────
+import os as _os
+from pathlib import Path as _Path
+_env_path = _Path(__file__).parent / ".env"
+if _env_path.exists():
+    with open(_env_path, "r") as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _key, _, _val = _line.partition("=")
+                _os.environ.setdefault(_key.strip(), _val.strip().strip('"').strip("'"))
+    print(f"✅ Loaded {_env_path}", flush=True)
+
 
 import json
 import logging
@@ -38,8 +51,8 @@ from monitoring.metrics import (
 from alerts import AlertDispatcher, Alert, AlertLevel
 
 # === BILLING SINGLETONS (v2.1.0) ===
-from billing.metering import MeteringEngine
-from billing.ledger import BillingLedger
+from billing.pg_metering import PGMeteringEngine as MeteringEngine
+from billing.pg_ledger import PGBillingLedger as BillingLedger
 
 metering_engine = MeteringEngine()
 billing_ledger = BillingLedger()
@@ -330,16 +343,9 @@ OAUTH_REDIRECT_BASE = os.environ.get(
 )
 
 import httpx
-from dotenv import load_dotenv
-
-try:
-    from openai import AsyncOpenAI
-except ImportError:
-    AsyncOpenAI = None
 
 from urllib.parse import urlencode
 
-load_dotenv()
 
 
 # ============================================
@@ -484,6 +490,7 @@ async def landing_page():
 roma_jobs_total = Counter("roma_jobs_total", "Total number of submitted jobs", ["tenant_id"])
 roma_jobs_active = Gauge("roma_jobs_active", "Currently active jobs", ["tenant_id"])
 roma_queue_depth = Gauge("roma_queue_depth", "Current queue depth", ["tenant_id"])
+queue_depth = 0
 roma_requests_total = Counter("roma_requests_total", "Total HTTP requests", ["endpoint", "method", "status"])
 roma_request_duration = Histogram("roma_request_duration_seconds", "Request duration in seconds", ["endpoint", "method"])
 
@@ -557,6 +564,11 @@ if not DEEPSEEK_API_KEY:
         pass
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+try:
+    from openai import AsyncOpenAI
+except ImportError:
+    AsyncOpenAI = None
+
 ROMA_INTERNAL_BASE_URL = "http://127.0.0.1:8900"
 
 DEEPSEEK_CLIENT = None
@@ -592,6 +604,20 @@ SYSTEM_PROMPT = """Ты — ROMA AI, дружелюбный и честный п
 - Помогай человеку быстро понять выгоду и принять решение
 - Не утверждай результат действия, пока tool не вернул его
 - Никогда не проси пользователя вставлять секрет в сообщение (X-API-Key уже передан)
+
+## ЖЁСТКОЕ ПРАВИЛО — никаких месячных подписок
+
+- **НИКОГДА** не называй цены $99, $499 или любые другие месячные подписки.
+  В ROMA нет ежемесячной платы. Есть только spend-cap (лимит) и стоимость использования.
+- Если пользователь спрашивает «какие тарифы?», «сколько стоит?», «какие планы?» —
+  отвечай ТОЛЬКО про spend-cap и цены GPU/токенов.
+- Не используй слова «подписка», «месячный платёж», «тарифный план».
+  Используй: «лимит», «spend-cap», «баланс».
+- Пример ПРАВИЛЬНОГО ответа на «какие у вас тарифы?»:
+  «У нас нет ежемесячной платы. Вы платите только за использование:
+   Free — лимит $0 (попробовать), Start — $5, Pro — $50, Enterprise — без лимита.
+   GPU: $0.00001/сек ($0.036/час). Токены: $1 за 1M входа, $2 за 1M выхода.»
+
 
 ## Когда использовать tools
 
@@ -802,8 +828,14 @@ async def daily_stats(request: Request):
 
 @app.get("/health")
 async def health():
-    pg_ok = db.is_pg_connected()
-    return {"status": "ok", "pg": pg_ok}
+    from billing.pg_connection import pg_health
+    pg_status = pg_health()
+    return {
+        "status": "ok",
+        "pg": pg_status["connected"],
+        "pg_detail": pg_status,
+        "version": "2.1.0",
+    }
 
 
 @app.get("/metrics")
@@ -814,6 +846,21 @@ async def metrics():
 # ============================================
 # ENDPOINTS — DecisionOS: /submit via Gate + PG
 # ============================================
+
+# ── Load .env at startup ─────────────────────────────────────────
+import os as _os
+from pathlib import Path as _Path
+_env_path = _Path(__file__).parent / ".env"
+if _env_path.exists():
+    with open(_env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith('#') and '=' in _line:
+                _key, _val = _line.split('=', 1)
+                _key = _key.strip()
+                _val = _val.strip().strip('"').strip("'")
+                if _key not in _os.environ:
+                    _os.environ[_key] = _val
 
 @limiter.limit("30/minute")
 @app.post("/submit", response_model=RomaTaskResponse, status_code=202, dependencies=[Depends(verify_api_key)])
@@ -832,7 +879,7 @@ async def submit_task(payload: RomaTaskInput, request: Request, key_info: dict =
     )
 
     # Evaluate through Gate
-    decision = await gate.evaluate(dreq)
+    decision = gate.evaluate(tenant_id=tenant_id, payload=payload.model_dump())
     if decision.result.value != "allowed":
         logger.warning("decision.denied tenant=%s reason=%s", tenant_id, decision.reason)
         raise HTTPException(status_code=402, detail=decision.reason)
@@ -844,13 +891,27 @@ async def submit_task(payload: RomaTaskInput, request: Request, key_info: dict =
     # Persist execution job in PG
     db.insert_execution_job(
         job_id=job_id,
-        decision_id=decision.decision_id,
+        decision_id=str(uuid.uuid4()),  # GateDecision has no decision_id
         tenant_id=tenant_id,
         status="queued",
         payload=payload.model_dump(),
     )
 
     # Increment usage
+    # Dispatch to execution backend (local/vastai/slurm/ray)
+    backend_protocol = "rom"
+    backend_target = f"rom://local/{job_id}"
+    try:
+        backend_result = await dispatch_job(
+            job_id=job_id,
+            tenant_id=tenant_id,
+            payload=payload.model_dump(),
+        )
+        backend_protocol = backend_result.get("protocol", "rom")
+        backend_target = backend_result.get("target", f"rom://local/{job_id}")
+    except Exception as exc:
+        logger.warning("backend.dispatch.failed tenant=%s job=%s: %s", tenant_id, job_id, exc)
+
     gpu_sec = 300 if payload.gpu_required else 0
     _increment_usage(tenant_id, gpu_sec)
 
@@ -867,13 +928,17 @@ async def submit_task(payload: RomaTaskInput, request: Request, key_info: dict =
     ten_jobs = db.list_tenant_jobs(tenant_id, limit=100)
     roma_jobs_active.labels(tenant_id=tenant_id).set(len(ten_jobs))
 
+    roma_jobs_total.labels(tenant_id=tenant_id).inc()
+    ten_jobs = db.list_tenant_jobs(tenant_id, limit=100)
+    roma_jobs_active.labels(tenant_id=tenant_id).set(len(ten_jobs))
+
     return RomaTaskResponse(
         status="queued",
         job_id=job_id,
         tenant_id=tenant_id,
-        roma_dispatch={"protocol": "rom", "target": f"rom://local/{job_id}"},
+        roma_dispatch={"protocol": backend_protocol, "target": backend_target},
         dag=["validate", "dispatch", "execute", "commit"],
-        estimated_resources={"cpu_cores": 2, "memory_mb": 512, "gpu": 0},
+        estimated_resources={"cpu_cores": 2, "memory_mb": 512, "gpu": 1 if payload.gpu_required else 0},
         gpu_required=payload.gpu_required,
     )
 
@@ -915,6 +980,27 @@ async def complete_job(job_id: str, key_info: dict = Depends(verify_api_key)):
     job = db.get_execution_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    tenant_id = key_info["tenant_id"]
+
+    # FIXED: real billing — compute actual GPU seconds from job duration
+    actual_duration_s = 0
+    import time
+    started_at = job.get("started_at")
+    if started_at:
+        try:
+            started_dt = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
+            actual_duration_s = (datetime.utcnow() - started_dt.replace(tzinfo=None)).total_seconds()
+        except Exception:
+            actual_duration_s = 300
+    gpu_sec = max(actual_duration_s, 0)
+    _increment_usage(tenant_id, gpu_sec, cost_only=True)
+
+    # Cleanup backend instance (Vast.ai destroy etc.)
+    try:
+        await backend_cancel_job(tenant_id=tenant_id, job_id=job_id)
+    except Exception as exc:
+        logger.warning("backend.cleanup.failed tenant=%s job=%s: %s", tenant_id, job_id, exc)
+
     db.update_execution_job(job_id, status="completed", completed_at=datetime.utcnow().isoformat())
     return {"status": "completed", "job_id": job_id}
 
@@ -928,7 +1014,7 @@ async def list_jobs(key_info: dict = Depends(verify_api_key)):
         "tenant_id": tenant_id,
         "queue": len(my_jobs),
         "jobs": my_jobs[-10:],
-        "execution_modes": ["k8s_job", "k8s_persistent", "atom_cluster", "batch"],
+        "execution_modes": ["k8s_job", "k8s_persistent", "atom_cluster", "batch", "vastai", "local"],
     }
 
 
@@ -1007,7 +1093,7 @@ async def create_checkout_session(
                 "1. Add CLOUDPAYMENTS_PUBLIC_ID to .env\n"
                 "2. Add CLOUDPAYMENTS_API_SECRET to .env\n"
                 "3. Restart the ROMA service\n\n"
-                f"Selected plan: {plan_name} ({plan_example.get('amount', 0)} RUB/month)"
+                f"Selected plan: {plan_name} ({plan_example.get('amount', 0)} RUB/session)"
             ),
         }
 
@@ -1278,6 +1364,7 @@ async def run_demo(demo_name: str, key_info: dict = Depends(verify_api_key)):
 # ============================================
 
 from scheduler.slurm_plugin import slurm as slurm_plugin
+from backends.dispatcher import dispatch_job, backend_cancel_job
 
 
 @app.get("/slurm/status/{slurm_job_id}", dependencies=[Depends(verify_api_key)])
@@ -1874,7 +1961,7 @@ footer .dot {{ display:inline-block; width:7px; height:7px; border-radius:50%; b
     <div class="card">
         <h3>Account</h3>
         <div class="value">{tenant_id}</div>
-        <div class="sub">Plan: <strong>{plan.get('name', plan_name)}</strong> (${plan.get('price_monthly', 0)}/month)</div>
+        <div class="sub">Plan: <strong>{plan.get('name', plan_name)}</strong> (${plan.get('spend_cap_usd', 0)}/session)</div>
     </div>
     <div class="card">
         <h3>Usage</h3>
@@ -2282,6 +2369,16 @@ async def admin_page(request: Request):
     return Response(content=_render_admin_dashboard(info["tenant_id"]), media_type="text/html")
 
 
+@app.get("/admin/backends", dependencies=[Depends(verify_api_key)])
+async def admin_backends(key_info: dict = Depends(verify_api_key)):
+    """List available execution backends and their status."""
+    from backends.dispatcher import list_backends
+    return {
+        "active_backend": os.getenv("ROMA_EXECUTION_BACKEND", "local"),
+        "backends": list_backends(),
+    }
+
+
 @app.get("/admin/analytics")
 async def admin_analytics(request: Request):
     """Get analytics overview (JSON)."""
@@ -2548,9 +2645,20 @@ a {{ color:#3b82f6 }}
 </body></html>"""
 
 
+@app.on_event("startup")
+async def startup_event():
+    try:
+        billing_ledger._pg._ensure_pool()
+        logger.info("PG pool initialized on startup")
+    except Exception as e:
+        logger.warning("Failed to init PG pool on startup: %s", e)
+
+
 @app.on_event("shutdown")
 async def shutdown_event():
     try:
+        from billing.pg_connection import shutdown_pg
+        shutdown_pg()
         from db_adapter import close_pg_pool
         close_pg_pool()
         logger.info("PG pool released on shutdown")

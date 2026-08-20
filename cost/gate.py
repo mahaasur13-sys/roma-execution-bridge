@@ -29,6 +29,9 @@ class GateDecision:
 
 
 class EnterpriseDecisionGate:
+    def __init__(self, db_adapter=None):
+        pass
+
     """Week 1: quota check + minimal cost check."""
 
     def evaluate(self, tenant_id: str, payload: dict | None = None) -> GateDecision:

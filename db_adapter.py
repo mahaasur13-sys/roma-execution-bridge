@@ -1559,20 +1559,24 @@ def find_tenant_by_key(api_key: str) -> dict | None:
     """Look up tenant by raw API key. Matches against api_key_hash."""
 
     if _pg_enabled():
-        return _run_async(_find_tenant_by_key_pg(api_key))
+        return _find_tenant_by_key_pg(api_key)
     return _find_tenant_by_key_sqlite(api_key)
 
-async def _find_tenant_by_key_pg(api_key_hash: str) -> dict | None:
-    async with _PG_POOL.acquire() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                "SELECT id, name, plan, api_key FROM tenants WHERE api_key = %s",
-                (api_key_hash,),
-            )
-            row = await cur.fetchone()
-    if not row:
-        return None
-    return {"tenant_id": row[0], "name": row[1], "tier": row[2], "api_key_hash": row[3]}
+def _find_tenant_by_key_pg(api_key_hash: str) -> dict | None:
+    conn = _pg_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, name, plan, api_key FROM tenants WHERE api_key = %s",
+            (api_key_hash,),
+        )
+        row = cur.fetchone()
+        cur.close()
+        if not row:
+            return None
+        return {"tenant_id": row[0], "name": row[1], "tier": row[2], "api_key_hash": row[3]}
+    finally:
+        _pg_return(conn)
 
 def _find_tenant_by_key_sqlite(api_key_hash: str) -> dict | None:
     with _sqlite_conn() as conn:
