@@ -1,3 +1,6 @@
+# ⚠️ DEPRECATED — use gpu_policy_engine_v2.GPUPolicyEngineV2 instead.
+# Switched 2026-08-15 (P0 GPU Efficiency Audit). This file is kept for reference only.
+# See scheduler/roma_scheduler.py for the active integration.
 """GPU-aware scheduler — VRAM enforcement + priority decisions."""
 
 from queue_manager.queue_manager import QueueManager

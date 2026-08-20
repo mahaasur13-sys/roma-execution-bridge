@@ -53,6 +53,16 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_tenants_status ON tenants(subscription_status);
         CREATE INDEX IF NOT EXISTS idx_webhooks_tenant ON webhook_events(tenant_id);
 
+        CREATE TABLE IF NOT EXISTS processed_invoices (
+            invoice_id   TEXT PRIMARY KEY,
+            event_type   TEXT,
+            tenant_id    TEXT,
+            processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_processed_invoices_tenant
+            ON processed_invoices(tenant_id);
+
         CREATE TABLE IF NOT EXISTS leads (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             email TEXT NOT NULL,
@@ -501,3 +511,29 @@ def list_tenants() -> list[dict]:
     rows = c.execute("SELECT * FROM tenants ORDER BY created_at DESC").fetchall()
     c.close()
     return [dict(r) for r in rows]
+
+
+def is_invoice_processed(invoice_id: str) -> bool:
+    """Проверяет, был ли уже обработан данный InvoiceId."""
+    if not invoice_id:
+        return False
+    c = _conn()
+    try:
+        c.execute("SELECT 1 FROM processed_invoices WHERE invoice_id = ? LIMIT 1", (invoice_id,))
+        return c.fetchone() is not None
+    finally:
+        c.close()
+
+def mark_invoice_processed(invoice_id: str, event_type: str = "", tenant_id: str = "") -> None:
+    """Помечает InvoiceId как обработанный (идемпотентность)."""
+    if not invoice_id:
+        return
+    c = _conn()
+    try:
+        c.execute(
+            "INSERT OR IGNORE INTO processed_invoices (invoice_id, event_type, tenant_id, processed_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+            (invoice_id, event_type, tenant_id),
+        )
+        c.commit()
+    finally:
+        c.close()

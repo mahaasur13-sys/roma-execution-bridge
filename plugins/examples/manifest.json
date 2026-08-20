@@ -1,0 +1,19 @@
+{
+  "name": "custom-policy",
+  "version": "1.0.0",
+  "display_name": "Custom Policy Plugin",
+  "description": "Example custom policy with rate limiting and geo-blocking rules for ROMA DecisionOS.",
+  "author": "ROMA Community",
+  "category": "community",
+  "entry_point": "plugins.examples.custom_policy:CustomPolicyPlugin",
+  "dependencies": ["policy-engine"],
+  "minimum_tier": "pro",
+  "permissions": ["network"],
+  "sandbox_policy": "network",
+  "tags": ["policy", "security", "rate-limit"],
+  "config_schema": {
+    "rate_limit_per_minute": 60,
+    "blocked_countries": ["XX"],
+    "require_2fa": false
+  }
+}

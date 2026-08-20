@@ -1,0 +1,29 @@
+{
+  "title": "ROMA Billing & CloudPayments",
+  "uid": "roma-billing-v2",
+  "panels": [
+    {
+      "title": "Checkout Sessions (5m rate)",
+      "targets": [{"expr": "sum(rate(roma_cloudpayments_checkouts_total[5m])) by (plan)", "legendFormat": "{{plan}}"}],
+      "type": "timeseries"
+    },
+    {
+      "title": "CloudPayments Webhooks (5m rate)",
+      "targets": [{"expr": "sum(rate(roma_cloudpayments_webhooks_total[5m])) by (event_type)", "legendFormat": "{{event_type}}"}],
+      "type": "timeseries"
+    },
+    {
+      "title": "Success vs Failure Rate (5m)",
+      "targets": [
+        {"expr": "rate(roma_cloudpayments_success_total[5m])", "legendFormat": "success"},
+        {"expr": "rate(roma_cloudpayments_failure_total[5m])", "legendFormat": "failure"}
+      ],
+      "type": "timeseries"
+    },
+    {
+      "title": "Billing Events by Plan (5m)",
+      "targets": [{"expr": "sum(rate(roma_billing_events_total[5m])) by (plan)", "legendFormat": "{{plan}}"}],
+      "type": "timeseries"
+    }
+  ]
+}

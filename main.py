@@ -98,15 +98,17 @@ db.init_db()
 db.seed_tenants(API_KEYS)
 
 def verify_api_key(x_api_key: str = Header(None)) -> dict:
-    """Validate API key and return tenant info: {tenant_id, name}."""
+    """Validate API key and return tenant info: {tenant_id, name, tier, api_key}."""
     if not x_api_key:
         raise HTTPException(
             status_code=401,
             detail="Missing X-API-Key header. Request a key at https://roma-execution-bridge-asurdev.zocomputer.io",
         )
-    if x_api_key not in API_KEYS:
+    tenant = db.find_tenant_by_key(x_api_key)
+    if not tenant:
         raise HTTPException(status_code=401, detail="Invalid API key")
-    info = dict(API_KEYS[x_api_key]); info["api_key"] = x_api_key; return info
+    tenant["api_key"] = x_api_key
+    return tenant
 
 # ============================================
 # PLANS & USAGE — DecisionOS PG-backed
@@ -315,9 +317,17 @@ app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_credentials
 
 # DecisionOS Week 2 — v1 API routes
 from routes.v1_router import router as v1_router
+from router_decisions import router as decisions_router
+from router_jobs import router as jobs_router
+from crypto_payments.router import router as crypto_router
+from crypto_payments.wallets.router import router as wallets_router
+from support_chat.router import router as support_router
 app.include_router(v1_router)
 app.include_router(decisions_router)
 app.include_router(jobs_router)
+app.include_router(crypto_router)
+app.include_router(wallets_router)
+app.include_router(support_router)
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 if JAEGER_ENABLED:
@@ -2235,3 +2245,5 @@ async def shutdown_event():
         logger.info("PG pool released on shutdown")
     except Exception as e:
         logger.warning("Failed to close PG pool: %s", e)
+
+

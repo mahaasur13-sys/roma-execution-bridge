@@ -52,7 +52,7 @@ def t_ledger():
     assert bal >= 0, "ledger failed"
 
 def t_gpu_scheduler():
-    from scheduler.gpu_scheduler import GPUScheduler
+    from scheduler.gpu_policy_engine_v2 import GPUPolicyEngineV2
     from queue.queue_manager import QueueManager
     class MockRedis:
         def __init__(self): self.data = {}

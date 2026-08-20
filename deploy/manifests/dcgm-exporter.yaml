@@ -1,0 +1,108 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: dcgm-exporter
+  namespace: roma
+  labels:
+    app: dcgm-exporter
+    component: gpu-monitoring
+spec:
+  selector:
+    matchLabels:
+      app: dcgm-exporter
+  template:
+    metadata:
+      labels:
+        app: dcgm-exporter
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9400"
+        prometheus.io/path: "/metrics"
+    spec:
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      hostNetwork: true
+      hostPID: true
+      containers:
+        - name: dcgm-exporter
+          image: nvcr.io/nvidia/k8s/dcgm-exporter:3.3.6-3.4.1-ubuntu22.04
+          securityContext:
+            privileged: true
+          ports:
+            - name: metrics
+              containerPort: 9400
+              protocol: TCP
+          env:
+            - name: DCGM_EXPORTER_LISTEN
+              value: ":9400"
+            - name: DCGM_EXPORTER_KUBERNETES
+              value: "true"
+            - name: DCGM_EXPORTER_COLLECTORS
+              value: "/etc/dcgm-exporter/default-counters.csv"
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 100m
+            limits:
+              memory: 256Mi
+              cpu: 200m
+          volumeMounts:
+            - name: pod-resources
+              mountPath: /var/lib/kubelet/pod-resources
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9400
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9400
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: pod-resources
+          hostPath:
+            path: /var/lib/kubelet/pod-resources
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dcgm-exporter
+  namespace: roma
+  labels:
+    app: dcgm-exporter
+spec:
+  clusterIP: None
+  ports:
+    - name: metrics
+      port: 9400
+      targetPort: 9400
+      protocol: TCP
+  selector:
+    app: dcgm-exporter
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: dcgm-exporter
+  namespace: roma
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: dcgm-exporter
+  endpoints:
+    - port: metrics
+      interval: 15s
+      path: /metrics
+  namespaceSelector:
+    matchNames:
+      - roma

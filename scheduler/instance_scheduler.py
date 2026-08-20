@@ -29,8 +29,12 @@ def find_and_assign_worker(tenant_id: str, instance_type: str, job_id: str,
     try:
         from scheduler.ws_server import assign_job_to_worker, connected_workers
         if worker_id in connected_workers:
-            # Create task for async WebSocket send
-            asyncio.create_task(assign_job_to_worker(worker_id, job_id, script, params))
+            # Create task for async WebSocket send with error callback
+            task = asyncio.create_task(assign_job_to_worker(worker_id, job_id, script, params))
+            task.add_done_callback(
+                lambda t: logger.error("WS assignment failed for worker %s: %s", worker_id, t.exception())
+                if t.exception() else None
+            )
         else:
             logger.warning("Worker %s found in DB but not connected via WebSocket — job %s queued", worker_id, job_id)
     except Exception as e:

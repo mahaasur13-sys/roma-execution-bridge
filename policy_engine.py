@@ -2,6 +2,7 @@
 import db_adapter as db
 from tier_profiles import load_tiers, DEFAULT_TIERS
 
+
 # Allowed read tools per tier mode
 READ_TOOLS = {"list_workers", "list_jobs", "get_job_status", "get_usage", "get_daily_stats"}
 WRITE_TOOLS = {"submit_task", "cancel_job", "drain_worker", "slurm_status", "slurm_cancel", "create_checkout_session"}
@@ -67,5 +68,66 @@ def evaluate_policies(tenant_id: str, action: str, context: dict | None = None) 
         if current_status in ("completed", "failed", "cancelled"):
             return {"result": "denied", "reason": f"transition_denied: cannot cancel {current_status}", "policy_name": "transition_policy"}
         return {"result": "allowed", "reason": "cancel allowed", "policy_name": "transition_policy"}
+
+
+    if action.startswith("tool_call"):
+        if not context.get("tenant_key"):
+            return {"result": "denied", "reason": "AI tool call without tenant key", "policy_name": "default"}
+        return {"result": "allowed", "reason": "default policy passed", "policy_name": "default"}
+
+    if action == "crypto_create_invoice":
+        tenant_id = context.get("tenant_id", "")
+        network = context.get("network", "")
+        if network not in ("USDT_TRC20", "USDT_ERC20", "USDC", "BTC", "TON", "SOL"):
+            return {"result": "denied", "reason": f"Unsupported network: {network}", "policy_name": "crypto_network_guard"}
+        max_invoices = {"start": 5, "pro": 20, "enterprise": 100}.get(
+            context.get("tier", "start"), 5
+        )
+        if context.get("invoice_count_this_month", 0) >= max_invoices:
+            return {"result": "denied", "reason": f"Crypto invoice quota ({max_invoices}/mo) exceeded", "policy_name": "crypto_quota"}
+        return {"result": "allowed", "reason": "Crypto invoice creation allowed", "policy_name": "crypto_quota"}
+
+    if action == "crypto_tier_activate":
+        if context.get("payment_status") != "confirmed":
+            return {"result": "denied", "reason": "Payment not confirmed", "policy_name": "crypto_payment_guard"}
+        if context.get("invoice_status") != "paid":
+            return {"result": "denied", "reason": "Invoice not paid", "policy_name": "crypto_invoice_guard"}
+        return {"result": "allowed", "reason": "Tier activation allowed", "policy_name": "crypto_tier_activation"}
+
+    if action.startswith("crypto_webhook:"):
+        provider = context.get("provider", "")
+        if provider not in ("nowpayments", "btcpay"):
+            return {"result": "denied", "reason": f"Unknown webhook provider: {provider}", "policy_name": "crypto_webhook_provider"}
+        return {"result": "allowed", "reason": "Crypto webhook processing allowed", "policy_name": "crypto_webhook"}
+
+    
+
+    if action == "crypto:wallet:create":
+        tenant_id = context.get("tenant_id", "")
+        wallet_type = context.get("wallet_type", "")
+        if wallet_type not in ("provider", "self_hosted", "hardware", "monero"):
+            return {"result": "denied", "reason": f"Unsupported wallet type: {wallet_type}", "policy_name": "crypto_wallet_type_guard"}
+        if wallet_type == "monero" and context.get("mode") == "hot":
+            return {"result": "denied", "reason": "Monero HOT mode not allowed — view_only only", "policy_name": "crypto_monero_privacy"}
+        if context.get("wallets_count", 0) >= 10:
+            return {"result": "denied", "reason": "Max 10 wallets per tenant", "policy_name": "crypto_wallet_limit"}
+        return {"result": "allowed", "reason": "Wallet creation allowed", "policy_name": "crypto_wallet_create"}
+
+    if action == "crypto:wallet:generate_address":
+        if context.get("wallet_status") == "compromised":
+            return {"result": "denied", "reason": "Wallet is compromised — rotate first", "policy_name": "crypto_wallet_security"}
+        return {"result": "allowed", "reason": "Address generation allowed", "policy_name": "crypto_wallet_address"}
+
+    if action == "crypto:wallet:generate_monero_subaddress":
+        if context.get("wallet_type") != "monero":
+            return {"result": "denied", "reason": "Monero subaddress requires Monero wallet", "policy_name": "crypto_monero_type_guard"}
+        if context.get("wallet_mode") != "view_only":
+            return {"result": "denied", "reason": "Monero subaddress requires view_only mode", "policy_name": "crypto_monero_privacy"}
+        return {"result": "allowed", "reason": "Monero subaddress creation allowed", "policy_name": "crypto_monero_subaddress"}
+
+    if action == "crypto:wallet:rotate":
+        if context.get("wallet_status") == "rotating":
+            return {"result": "denied", "reason": "Wallet already rotating", "policy_name": "crypto_wallet_busy"}
+        return {"result": "allowed", "reason": "Wallet rotation allowed", "policy_name": "crypto_wallet_rotate"}
 
     return {"result": "allowed", "reason": "default policy passed", "policy_name": "default"}

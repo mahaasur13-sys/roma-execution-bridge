@@ -7,7 +7,7 @@ import asyncio
 import logging
 from typing import Optional
 
-from scheduler.gpu_scheduler import GPUScheduler
+from scheduler.gpu_policy_engine_v2 import GPUPolicyEngineV2
 from gpu_worker.connector import get_gpu_connector
 from cost.gate import DecisionGate
 from cost.predictor import CostPredictor
@@ -19,9 +19,25 @@ logger = logging.getLogger("roma.scheduler")
 class ROMAGPUScheduler:
     def __init__(self):
         qm = QueueManager()
-        self.gpu_scheduler = GPUScheduler(queue_manager=qm)
+        self.policy_engine = GPUPolicyEngineV2()
         self.gpu_connector = get_gpu_connector()
-        self.cost_gate = DecisionGate()
+
+        # Register GPU nodes from connector
+        try:
+            worker_count = self.gpu_connector.get_worker_count()
+            if worker_count > 0:
+                for i in range(worker_count):
+                    self.policy_engine.register_node(f"gpu-node-{i+1}")
+            else:
+                # Fallback: register default RTX 3060 node
+                self.policy_engine.register_node("gpu-node-1")
+        except Exception:
+            self.policy_engine.register_node("gpu-node-1")
+        try:
+            self.cost_gate = DecisionGate()
+        except Exception as e:
+            logger.warning("DecisionGate init failed: %s, cost gate disabled", e)
+            self.cost_gate = None
         self.predictor = CostPredictor()
         self.local_mode = os.getenv("ROMA_EXECUTION_MODE", "local")
 
@@ -31,7 +47,9 @@ class ROMAGPUScheduler:
         prediction = self.predictor.predict(
             task=job.get("task_type", "default"),
             gpu_required=gpu_required,
-            plugin_type=job.get("tenant_tier", "PRO")
+            plugin_type=job.get("plugin_type", "default"),
+            tenant_tier=job.get("tenant_tier", "FREE"),
+            policy_engine=self.policy_engine
         )
 
         gate_result = self.cost_gate.evaluate(
@@ -102,7 +120,8 @@ class ROMAGPUScheduler:
             "execution_mode": self.local_mode,
             "gpu_available": self.gpu_connector.is_available(),
             "gpu_worker_count": self.gpu_connector.get_worker_count(),
-            "gpu_metrics": self.gpu_connector.get_metrics()
+            "gpu_metrics": self.gpu_connector.get_metrics(),
+            "policy_engine": self.policy_engine.get_status()
         }
 
 
@@ -110,24 +129,32 @@ class ROMAJobExecutor:
     def __init__(self):
         self.scheduler = ROMAGPUScheduler()
         self.results: dict = {}
+        self._job_ownership: dict = {}
 
     async def submit(self, job: dict) -> dict:
         import uuid
         job_id = job.get("job_id") or str(uuid.uuid4())
         job["job_id"] = job_id
+        tenant_id = job.get("tenant_id", "unknown")
+        self._job_ownership[job_id] = tenant_id
         route = self.scheduler.route_job(job)
         if route.get("status") == "rejected":
             return route
 
-        async def run():
-            return await self.scheduler.execute_job(job)
-
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, lambda: asyncio.run(run()))
+        result = await self.scheduler.execute_job(job)
         self.results[job_id] = result
         return result
 
-    def get_result(self, job_id: str) -> Optional[dict]:
+    def get_result(self, job_id: str, tenant_id: str = None) -> Optional[dict]:
+        if tenant_id:
+            owner = self._job_ownership.get(job_id)
+            if owner and owner != tenant_id:
+                import logging
+                logging.getLogger("roma.scheduler").warning(
+                    "Tenant %s tried to access result of job %s owned by %s — denied",
+                    tenant_id, job_id, owner
+                )
+                return None
         return self.results.get(job_id)
 
     def get_metrics(self) -> dict:
