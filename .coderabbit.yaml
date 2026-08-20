@@ -1,0 +1,88 @@
+# CodeRabbit configuration for ROMA Execution Bridge / DecisionOS v1.0.0
+# Repo: https://github.com/mahaasur13-sys/roma-execution-bridge
+# Docs: https://docs.coderabbit.ai/guides/configure-coderabbit
+
+language: ru-RU
+
+reviews:
+  profile: assertive
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  sequence_diagrams: true
+  changed_files_summary: true
+  path_filters:
+    - "!docs/**"
+    - "!*.md"
+    - "!static/**"
+    - "!data/**"
+    - "!*.db"
+
+path_instructions:
+  - path: "plugins/core/**"
+    instructions: |
+      КРИТИЧНО: PluginManager, Sandbox, Trace.
+      Проверяй:
+      1. Потокобезопасность (asyncio.Lock).
+      2. Lifecycle: register→load→enable→disable→unload — все состояния.
+      3. Dependency resolution — нет циклических зависимостей.
+      4. Обработка ошибок: PluginError, PluginNotFoundError, PluginLoadError.
+
+  - path: "plugins/dashbeam/**"
+    instructions: |
+      КРИТИЧНО: DashBeam P2P Transfer Plugin.
+      Проверяй:
+      1. Spend keys Monero НИКОГДА не попадают в код/логи (MoneroSharingValidator).
+      2. Pydantic v2 frozen модели (DashBeamTicket, DashBeamSession, PairedDevice).
+      3. IrohAdapter — корректность QUIC/TLS 1.3 handshake.
+      4. Ticket lifecycle: CREATED→PENDING→ACCEPTED→TRANSFERRING→COMPLETED.
+      5. Enterprise relay: токены не логируются, relay_url валидируется.
+
+  - path: "plugins/domain/**"
+    instructions: |
+      Проверяй: PluginManifest (semver regex), PluginInstance (8 состояний),
+      PluginCategory, PluginTier (free/pro/enterprise). Все модели frozen.
+
+  - path: "plugins/builtin/**"
+    instructions: |
+      Встроенные плагины: policy_engine, decision_gate, crypto_payments, support_chat.
+      Проверяй: корректность аргументов, отсутствие хардкода ключей.
+
+  - path: "billing/**"
+    instructions: |
+      Billing: Stripe + CloudPayments. Проверяй: корректность amount_cents,
+      идемпотентность webhook-обработчиков, отсутствие логов с CVV/PAN.
+
+  - path: "auth/**"
+    instructions: |
+      Auth: API keys, RBAC, OIDC. Проверяй: timing-safe сравнение токенов,
+      отсутствие хардкода ключей, корректность JWT claims.
+
+  - path: "scheduler/**"
+    instructions: |
+      GPU Scheduler. Проверяй: корректность lock/unlock, отсутствие deadlock,
+      fairness очередей, heartbeat таймауты.
+
+  - path: "ha/**"
+    instructions: |
+      High Availability: Raft consensus, leader election, split-brain protection.
+      Проверяй: корректность term/log индексов, таймауты выборов.
+
+  - path: "main.py"
+    instructions: |
+      Главный FastAPI entry point. Проверяй: 1) CORS настройки, 2) startup/shutdown
+      события (graceful shutdown), 3) middleware — нет утечек, 4) health endpoints.
+
+  - path: "tests/**"
+    instructions: |
+      Тесты. Проверяй: 1) покрытие всех состояний PluginInstance,
+      2) граничные случаи (None, пустые списки, таймауты), 3) async тесты с asyncio.
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  learnings:
+    scope: "auto"
