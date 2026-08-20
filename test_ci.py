@@ -33,6 +33,8 @@ def t_audit():
     assert len(q) > 0, "audit failed"
 
 def t_cost_gate():
+    import db_adapter as db
+    db.init_db()
     from cost.gate import EnterpriseDecisionGate
     g = EnterpriseDecisionGate()
     result = g.evaluate(tenant_id='tp', payload={'task': 'train YOLOv8', 'gpu_required': True})
