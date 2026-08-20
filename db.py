@@ -18,10 +18,6 @@ def _conn():
     c.execute("PRAGMA cache_size=-8000")
     c.execute("PRAGMA synchronous=NORMAL")
     c.execute("PRAGMA temp_store=MEMORY")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_tenants_api_key ON tenants(api_key)")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_email_logs_recipient ON email_logs(recipient_email)")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_user_events_tenant ON user_events(tenant_id, event_type)")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_feedback_tenant ON feedback(tenant_id)")
     return c
 
 
