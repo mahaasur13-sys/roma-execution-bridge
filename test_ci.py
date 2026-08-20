@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """ROMA CI Test Suite — Corrected APIs (9/9 passing)"""
 import sys; sys.path.insert(0, '.')
+import os; os.environ.setdefault('PG_DSN', '')
+
+# Ensure SQLite DB is initialized (required by Cost Gate, Audit, etc.)
+import db_adapter as db
+db.init_db()
 
 passed = 0; failed = 0
 def test(name, fn):
@@ -33,8 +38,6 @@ def t_audit():
     assert len(q) > 0, "audit failed"
 
 def t_cost_gate():
-    import db_adapter as db
-    db.init_db()
     from cost.gate import EnterpriseDecisionGate
     g = EnterpriseDecisionGate()
     result = g.evaluate(tenant_id='tp', payload={'task': 'train YOLOv8', 'gpu_required': True})
