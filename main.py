@@ -306,7 +306,7 @@ class ChatRequest(BaseModel):
 
 app = FastAPI(
     title="ROMA Execution Platform",
-    version="1.0.0",
+    version="2.1.0",
 )
 app.state.limiter = limiter
 
@@ -1671,7 +1671,7 @@ footer .dot {{ display:inline-block; width:7px; height:7px; border-radius:50%; b
     </script>
 
 <footer>
-    <span><span class="dot"></span> ROMA v1.0.0 — Phase 0 Pre-Launch</span>
+    <span><span class="dot"></span> ROMA v2.1.0 — Phase 0 Pre-Launch</span>
     <span>Uptime: since restart</span>
 
 <div class="charts-row hidden" id="dashboard-chart-box">
