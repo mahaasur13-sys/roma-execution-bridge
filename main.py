@@ -1729,6 +1729,21 @@ async def signup(payload: dict, request: Request):
     if len(password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
     
+    # Beta capacity check
+    if BETA_MODE:
+        cap = check_beta_capacity()
+        if not cap["allowed"]:
+            raise HTTPException(status_code=423, detail="Beta is currently full. Slots: %d/%d" % (cap["current_users"], cap["max_users"]))
+    
+    # Invite code validation (if required)
+    invite_code = payload.get("invite_code")
+    if BETA_MODE and BETA_REQUIRE_INVITE:
+        if not invite_code:
+            raise HTTPException(status_code=400, detail="Invite code is required for beta access")
+        inv = validate_invite(invite_code)
+        if inv is None:
+            raise HTTPException(status_code=400, detail="Invalid or expired invite code")
+    
     existing = db.get_user_by_email(email)
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
@@ -1738,7 +1753,6 @@ async def signup(payload: dict, request: Request):
     api_key = f"roma-{str(uuid.uuid4())[:12]}"
     password_hash = hashlib.sha256(password.encode() + user_id.encode()).hexdigest()
     
-    token, expires_at = create_verification(user_id)
     from auth.verification import generate_token
     token = generate_token()
     expires_at = (datetime.now(timezone.utc) + timedelta(hours=VERIFICATION_TOKEN_EXPIRY_HOURS)).isoformat()
@@ -1759,6 +1773,28 @@ async def signup(payload: dict, request: Request):
         logger.info("verification_email_sent", extra={"email": email, "tenant_id": tenant_id})
     except Exception as e:
         logger.warning("verification_email_failed", extra={"email": email, "error": str(e)})
+    
+    # Mark invite as used
+    if invite_code:
+        use_invite(invite_code, user_id)
+    
+    # Apply beta spend-cap
+    if BETA_MODE and BETA_DEFAULT_SPEND_CAP > 0:
+        try:
+            from billing.pg_ledger import _ensure_pool
+            conn = _ensure_pool()
+            if conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO tenant_spend_caps (tenant_id, max_spend_usd) VALUES (%s, %s) "
+                    "ON CONFLICT (tenant_id) DO NOTHING",
+                    (tenant_id, BETA_DEFAULT_SPEND_CAP)
+                )
+                conn.commit()
+                from billing.pg_connection import _return_conn
+                _return_conn(conn)
+        except Exception as e:
+            logger.warning("beta_spend_cap_failed", extra={"tenant_id": tenant_id, "error": str(e)})
     
     return {
         "status": "pending",
@@ -1821,6 +1857,65 @@ async def resend_verification(payload: dict):
         logger.warning("resend_verification_failed", extra={"email": email, "error": str(e)})
     
     return {"status": "sent", "message": "Verification email resent. Please check your inbox."}
+
+# ============================================
+# BETA — Invite Codes + Capacity
+# ============================================
+
+from auth.invites import (
+    BETA_MODE, BETA_REQUIRE_INVITE, BETA_DEFAULT_SPEND_CAP,
+    create_invite, validate_invite, use_invite, list_invites, deactivate_invite,
+    check_beta_capacity, is_beta_enabled,
+)
+
+
+@app.post("/admin/invites/create")
+async def admin_create_invite(payload: dict):
+    """Create a new invite code (admin only)."""
+    max_uses = int(payload.get("max_uses", 1))
+    note = payload.get("note", "")
+    expires_hours = int(payload.get("expires_hours", 0))
+    result = create_invite(max_uses=max_uses, note=note, expires_hours=expires_hours)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.get("/admin/invites")
+async def admin_list_invites():
+    """List all invite codes with usage status."""
+    return {"invites": list_invites(), "beta": check_beta_capacity()}
+
+
+@app.post("/admin/invites/deactivate")
+async def admin_deactivate_invite(payload: dict):
+    """Deactivate an invite code."""
+    code = payload.get("code", "")
+    if not code:
+        raise HTTPException(status_code=400, detail="Code is required")
+    success = deactivate_invite(code)
+    if not success:
+        raise HTTPException(status_code=404, detail="Code not found")
+    return {"status": "deactivated", "code": code}
+
+
+@app.get("/api/beta/status")
+async def beta_status():
+    """Public endpoint: check beta status and capacity."""
+    return check_beta_capacity()
+
+
+@app.get("/api/beta/validate-invite")
+async def beta_validate_invite(code: str):
+    """Check if an invite code is valid (pre-signup)."""
+    result = validate_invite(code)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Invalid or expired invite code")
+    return {"valid": True, "max_uses": result.get("invite", {}).get("max_uses", 1),
+            "used_count": result.get("invite", {}).get("used_count", 0)}
+
+
+# ============================================
 
 # OAUTH2 — Google + GitHub Login
 # ============================================

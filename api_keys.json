@@ -14,5 +14,9 @@
   "test-key-12345": {
     "tenant_id": "demo",
     "name": "test"
+  },
+  "admin-key-beta-2026": {
+    "tenant_id": "tenant-admin",
+    "name": "Admin Beta"
   }
 }
