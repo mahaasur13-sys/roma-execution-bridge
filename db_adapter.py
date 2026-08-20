@@ -1752,3 +1752,74 @@ def update_verification_token(user_id: str, token: str, expires_at: str) -> None
         finally:
             _pg_return(conn)
         
+
+# ── Invite Codes ─────────────────────────────────────────────────
+
+def create_invite_code(code: str, created_by: str = "admin", max_uses: int = 1, note: str = "", expires_at: str = None) -> dict:
+    if _pg_enabled():
+        from db_pg_sync import create_invite_code as pg_fn
+        conn = _pg_conn()
+        try:
+            return pg_fn(conn, code, created_by, max_uses, note, expires_at)
+        finally:
+            _pg_return(conn)
+    return {}
+
+def validate_invite_code(code: str) -> dict | None:
+    if _pg_enabled():
+        from db_pg_sync import validate_invite_code as pg_fn
+        conn = _pg_conn()
+        try:
+            return pg_fn(conn, code)
+        finally:
+            _pg_return(conn)
+    return None
+
+def use_invite_code(invite_code_id: int, user_id: str) -> None:
+    if _pg_enabled():
+        from db_pg_sync import use_invite_code as pg_fn
+        conn = _pg_conn()
+        try:
+            pg_fn(conn, invite_code_id, user_id)
+        finally:
+            _pg_return(conn)
+
+def list_invite_codes() -> list[dict]:
+    if _pg_enabled():
+        from db_pg_sync import list_invite_codes as pg_fn
+        conn = _pg_conn()
+        try:
+            return pg_fn(conn)
+        finally:
+            _pg_return(conn)
+    return []
+
+def deactivate_invite_code(code: str) -> bool:
+    if _pg_enabled():
+        from db_pg_sync import deactivate_invite_code as pg_fn
+        conn = _pg_conn()
+        try:
+            return pg_fn(conn, code)
+        finally:
+            _pg_return(conn)
+    return False
+
+def get_beta_config() -> dict:
+    if _pg_enabled():
+        from db_pg_sync import get_beta_config as pg_fn
+        conn = _pg_conn()
+        try:
+            return pg_fn(conn)
+        finally:
+            _pg_return(conn)
+    return {"max_users": 100, "default_spend_cap_usd": 5.00, "is_active": True}
+
+def count_verified_users() -> int:
+    if _pg_enabled():
+        from db_pg_sync import count_verified_users as pg_fn
+        conn = _pg_conn()
+        try:
+            return pg_fn(conn)
+        finally:
+            _pg_return(conn)
+    return 0

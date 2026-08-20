@@ -582,3 +582,64 @@ def update_verification_token(conn, user_id: str, token: str, expires_at: str) -
         (token, expires_at, user_id)
     )
     conn.commit()
+
+# ── Invite Codes ─────────────────────────────────────────────────
+
+def create_invite_code(conn, code: str, created_by: str, max_uses: int, note: str = "", expires_at: str = None) -> dict:
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO invite_codes (code, created_by, max_uses, note, expires_at) "
+        "VALUES (%s,%s,%s,%s,%s) RETURNING *",
+        (code, created_by, max_uses, note, expires_at)
+    )
+    cols = [desc[0] for desc in cur.description]
+    row = cur.fetchone()
+    conn.commit()
+    return dict(zip(cols, row))
+
+def validate_invite_code(conn, code: str) -> dict | None:
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT * FROM invite_codes WHERE code=%s AND is_active=true AND "
+        "used_count < max_uses AND (expires_at IS NULL OR expires_at > now())",
+        (code,)
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    cols = [desc[0] for desc in cur.description]
+    return dict(zip(cols, row))
+
+def use_invite_code(conn, invite_code_id: int, user_id: str) -> None:
+    cur = conn.cursor()
+    cur.execute("UPDATE invite_codes SET used_count = used_count + 1 WHERE id=%s", (invite_code_id,))
+    cur.execute("INSERT INTO invite_usage (invite_code_id, user_id) VALUES (%s,%s)", (invite_code_id, user_id))
+    conn.commit()
+
+def list_invite_codes(conn) -> list[dict]:
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM invite_codes ORDER BY created_at DESC")
+    cols = [desc[0] for desc in cur.description]
+    return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+def deactivate_invite_code(conn, code: str) -> bool:
+    cur = conn.cursor()
+    cur.execute("UPDATE invite_codes SET is_active=false WHERE code=%s", (code,))
+    conn.commit()
+    return cur.rowcount > 0
+
+# ── Beta Config ──────────────────────────────────────────────────
+
+def get_beta_config(conn) -> dict:
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM beta_config WHERE id=1")
+    row = cur.fetchone()
+    if row:
+        cols = [desc[0] for desc in cur.description]
+        return dict(zip(cols, row))
+    return {"max_users": 100, "default_spend_cap_usd": 5.00, "is_active": True}
+
+def count_verified_users(conn) -> int:
+    cur = conn.cursor()
+    cur.execute("SELECT count(*) FROM users WHERE email_verified=true")
+    return cur.fetchone()[0]
