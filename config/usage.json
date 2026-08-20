@@ -1,12 +1,17 @@
 {
   "tenant-demo": {
-    "total_jobs": 0,
+    "total_jobs": 50,
     "total_gpu_seconds": 0,
-    "last_updated": "2026-08-12"
+    "last_updated": "2026-08-15T04:29:15.478875"
   },
   "tenant-alpha": {
     "total_jobs": 1,
     "total_gpu_seconds": 0,
     "last_updated": "2026-08-12T08:01:38.875713"
+  },
+  "demo": {
+    "total_jobs": 16,
+    "total_gpu_seconds": 0,
+    "last_updated": "2026-08-16T02:54:56.399243"
   }
 }

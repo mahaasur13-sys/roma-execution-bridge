@@ -1,0 +1,46 @@
+# CodeRabbit configuration for ROMA Execution Bridge / DecisionOS v1.0.0
+# https://github.com/mahaasur13-sys/roma-execution-bridge
+
+language: ru-RU
+
+reviews:
+  profile: assertive
+  request_changes_workflow: false
+
+path_filters:
+  - "!docs/**"
+  - "!*.md"
+  - "!static/**"
+  - "!data/**"
+  - "!*.db"
+
+path_instructions:
+  - path: "plugins/core/**"
+    instructions: |
+      CRITICAL: PluginManager, Sandbox, Trace.
+      Check: thread safety (asyncio.Lock), lifecycle states, dependency resolution.
+
+  - path: "plugins/dashbeam/**"
+    instructions: |
+      CRITICAL: DashBeam P2P Transfer Plugin.
+      Check: no Monero spend keys in code/logs, Pydantic v2 frozen models,
+      IrohAdapter QUIC/TLS handshake, ticket lifecycle, no token logging.
+
+  - path: "billing/**"
+    instructions: |
+      Stripe + CloudPayments.
+      Check: webhook handler idempotency, no CVV/PAN in logs, no hardcoded secrets.
+
+  - path: "auth/**"
+    instructions: |
+      API keys, RBAC, OIDC.
+      Check: timing-safe comparison, no hardcoded keys, JWT claims.
+
+  - path: "main.py"
+    instructions: |
+      Main FastAPI entry point.
+      Check: CORS, startup/shutdown events, middleware, health endpoints.
+
+  - path: "tests/**"
+    instructions: |
+      Check: coverage of PluginInstance states, edge cases, async tests.

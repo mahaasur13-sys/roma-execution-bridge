@@ -2,7 +2,6 @@
 """ROMA Cost Predictor — Pre-execution cost estimation engine."""
 import sys
 sys.path.insert(0, '/home/workspace/roma-execution-bridge')
-
 from billing.pricing_engine import PricingEngine, PricingTier
 
 class CostPredictor:
@@ -13,7 +12,8 @@ class CostPredictor:
         self.tier_map = {"FREE": PricingTier.FREE, "PRO": PricingTier.PRO, "ENTERPRISE": PricingTier.ENTERPRISE}
 
     def predict(self, task: str, gpu_required: bool, plugin_type: str = "default",
-                tenant_tier: str = "FREE", custom_duration: int = None) -> dict:
+                tenant_tier: str = "FREE", custom_duration: int = None,
+                policy_engine=None) -> dict:
         tier_enum = self.tier_map.get(tenant_tier, PricingTier.FREE)
 
         # Оцениваем длительность (в секундах)
@@ -38,9 +38,25 @@ class CostPredictor:
         else:
             risk_level = "LOW"
 
-        # Оцениваем GPU узел и количество (заглушки)
-        gpu_node = "gpu-node-1" if gpu_required else "cpu-cluster"
-        gpu_count = 1 if gpu_required else 0
+        # Resolve GPU node from policy engine topology, or fallback
+        gpu_node = "cpu-cluster"
+        gpu_count = 0
+        if gpu_required:
+            if policy_engine is not None:
+                try:
+                    best = policy_engine.select_best_node(vram_gb=8)
+                    if best:
+                        gpu_node = best.name
+                        gpu_count = 1
+                    else:
+                        gpu_node = "gpu-node-1"
+                        gpu_count = 1
+                except Exception:
+                    gpu_node = "gpu-node-1"
+                    gpu_count = 1
+            else:
+                gpu_node = "gpu-node-1"
+                gpu_count = 1
 
         return {
             "estimated_cost": round(total_cost, 4),

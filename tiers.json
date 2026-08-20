@@ -1,0 +1,38 @@
+{
+  "start": {
+    "tier": "start",
+    "max_jobs_month": 50,
+    "max_gpu_seconds_month": 36000,
+    "max_concurrent": 5,
+    "budget_limit": 100.0,
+    "audit_retention_days": 7,
+    "white_label": false,
+    "policy_engine_mode": "basic",
+    "ai_tools_mode": "read_only",
+    "sso": false
+  },
+  "pro": {
+    "tier": "pro",
+    "max_jobs_month": 150,
+    "max_gpu_seconds_month": 180000,
+    "max_concurrent": 20,
+    "budget_limit": 500.0,
+    "audit_retention_days": 90,
+    "white_label": false,
+    "policy_engine_mode": "full",
+    "ai_tools_mode": "scoped",
+    "sso": false
+  },
+  "enterprise": {
+    "tier": "enterprise",
+    "max_jobs_month": -1,
+    "max_gpu_seconds_month": -1,
+    "max_concurrent": 100,
+    "budget_limit": -1,
+    "audit_retention_days": -1,
+    "white_label": true,
+    "policy_engine_mode": "custom",
+    "ai_tools_mode": "full",
+    "sso": true
+  }
+}

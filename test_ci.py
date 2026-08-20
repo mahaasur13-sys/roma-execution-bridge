@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """ROMA CI Test Suite — Corrected APIs (9/9 passing)"""
 import sys; sys.path.insert(0, '.')
+import os; os.environ.setdefault('PG_DSN', '')
+
+# Ensure SQLite DB is initialized (required by Cost Gate, Audit, etc.)
+import db_adapter as db
+db.init_db()
 
 passed = 0; failed = 0
 def test(name, fn):
@@ -10,7 +15,7 @@ def test(name, fn):
         print(f"  PASS: {name}")
         passed += 1
     except Exception as e:
-        print(f"  FAIL: {name} → {e}")
+        print(f"  FAIL: {name} -> {e}")
         failed += 1
 
 def t_auth_keys():
@@ -33,16 +38,16 @@ def t_audit():
     assert len(q) > 0, "audit failed"
 
 def t_cost_gate():
-    from cost.gate import DecisionGate
-    g = DecisionGate()
-    result = g.evaluate(task='train YOLOv8', gpu_required=True, tenant_id='tp', plugin_type='default')
-    assert result.get('decision') in ('APPROVED', 'REQUIRES_CONFIRMATION', 'REJECTED'), f"gate: {result}"
+    from cost.gate import EnterpriseDecisionGate
+    g = EnterpriseDecisionGate()
+    result = g.evaluate(tenant_id='tp', payload={'task': 'train YOLOv8', 'gpu_required': True})
+    assert result.result in ('allowed', 'denied'), f"gate: {result}"
 
 def t_billing():
     from billing.pricing_engine import PricingEngine, PricingTier
     pe = PricingEngine()
     calc = pe.calculate(tier=PricingTier.PRO, gpu_s=3600, cpu_s=0, gb_s=86400)
-    assert calc.get('final_cost', 0) > 0, "billing failed"
+    assert calc.get('total', 0) > 0, "billing failed"
 
 def t_ledger():
     from billing.ledger import BillingLedger
@@ -53,18 +58,9 @@ def t_ledger():
 
 def t_gpu_scheduler():
     from scheduler.gpu_scheduler import GPUScheduler
-    from queue.queue_manager import QueueManager
-    class MockRedis:
-        def __init__(self): self.data = {}
-        def get(self, k): return self.data.get(k)
-        def set(self, k, v): self.data[k] = v
-        def hget(self, h, k): return self.data.get(f"{h}:{k}")
-        def hset(self, h, k, v): self.data[f"{h}:{k}"] = v
-        def delete(self, k): self.data.pop(k, None)
-    redis = MockRedis()
-    q = QueueManager(redis)
-    sched = GPUScheduler(queue_manager=q)
-    can = sched.can_schedule({'task': 'train YOLOv8', 'gpu_required': True})
+    from queue_manager.queue_manager import QueueManager
+    scheduler = GPUScheduler(QueueManager())
+    can = scheduler.can_schedule({})
     assert isinstance(can, bool), f"scheduler failed: {can}"
 
 def t_raft():
@@ -90,4 +86,6 @@ test("Plugin API", t_plugin)
 
 print()
 print(f"RESULTS: {passed} passed, {failed} failed")
-raise SystemExit("CI check failed")
+if failed > 0:
+    raise SystemExit(f"CI check failed: {failed} failures")
+print("CI check passed")

@@ -1,92 +1,232 @@
 {
-  "title": "ROMA Execution Bridge — v1.2",
+  "title": "ROMA Execution Bridge \u2014 v1.2",
   "uid": "roma-v1.2",
   "refresh": "30s",
-  "time": {"from": "now-1h", "to": "now"},
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
   "templating": {
     "list": [
-      {"name": "tenant", "type": "adhoc", "datasource": "Prometheus", "filters": []}
+      {
+        "name": "tenant",
+        "type": "adhoc",
+        "datasource": "Prometheus",
+        "filters": []
+      }
     ]
   },
   "panels": [
     {
-      "id": 1, "title": "HTTP Throughput (req/s)",
-      "type": "timeseries", "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
-      "targets": [{
-        "expr": "sum(rate(roma_requests_total[1m])) by (endpoint)",
-        "legendFormat": "{{endpoint}}"
-      }]
-    },
-    {
-      "id": 2, "title": "Request Duration (p50/p95/p99)",
-      "type": "timeseries", "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+      "id": 1,
+      "title": "HTTP Throughput (req/s)",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
-        {"expr": "histogram_quantile(0.50, sum(rate(roma_request_duration_seconds_bucket[1m])) by (le, endpoint))", "legendFormat": "p50 {{endpoint}}"},
-        {"expr": "histogram_quantile(0.95, sum(rate(roma_request_duration_seconds_bucket[1m])) by (le, endpoint))", "legendFormat": "p95 {{endpoint}}"},
-        {"expr": "histogram_quantile(0.99, sum(rate(roma_request_duration_seconds_bucket[1m])) by (le, endpoint))", "legendFormat": "p99 {{endpoint}}"}
+        {
+          "expr": "sum(rate(roma_requests_total[1m])) by (endpoint)",
+          "legendFormat": "{{endpoint}}"
+        }
       ]
     },
     {
-      "id": 3, "title": "Active Jobs & Queue Depth",
-      "type": "timeseries", "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+      "id": 2,
+      "title": "Request Duration (p50/p95/p99)",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
-        {"expr": "sum(roma_jobs_active) by (tenant_id)", "legendFormat": "active — {{tenant_id}}"},
-        {"expr": "sum(roma_queue_depth) by (tenant_id)", "legendFormat": "queue — {{tenant_id}}"}
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(roma_request_duration_seconds_bucket[1m])) by (le, endpoint))",
+          "legendFormat": "p50 {{endpoint}}"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(roma_request_duration_seconds_bucket[1m])) by (le, endpoint))",
+          "legendFormat": "p95 {{endpoint}}"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(roma_request_duration_seconds_bucket[1m])) by (le, endpoint))",
+          "legendFormat": "p99 {{endpoint}}"
+        }
       ]
     },
     {
-      "id": 4, "title": "Job Submission Rate (per min)",
-      "type": "stat", "gridPos": {"x": 12, "y": 8, "w": 6, "h": 4},
-      "targets": [{"expr": "round(sum(rate(roma_jobs_total[1m])) * 60, 1)"}],
-      "fieldConfig": {"defaults": {"unit": "reqpm"}}
-    },
-    {
-      "id": 5, "title": "Error Rate (5xx %)",
-      "type": "stat", "gridPos": {"x": 18, "y": 8, "w": 6, "h": 4},
-      "targets": [{
-        "expr": "round(sum(rate(roma_errors_total{status_code=~\"5..\"}[1m])) / sum(rate(roma_requests_total[1m])) * 100, 2)"
-      }],
-      "fieldConfig": {"defaults": {"unit": "percent", "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 5}]}}}
-    },
-    {
-      "id": 6, "title": "Billing Events",
-      "type": "timeseries", "gridPos": {"x": 0, "y": 16, "w": 8, "h": 8},
-      "targets": [{
-        "expr": "sum(rate(roma_billing_events_total[5m])) by (event_type, plan)",
-        "legendFormat": "{{event_type}} ({{plan}})"
-      }]
-    },
-    {
-      "id": 7, "title": "CloudPayments — Success vs Failures",
-      "type": "timeseries", "gridPos": {"x": 8, "y": 16, "w": 8, "h": 8},
+      "id": 3,
+      "title": "Active Jobs & Queue Depth",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
       "targets": [
-        {"expr": "rate(roma_cloudpayments_success_total[5m])", "legendFormat": "success"},
-        {"expr": "rate(roma_cloudpayments_failure_total[5m])", "legendFormat": "failed"}
+        {
+          "expr": "sum(roma_jobs_active) by (tenant_id)",
+          "legendFormat": "active \u2014 {{tenant_id}}"
+        },
+        {
+          "expr": "sum(roma_queue_depth) by (tenant_id)",
+          "legendFormat": "queue \u2014 {{tenant_id}}"
+        }
       ]
     },
     {
-      "id": 8, "title": "Auth Failures",
-      "type": "timeseries", "gridPos": {"x": 16, "y": 16, "w": 8, "h": 8},
-      "targets": [{
-        "expr": "sum(rate(roma_auth_failures_total[5m])) by (reason)",
-        "legendFormat": "{{reason}}"
-      }]
+      "id": 4,
+      "title": "Job Submission Rate (per min)",
+      "type": "stat",
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "round(sum(rate(roma_jobs_total[1m])) * 60, 1)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqpm"
+        }
+      }
     },
     {
-      "id": 9, "title": "Errors by Endpoint (last 5 min)",
-      "type": "bargauge", "gridPos": {"x": 0, "y": 24, "w": 12, "h": 8},
-      "targets": [{
-        "expr": "sum(increase(roma_errors_total[5m])) by (endpoint, status_code)",
-        "legendFormat": "{{endpoint}} {{status_code}}"
-      }]
+      "id": 5,
+      "title": "Error Rate (5xx %)",
+      "type": "stat",
+      "gridPos": {
+        "x": 18,
+        "y": 8,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "round(sum(rate(roma_errors_total{status_code=~\"5..\"}[1m])) / sum(rate(roma_requests_total[1m])) * 100, 2)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        }
+      }
     },
     {
-      "id": 10, "title": "HTTP Status Codes Heatmap",
-      "type": "heatmap", "gridPos": {"x": 12, "y": 24, "w": 12, "h": 8},
-      "targets": [{
-        "expr": "sum(rate(roma_requests_total[1m])) by (status)",
-        "legendFormat": "{{status}}"
-      }]
+      "id": 6,
+      "title": "Billing Events",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(roma_billing_events_total[5m])) by (event_type, plan)",
+          "legendFormat": "{{event_type}} ({{plan}})"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "CloudPayments \u2014 Success vs Failures",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 8,
+        "y": 16,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "rate(roma_cloudpayments_success_total[5m])",
+          "legendFormat": "success"
+        },
+        {
+          "expr": "rate(roma_cloudpayments_failure_total[5m])",
+          "legendFormat": "failed"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Auth Failures",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 16,
+        "y": 16,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(roma_auth_failures_total[5m])) by (reason)",
+          "legendFormat": "{{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Errors by Endpoint (last 5 min)",
+      "type": "bargauge",
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(roma_errors_total[5m])) by (endpoint, status_code)",
+          "legendFormat": "{{endpoint}} {{status_code}}"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "HTTP Status Codes Heatmap",
+      "type": "heatmap",
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(roma_requests_total[1m])) by (status)",
+          "legendFormat": "{{status}}"
+        }
+      ]
     }
-  ]
+  ],
+  "schemaVersion": 39
 }

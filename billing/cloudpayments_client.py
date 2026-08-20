@@ -12,7 +12,7 @@ import hmac
 import json
 import logging
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -134,17 +134,20 @@ class CloudPaymentsClient:
 
     def verify_webhook(self, body: bytes, signature_header: str | None) -> bool:
         """
-        Verify Content-HMAC signature from CloudPayments webhook.
-        CloudPayments signs the body with HMAC-SHA256 using the API secret.
+        Verify HMAC-SHA256 webhook signature from CloudPayments.
+        Priority: webhook_secret -> api_secret (fallback).
         """
-        if not signature_header or not self.config.api_secret:
+        if not signature_header:
+            return False
+        secret = (self.config.webhook_secret or self.config.api_secret or "").strip()
+        if not secret:
             return False
         expected = hmac.new(
-            self.config.api_secret.encode(),
+            secret.encode("utf-8"),
             body,
             hashlib.sha256,
         ).hexdigest()
-        return hmac.compare_digest(expected, signature_header)
+        return hmac.compare_digest(expected, signature_header.strip())
 
     # ── internal ───────────────────────────────────────────────
 

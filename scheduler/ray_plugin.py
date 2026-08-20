@@ -6,8 +6,6 @@ No ray library required — pure HTTP to Ray Job Submission API.
 
 import logging
 import os
-import time
-from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 import json

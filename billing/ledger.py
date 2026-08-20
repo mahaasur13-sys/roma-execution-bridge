@@ -16,8 +16,6 @@ class BillingLedger:
             "tenant_id": tenant_id,
             "type": entry_type,
             "amount": amount,
-    "partner_id": partner_id or "platform",
-    "revenue_share_percent_applied": revenue_share_percent,
             "currency": currency,
             "metadata": metadata or {},
         }
@@ -56,7 +54,7 @@ class BillingLedger:
         for t in by_tenant:
             by_tenant[t]["net"] = by_tenant[t]["credits"] - by_tenant[t]["debits"]
         return by_tenant
-    # ─── Revenue-Share Extension ─────────────────────────────────────────────
+
     def record_revenue_share(self, tenant_id: str, amount_cents: int,
                             source_invoice: str, rate: float) -> None:
         now = int(time.time())
@@ -67,6 +65,7 @@ class BillingLedger:
             VALUES (?, ?, ?, ?, ?, ?, 0)
         """, (tenant_id, amount_cents, source_invoice, rate, period, now))
         self._conn.commit()
+
     def get_monthly_revenue(self, tenant_id: str, month: Optional[str] = None) -> float:
         if month is None:
             month = time.strftime("%Y-%m")
@@ -76,6 +75,7 @@ class BillingLedger:
             WHERE tenant_id = ? AND strftime('%%Y-%%m', datetime(timestamp, 'unixepoch')) = ?
         """, (tenant_id, month))
         return self._cur.fetchone()[0] / 100.0
+
     def get_pending_revenue_share(self, tenant_id: str) -> int:
         self._cur.execute("""
             SELECT COALESCE(SUM(amount_cents), 0)
@@ -98,7 +98,3 @@ def simulate_ledger() -> None:
 
 if __name__ == "__main__":
     simulate_ledger()
-
-# Revenue-share extension (dev helper only)
-# NOTE: record_revenue_share, get_monthly_revenue, get_pending_revenue_share
-# are already added as class methods above in the class definition
