@@ -1314,7 +1314,7 @@
             }
           },
           "402": {
-            "description": "Spend cap exceeded. Payment required.",
+            "description": "Spend cap exceeded",
             "content": {
               "application/json": {
                 "schema": {
@@ -2339,6 +2339,94 @@
           }
         }
       }
+    },
+    "/api/v1/tenants/{tenant_id}/billing": {
+      "get": {
+        "summary": "Get tenant billing ledger",
+        "description": "Full append-only billing ledger: GPU-sec debits, token debits, credits, balance.",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Billing entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingUsage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid API key"
+          },
+          "402": {
+            "description": "Spend cap exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tenants/{tenant_id}/usage": {
+      "get": {
+        "summary": "Get tenant usage stats",
+        "description": "Cumulative GPU seconds, tokens, and cost for a tenant.",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Usage statistics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingUsage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid API key"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3281,12 +3369,12 @@
           "input_tokens": {
             "type": "integer",
             "default": 0,
-            "description": "Number of input tokens (LLM tasks). Charged at $1/M input."
+            "example": 1500
           },
           "output_tokens": {
             "type": "integer",
             "default": 0,
-            "description": "Number of output tokens (LLM tasks). Charged at $2/M output. Updated on job completion."
+            "example": 500
           },
           "plan": {
             "type": "string",
@@ -3296,8 +3384,7 @@
               "start",
               "pro",
               "enterprise"
-            ],
-            "description": "Billing plan for spend-cap enforcement."
+            ]
           }
         },
         "additionalProperties": false,
@@ -3342,13 +3429,11 @@
           },
           "estimated_cost_usd": {
             "type": "number",
-            "format": "float",
-            "description": "Estimated cost for this job (GPU-sec + tokens)."
+            "example": 0.0015
           },
           "spend_cap_remaining": {
             "type": "number",
-            "format": "float",
-            "description": "Remaining spend cap budget after this job."
+            "example": 49.999
           }
         },
         "type": "object",
@@ -3609,27 +3694,28 @@
         "type": "object",
         "properties": {
           "tenant_id": {
-            "type": "string"
+            "type": "string",
+            "example": "tenant-pro-01"
           },
           "total_gpu_seconds": {
             "type": "number",
-            "description": "Cumulative GPU seconds used"
+            "example": 3600.0
           },
           "total_input_tokens": {
             "type": "integer",
-            "description": "Cumulative input tokens"
+            "example": 1500000
           },
           "total_output_tokens": {
             "type": "integer",
-            "description": "Cumulative output tokens"
+            "example": 750000
           },
           "total_cost_usd": {
             "type": "number",
-            "description": "Total USD charged"
+            "example": 3.036
           },
           "spend_cap_usd": {
             "type": "number",
-            "description": "Plan spend cap (0=free, -1=unlimited)"
+            "example": 50.0
           },
           "plan": {
             "type": "string",
@@ -3642,7 +3728,15 @@
           },
           "balance_usd": {
             "type": "number",
-            "description": "Current balance in ledger"
+            "example": 3.036
+          },
+          "remaining_cap_usd": {
+            "type": "number",
+            "example": 46.964
+          },
+          "alert_90pct": {
+            "type": "boolean",
+            "example": false
           }
         }
       },
