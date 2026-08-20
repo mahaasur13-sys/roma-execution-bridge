@@ -115,6 +115,23 @@ TEMPLATES = {
   <p>Tenant <strong>{{ tenant_name }}</strong> has a balance of <strong style="color:#dc2626">${{ balance }}</strong>.</p>
   <p style="color:#475569">Top up at {{ dashboard_url }}</p>
 </div></body></html>""",
+    "verify_email": """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Verify your email</title></head>
+<body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+<div style="background:{{ brand.get('primary_color','#6366f1') }};color:white;padding:24px;text-align:center;border-radius:8px 8px 0 0">
+  <h1>{{ brand.get('app_name','ROMA') }}</h1>
+</div>
+<div style="background:#f8fafc;padding:32px;border-radius:0 0 8px 8px;border:1px solid #e2e8f0">
+  <h2 style="color:#1e293b;margin-top:0">Verify your email</h2>
+  <p style="color:#475569;line-height:1.6">Welcome, {{ tenant_name }}! Please click the button below to verify your email address and activate your account.</p>
+  <p style="text-align:center;margin:32px 0">
+    <a href="{{ verification_url }}" style="display:inline-block;background:{{ brand.get('primary_color','#6366f1') }};color:white;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:bold;font-size:16px">Verify Email</a>
+  </p>
+  <p style="color:#94a3b8;font-size:13px">Or copy this link: <br><code>{{ verification_url }}</code></p>
+  <p style="color:#94a3b8;font-size:13px;margin-top:24px">This link expires in {{ expiry_hours }} hours. You can request a new one at any time.</p>
+</div>
+<div style="text-align:center;color:#94a3b8;font-size:12px;margin-top:24px">Powered by <a href="https://roma.ai" style="color:#94a3b8">ROMA</a></div>
+</body></html>""",
 }
 
 

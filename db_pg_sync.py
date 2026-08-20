@@ -380,3 +380,205 @@ def list_tenants(conn) -> list[dict]:
     cur.execute("SELECT * FROM tenants ORDER BY created_at DESC")
     cols = [desc[0] for desc in cur.description]
     return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+
+# ── Email Verification ──────────────────────────────────────
+
+def create_user_with_password(conn, user_id: str, email: str, name: str, tenant_id: str, api_key: str, password_hash: str, verification_token: str, token_expires: str) -> dict:
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO users (id, email, name, provider, tenant_id, api_key, password_hash, verification_token, verification_token_expires_at, email_verified) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,false) RETURNING *",
+        (user_id, email, name, 'email', tenant_id, api_key, password_hash, verification_token, token_expires)
+    )
+    cols = [desc[0] for desc in cur.description]
+    return dict(zip(cols, cur.fetchone()))
+
+
+def get_user_by_verification_token(conn, token: str) -> dict | None:
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users WHERE verification_token = %s", (token,))
+    row = cur.fetchone()
+    if row:
+        cols = [desc[0] for desc in cur.description]
+        return dict(zip(cols, row))
+    return None
+
+
+def verify_user_email(conn, user_id: str) -> None:
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE users SET email_verified=true, verification_token=NULL, verification_token_expires_at=NULL, updated_at=now() WHERE id=%s",
+        (user_id,)
+    )
+    conn.commit()
+
+
+def set_verification_token(conn, user_id: str, token: str, expires_at) -> None:
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE users SET verification_token=%s, verification_token_expires_at=%s, updated_at=now() WHERE id=%s",
+        (token, expires_at, user_id)
+    )
+    conn.commit()
+
+
+# ── Email Verification ──────────────────────────────────────
+
+def create_user_with_password(conn, user_id: str, email: str, name: str, tenant_id: str, api_key: str, password_hash: str, verification_token: str, token_expires: str) -> dict:
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO users (id, email, name, provider, tenant_id, api_key, password_hash,
+            email_verified, verification_token, verification_token_expires_at)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT (id) DO UPDATE SET
+            email=EXCLUDED.email, name=EXCLUDED.name, password_hash=EXCLUDED.password_hash,
+            verification_token=EXCLUDED.verification_token,
+            verification_token_expires_at=EXCLUDED.verification_token_expires_at,
+            updated_at=now()
+        RETURNING *""",
+        (user_id, email, name, "email", tenant_id, api_key, password_hash, False, verification_token, token_expires)
+    )
+    cols = [desc[0] for desc in cur.description]
+    row = cur.fetchone()
+    # Hide password_hash from returned dict
+    result = dict(zip(cols, row))
+    result.pop("password_hash", None)
+    return result
+
+
+def get_user_by_verification_token(conn, token: str) -> dict | None:
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users WHERE verification_token = %s", (token,))
+    row = cur.fetchone()
+    if row:
+        cols = [desc[0] for desc in cur.description]
+        return dict(zip(cols, row))
+    return None
+
+
+def verify_user_email(conn, user_id: str) -> None:
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE users SET email_verified=true, verification_token=NULL, "
+        "verification_token_expires_at=NULL, updated_at=now() WHERE id=%s",
+        (user_id,)
+    )
+    conn.commit()
+
+
+def set_verification_token(conn, user_id: str, token: str, expires_at: str) -> None:
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE users SET verification_token=%s, verification_token_expires_at=%s, "
+        "updated_at=now() WHERE id=%s",
+        (token, expires_at, user_id)
+    )
+    conn.commit()
+
+def create_email_user(conn, email: str, password_hash: str, name: str, tenant_id: str, api_key: str) -> dict:
+    user_id = f"user-{email}"
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO users (id, email, name, provider, tenant_id, api_key, password_hash, email_verified) "
+        "VALUES (%s,%s,%s,'email',%s,%s,%s,false) "
+        "ON CONFLICT (id) DO NOTHING RETURNING *",
+        (user_id, email, name, tenant_id, api_key, password_hash)
+    )
+    row = cur.fetchone()
+    if row:
+        cols = [desc[0] for desc in cur.description]
+        return dict(zip(cols, row))
+    return get_user_by_email(conn, email)
+
+def mark_email_verified_pg(conn, email: str) -> None:
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE users SET email_verified = true, verification_token = NULL, "
+        "verification_token_expires_at = NULL, updated_at = now() WHERE email = %s",
+        (email,),
+    )
+    conn.commit()
+
+def get_user_by_verification_token(conn, token_hash: str) -> dict | None:
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT * FROM users WHERE verification_token = %s "
+        "AND verification_token_expires_at > now()",
+        (token_hash,),
+    )
+    row = cur.fetchone()
+    if row:
+        cols = [desc[0] for desc in cur.description]
+        return dict(zip(cols, row))
+    return None
+
+def store_verification_token(conn, email: str, token_hash: str, expires_at: str) -> None:
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE users SET verification_token = %s, verification_token_expires_at = %s, "
+        "updated_at = now() WHERE email = %s",
+        (token_hash, expires_at, email),
+    )
+    conn.commit()
+
+
+# ── Email Verification ────────────────────────────────────────
+
+def create_email_user(conn, user_id: str, email: str, name: str, tenant_id: str, api_key: str, password_hash: str) -> dict:
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO users (id, email, name, provider, tenant_id, api_key, password_hash, email_verified) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,false) "
+        "ON CONFLICT (id) DO UPDATE SET email=EXCLUDED.email, name=EXCLUDED.name "
+        "RETURNING *",
+        (user_id, email, name, "email", tenant_id, api_key, password_hash)
+    )
+    cols = [desc[0] for desc in cur.description]
+    return dict(zip(cols, cur.fetchone()))
+
+
+def set_verification_token(conn, email: str, token: str, expires_at):
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE users SET verification_token=%s, verification_token_expires_at=%s, updated_at=now() "
+        "WHERE email=%s",
+        (token, expires_at, email)
+    )
+
+
+def find_user_by_verification_token(conn, token: str) -> dict | None:
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users WHERE verification_token=%s", (token,))
+    row = cur.fetchone()
+    if row:
+        cols = [desc[0] for desc in cur.description]
+        return dict(zip(cols, row))
+    return None
+
+
+def mark_email_verified(conn, email: str):
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE users SET email_verified=true, verification_token=NULL, "
+        "verification_token_expires_at=NULL, updated_at=now() WHERE email=%s",
+        (email,)
+    )
+
+
+def find_user_by_api_key(conn, api_key: str) -> dict | None:
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users WHERE api_key=%s", (api_key,))
+    row = cur.fetchone()
+    if row:
+        cols = [desc[0] for desc in cur.description]
+        return dict(zip(cols, row))
+    return None
+
+def update_verification_token(conn, user_id: str, token: str, expires_at: str) -> None:
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE users SET verification_token=%s, verification_token_expires_at=%s, updated_at=now() WHERE id=%s",
+        (token, expires_at, user_id)
+    )
+    conn.commit()

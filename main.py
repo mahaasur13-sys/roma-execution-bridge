@@ -23,7 +23,9 @@ import ipaddress
 import time
 import traceback
 import uuid
-from datetime import datetime
+import secrets
+import hashlib
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -57,6 +59,18 @@ from billing.pg_ledger import PGBillingLedger as BillingLedger
 metering_engine = MeteringEngine()
 billing_ledger = BillingLedger()
 alert_dispatcher = AlertDispatcher()
+
+from saas.email.service import EmailService, EmailProvider as _EmailProvider
+email_service = EmailService(
+    provider=_EmailProvider[os.environ.get("EMAIL_PROVIDER", "console").upper()] if os.environ.get("EMAIL_PROVIDER", "console").upper() in ("SMTP","SENDGRID","RESEND","CONSOLE") else _EmailProvider.CONSOLE,
+    smtp_host=os.environ.get("EMAIL_SMTP_HOST", "smtp.gmail.com"),
+    smtp_port=int(os.environ.get("EMAIL_SMTP_PORT", "587")),
+    smtp_user=os.environ.get("EMAIL_SMTP_USER", ""),
+    smtp_password=os.environ.get("EMAIL_SMTP_PASSWORD", ""),
+    from_email=os.environ.get("FROM_EMAIL", "beta@roma-execution-bridge.io"),
+    from_name=os.environ.get("FROM_NAME", "ROMA Platform"),
+    sendgrid_api_key=os.environ.get("SENDGRID_API_KEY", ""),
+)
 _burn_tracker: dict[str, list[tuple[float, float]]] = {}
 _http_request_count = 0
 _billing_event_count = 0
@@ -258,6 +272,11 @@ def verify_api_key(x_api_key: str = Header(None)) -> dict:
     if not tenant:
         raise HTTPException(status_code=401, detail="Invalid API key")
     tenant["api_key"] = x_api_key
+    
+    # Check email verification for API endpoints (skip for auth/browser-only endpoints — handled by caller)
+    verif_status = is_email_verified(x_api_key)
+    if not verif_status:
+        raise HTTPException(status_code=403, detail="Email not verified. Please verify your email first.")
     return tenant
 
 # ============================================
@@ -1601,6 +1620,7 @@ async def ws_worker(ws: WebSocket):
 # ============================================
 
 from auth.sessions import create_session, get_session, delete_session
+from auth.verification import create_verification, verify_token, is_email_verified
 from starlette.responses import RedirectResponse
 
 LOGIN_PAGE = """<!DOCTYPE html>
@@ -1688,6 +1708,120 @@ async def logout(request: Request):
 
 
 # ============================================
+
+# ============================================
+# AUTH — Email Signup + Verification
+# ============================================
+
+VERIFICATION_TOKEN_EXPIRY_HOURS = int(os.environ.get("VERIFICATION_TOKEN_EXPIRY_HOURS", "24"))
+VERIFICATION_BASE_URL = os.environ.get("VERIFICATION_BASE_URL", "https://roma-execution-bridge-asurdev.zocomputer.io")
+
+@app.post("/auth/signup", status_code=201)
+async def signup(payload: dict, request: Request):
+    """Register new user with email/password. Sends verification email."""
+    email = (payload.get("email") or "").strip().lower()
+    password = (payload.get("password") or "")
+    name = (payload.get("name") or email.split("@")[0])
+    plan = payload.get("plan", "free")
+    
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="Email and password are required")
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    
+    existing = db.get_user_by_email(email)
+    if existing:
+        raise HTTPException(status_code=409, detail="Email already registered")
+    
+    user_id = str(uuid.uuid4())
+    tenant_id = f"tenant-{str(uuid.uuid4())[:8]}"
+    api_key = f"roma-{str(uuid.uuid4())[:12]}"
+    password_hash = hashlib.sha256(password.encode() + user_id.encode()).hexdigest()
+    
+    token, expires_at = create_verification(user_id)
+    from auth.verification import generate_token
+    token = generate_token()
+    expires_at = (datetime.now(timezone.utc) + timedelta(hours=VERIFICATION_TOKEN_EXPIRY_HOURS)).isoformat()
+    verification_url = f"{VERIFICATION_BASE_URL}/auth/verify-email?token={token}"
+    
+    db.seed_tenants({api_key: {"tenant_id": tenant_id, "plan": plan}})
+    API_KEYS[api_key] = {"tenant_id": tenant_id, "plan": plan, "email_verified": False}
+    db.create_user_with_password(user_id, email, name, tenant_id, api_key, password_hash, token, expires_at)
+    
+    try:
+        email_service.send_verification_email(
+            to_email=email,
+            tenant_name=name,
+            verification_url=verification_url,
+            brand={"app_name": "ROMA", "primary_color": "#6366f1"},
+            expiry_hours=VERIFICATION_TOKEN_EXPIRY_HOURS,
+        )
+        logger.info("verification_email_sent", extra={"email": email, "tenant_id": tenant_id})
+    except Exception as e:
+        logger.warning("verification_email_failed", extra={"email": email, "error": str(e)})
+    
+    return {
+        "status": "pending",
+        "message": "Account created. Please check your email to verify your address.",
+        "tenant_id": tenant_id,
+    }
+
+
+@app.get("/auth/verify-email")
+async def verify_email_endpoint(token: str):
+    """Verify email address. Can be called via browser (GET) or API (POST)."""
+    result = verify_token(token)
+    if not result:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification token")
+    
+    user_id = result["user_id"]
+    user = db.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    db.mark_email_verified(user["email"])
+    api_key = user.get("api_key", "")
+    if api_key and api_key in API_KEYS:
+        API_KEYS[api_key]["email_verified"] = True
+    
+    return {
+        "status": "verified",
+        "message": "Email verified successfully. Your account is now active.",
+        "email": user["email"],
+    }
+
+
+@app.post("/auth/resend-verification")
+async def resend_verification(payload: dict):
+    """Resend verification email."""
+    email = (payload.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required")
+    
+    user = db.get_user_by_email(email)
+    if not user:
+        raise HTTPException(status_code=404, detail="No account found with this email")
+    if user.get("email_verified"):
+        return {"status": "already_verified", "message": "Email is already verified"}
+    
+    token, expires_at = create_verification(user["id"])
+    verification_url = f"{VERIFICATION_BASE_URL}/auth/verify-email?token={token}"
+    db.update_verification_token(user["id"], token, expires_at)
+    
+    try:
+        email_service.send_verification_email(
+            to_email=email,
+            tenant_name=user.get("name", email),
+            verification_url=verification_url,
+            brand={"app_name": "ROMA", "primary_color": "#6366f1"},
+            expiry_hours=VERIFICATION_TOKEN_EXPIRY_HOURS,
+        )
+        logger.info("verification_resent", extra={"email": email})
+    except Exception as e:
+        logger.warning("resend_verification_failed", extra={"email": email, "error": str(e)})
+    
+    return {"status": "sent", "message": "Verification email resent. Please check your inbox."}
+
 # OAUTH2 — Google + GitHub Login
 # ============================================
 

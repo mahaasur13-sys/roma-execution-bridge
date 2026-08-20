@@ -1588,3 +1588,167 @@ def _find_tenant_by_key_sqlite(api_key_hash: str) -> dict | None:
         return None
     return {"tenant_id": row[0], "name": row[1], "plan": row[2], "api_key": row[3]}
 
+
+
+# ── Email Verification ──────────────────────────────────────
+
+def create_user_with_password(user_id: str, email: str, name: str, tenant_id: str, api_key: str, password_hash: str, verification_token: str, token_expires) -> dict:
+    if _pg_enabled():
+        from db_pg_sync import create_user_with_password as pg_fn
+        conn = _pg_conn()
+        try:
+            result = pg_fn(conn, user_id, email, name, tenant_id, api_key, password_hash, verification_token, token_expires)
+            conn.commit()
+            return result
+        finally:
+            _pg_return(conn)
+    raise RuntimeError("create_user_with_password requires PG")
+
+
+def get_user_by_verification_token(token: str) -> dict | None:
+    if _pg_enabled():
+        from db_pg_sync import get_user_by_verification_token as pg_fn
+        conn = _pg_conn()
+        try:
+            return pg_fn(conn, token)
+        finally:
+            _pg_return(conn)
+    import db
+    return db.get_user_by_email(token)  # fallback
+
+
+def verify_user_email(user_id: str) -> None:
+    if _pg_enabled():
+        from db_pg_sync import verify_user_email as pg_fn
+        conn = _pg_conn()
+        try:
+            pg_fn(conn, user_id)
+        finally:
+            _pg_return(conn)
+    else:
+        import db
+        # in-memory: just log
+        logger.info("email_verified user_id=%s (no PG)", user_id)
+
+
+def set_verification_token(user_id: str, token: str, expires_at) -> None:
+    if _pg_enabled():
+        from db_pg_sync import set_verification_token as pg_fn
+        conn = _pg_conn()
+        try:
+            pg_fn(conn, user_id, token, expires_at)
+        finally:
+            _pg_return(conn)
+    else:
+        logger.info("set_verification_token user_id=%s (no PG)", user_id)
+
+def create_user_with_email(email: str, password_hash: str, name: str, tenant_id: str, api_key: str) -> dict:
+    if _pg_enabled():
+        from db_pg_sync import create_email_user as pg_fn
+        conn = _pg_conn()
+        try:
+            result = pg_fn(conn, email, password_hash, name, tenant_id, api_key)
+            conn.commit()
+            return result
+        finally:
+            _pg_return(conn)
+    raise RuntimeError("email signup requires PostgreSQL")
+
+def mark_user_email_verified(email: str) -> None:
+    if _pg_enabled():
+        from db_pg_sync import mark_email_verified_pg as pg_fn
+        conn = _pg_conn()
+        try:
+            pg_fn(conn, email)
+        finally:
+            _pg_return(conn)
+
+def get_user_by_verification_token(token_hash: str) -> dict | None:
+    if _pg_enabled():
+        from db_pg_sync import get_user_by_verification_token as pg_fn
+        conn = _pg_conn()
+        try:
+            return pg_fn(conn, token_hash)
+        finally:
+            _pg_return(conn)
+    return None
+
+def store_user_verification_token(email: str, token_hash: str, expires_at: str) -> None:
+    if _pg_enabled():
+        from db_pg_sync import store_verification_token as pg_fn
+        conn = _pg_conn()
+        try:
+            pg_fn(conn, email, token_hash, expires_at)
+        finally:
+            _pg_return(conn)
+
+
+# ── Email Verification ────────────────────────────────────────
+
+def create_email_user(user_id: str, email: str, name: str, tenant_id: str, api_key: str, password_hash: str) -> dict:
+    if _pg_enabled():
+        from db_pg_sync import create_email_user as pg_fn
+        conn = _pg_conn()
+        try:
+            result = pg_fn(conn, user_id, email, name, tenant_id, api_key, password_hash)
+            conn.commit()
+            return result
+        finally:
+            _pg_return(conn)
+    import db
+    return db.upsert_oauth_user(user_id, email, name, "email", tenant_id, api_key)
+
+
+def set_verification_token(email: str, token: str, expires_at) -> None:
+    if _pg_enabled():
+        from db_pg_sync import set_verification_token as pg_fn
+        conn = _pg_conn()
+        try:
+            pg_fn(conn, email, token, expires_at)
+            conn.commit()
+        finally:
+            _pg_return(conn)
+
+
+def find_user_by_verification_token(token: str) -> dict | None:
+    if _pg_enabled():
+        from db_pg_sync import find_user_by_verification_token as pg_fn
+        conn = _pg_conn()
+        try:
+            return pg_fn(conn, token)
+        finally:
+            _pg_return(conn)
+    return None
+
+
+def mark_email_verified(email: str) -> None:
+    if _pg_enabled():
+        from db_pg_sync import mark_email_verified as pg_fn
+        conn = _pg_conn()
+        try:
+            pg_fn(conn, email)
+            conn.commit()
+        finally:
+            _pg_return(conn)
+
+
+def find_user_by_api_key(api_key: str) -> dict | None:
+    if _pg_enabled():
+        from db_pg_sync import find_user_by_api_key as pg_fn
+        conn = _pg_conn()
+        try:
+            return pg_fn(conn, api_key)
+        finally:
+            _pg_return(conn)
+    import db
+    return db.get_user_by_api_key(api_key)
+
+def update_verification_token(user_id: str, token: str, expires_at: str) -> None:
+    if _pg_enabled():
+        from db_pg_sync import update_verification_token as pg_fn
+        conn = _pg_conn()
+        try:
+            pg_fn(conn, user_id, token, expires_at)
+        finally:
+            _pg_return(conn)
+        
