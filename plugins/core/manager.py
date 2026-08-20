@@ -83,6 +83,10 @@ class PluginManager:
             raise PluginNotFoundError(f"Plugin '{name}' not registered")
         return plugin
 
+    def list_enabled(self) -> list[PluginInstance]:
+        """Return all currently enabled plugins."""
+        return [p for p in self._registry.values() if p.is_enabled()]
+
     def get_enabled(self, name: str) -> PluginInstance:
         """Get a plugin, raising if not enabled."""
         plugin = self.get(name)
