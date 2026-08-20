@@ -2,12 +2,13 @@
 ServiceMonitor for Prometheus Operator scraping
 Enables: prometheus.io/scrape: "true", prometheus.io/port: "8080", prometheus.io/path: "/metrics"
 */}}
-{{- if and .Values.apiServer.enabled .Values.serviceMonitor.enabled }}
+{{- $svcMon := .Values.apiServer.serviceMonitor }}
+{{- if and .Values.apiServer.enabled $svcMon.enabled }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: {{ include "roma-execution-bridge.fullname" . }}-api-server
-  namespace: {{ .Values.serviceMonitor.namespace | default "monitoring" }}
+  namespace: {{ $svcMon.namespace | default "monitoring" }}
   labels:
     {{- include "roma-execution-bridge.labels" . | nindent 4 }}
     app.kubernetes.io/component: api-server
@@ -21,6 +22,6 @@ spec:
   endpoints:
     - port: http
       path: /metrics
-      interval: {{ .Values.serviceMonitor.interval | default "30s" }}
+      interval: {{ $svcMon.interval | default "30s" }}
       scrapeTimeout: 10s
 {{- end }}
