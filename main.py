@@ -1093,14 +1093,14 @@ async def get_usage(key_info: dict = Depends(verify_api_key)):
 @limiter.limit("10/minute")
 
 @app.post("/billing/top-up")
-async def top_up_balance(payload: dict, tenant: dict = Depends(verify_api_key)):
+async def top_up_balance(request: Request, payload: dict, tenant: dict = Depends(verify_api_key)):
     """Admin/self-service balance top-up for testing. Credits tenant balance."""
     amount = float(payload.get("amount", 0))
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
     tenant_id = payload.get("tenant_id") or tenant["tenant_id"]
-    entry_id = billing_ledger.credit(tenant_id, amount, "manual_topup", 
-                                      f"Manual top-up by {tenant['tenant_id']}")
+    entry_id = billing_ledger.credit(tenant_id, amount, note=
+        f"Manual top-up by {tenant['tenant_id']}")
     return {"status": "ok", "tenant_id": tenant_id, "amount": amount, "entry_id": entry_id}
 
 @app.post("/billing/create-checkout-session")
