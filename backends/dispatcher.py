@@ -27,7 +27,7 @@ def get_backend() -> BaseBackend:
         _backend = VastaiBackend()
         if not _backend.enabled:
             logger.warning(
-                "VASTAI selected but VASTAI_API_KEY not configured — falling back to local"
+                "VASTAI selected but VAST_KEY (or VASTAI_API_KEY) not configured — falling back to local"
             )
             _backend = LocalBackend()
             _backend_name = "local"

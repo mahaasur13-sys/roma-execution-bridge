@@ -100,7 +100,7 @@ class VastaiBackend(BaseBackend):
     backend_name = "vastai"
 
     def __init__(self) -> None:
-        self._api_key = os.getenv("VASTAI_API_KEY", "")
+        self._api_key = (os.getenv("VAST_KEY") or os.getenv("VASTAI_API_KEY", "")).strip()
         self._default_gpu = os.getenv("VASTAI_DEFAULT_GPU", "RTX_4090")
         self._max_price = float(os.getenv("VASTAI_MAX_PRICE", "0.60"))
         self._default_image = os.getenv("VASTAI_IMAGE", "nvidia/cuda:12.1-runtime-ubuntu22.04")
@@ -285,7 +285,7 @@ class VastaiBackend(BaseBackend):
         """Full dispatch: search → rent → launch on Vast.ai."""
 
         if not self.enabled:
-            return {"status": "error", "message": "Vast.ai not configured: missing VASTAI_API_KEY"}
+            return {"status": "error", "message": "Vast.ai not configured: missing VAST_KEY / VASTAI_API_KEY"}
 
         gpu_filter = ctx.instance_type if ctx.instance_type != "any" else self._default_gpu
         max_price = self._gpu_tier.get("max_price", self._max_price)
