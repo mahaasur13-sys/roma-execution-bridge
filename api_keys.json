@@ -18,5 +18,10 @@
   "admin-key-beta-2026": {
     "tenant_id": "tenant-admin",
     "name": "Admin Beta"
+  },
+  "roma-4fb74666-d1e": {
+    "tenant_id": "tenant-e2e-run",
+    "name": "E2E Test Run",
+    "email_verified": true
   }
 }
