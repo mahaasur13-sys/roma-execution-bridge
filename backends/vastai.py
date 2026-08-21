@@ -466,3 +466,48 @@ class VastaiBackend(BaseBackend):
             if cid == contract_id:
                 return jid
         return None
+
+    async def run_command(self, ctx: JobContext, command: str, timeout: int = 600) -> dict:
+        """Выполняет команду на Vast.ai инстансе через /api/v0/commands/.
+        
+        Использует эндпоинт vast.ai для отправки команды на арендованный инстанс.
+        Возвращает: {"status": "completed|failed|timeout", "output": "...", "cost": float}
+        """
+        contract_id = self._job_instance_map.get(ctx.job_id)
+        if not contract_id:
+            return {"status": "failed", "output": "", "error": "No contract for this job"}
+
+        try:
+            import base64
+            
+            payload = {
+                "contract": contract_id,
+                "cmd": command,
+                "env": {},
+                "timeout": timeout,
+            }
+            
+            logger.info("vastai.run_command job=%s contract=%d cmd=%.80s", 
+                         ctx.job_id, contract_id, command)
+            
+            result = self._api_post("/api/v0/commands/", json_data=payload)
+            
+            if isinstance(result, dict):
+                output = result.get("output", "") or result.get("stdout", "")
+                exit_code = result.get("exit_code", result.get("return_code", -1))
+                status = "completed" if exit_code == 0 else "failed"
+                
+                logger.info("vastai.command_result job=%s status=%s exit=%d", 
+                            ctx.job_id, status, exit_code)
+                
+                return {
+                    "status": status,
+                    "output": str(output),
+                    "exit_code": exit_code,
+                }
+            
+            return {"status": "failed", "output": str(result), "error": "API returned non-dict"}
+            
+        except Exception as e:
+            logger.error("vastai.run_command_failed job=%s: %s", ctx.job_id, e)
+            return {"status": "failed", "output": "", "error": str(e)}

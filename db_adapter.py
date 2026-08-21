@@ -1823,3 +1823,17 @@ def count_verified_users() -> int:
         finally:
             _pg_return(conn)
     return 0
+
+
+def record_usage_event(tenant_id: str, event_type: str, value: float,
+                       cost_usd: float, job_id: str = "", metadata: dict = None) -> int:
+    if _pg_enabled():
+        from db_pg_sync import record_usage_event as pg_fn
+        conn = _pg_conn()
+        try:
+            eid = pg_fn(conn, tenant_id, event_type, value, cost_usd, job_id, metadata)
+            conn.commit()
+            return eid
+        finally:
+            _pg_return(conn)
+    return -1

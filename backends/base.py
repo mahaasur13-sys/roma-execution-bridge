@@ -55,3 +55,7 @@ class BaseBackend:
     async def get_logs(self, instance_id: str, lines: int = 50) -> str:
         """Get recent logs from instance."""
         raise NotImplementedError
+
+    async def run_command(self, ctx: JobContext, command: str, timeout: int = 600) -> dict:
+        """Выполнить команду на бэкенде. Возвращает {status, output, exit_code}."""
+        raise NotImplementedError

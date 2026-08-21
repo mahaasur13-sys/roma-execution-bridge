@@ -58,6 +58,7 @@ from billing.pg_ledger import PGBillingLedger as BillingLedger
 
 metering_engine = MeteringEngine()
 billing_ledger = BillingLedger()
+from billing.execution_worker import init_worker, execute_and_bill, bill_job
 alert_dispatcher = AlertDispatcher()
 
 from saas.email.service import EmailService, EmailProvider as _EmailProvider
@@ -2918,6 +2919,11 @@ a {{ color:#3b82f6 }}
 async def startup_event():
     try:
         billing_ledger._pg._ensure_pool()
+        try:
+            init_worker()
+            logger.info("execution_worker initialized")
+        except Exception as e:
+            logger.warning("Failed to init execution_worker: %s", e)
         logger.info("PG pool initialized on startup")
     except Exception as e:
         logger.warning("Failed to init PG pool on startup: %s", e)

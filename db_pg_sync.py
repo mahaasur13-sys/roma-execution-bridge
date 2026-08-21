@@ -643,3 +643,18 @@ def count_verified_users(conn) -> int:
     cur = conn.cursor()
     cur.execute("SELECT count(*) FROM users WHERE email_verified=true")
     return cur.fetchone()[0]
+
+
+# ── Usage Events ─────────────────────────────────────────────────
+
+def record_usage_event(conn, tenant_id: str, event_type: str, value: float, cost_usd: float, job_id: str = "", metadata: dict = None) -> int:
+    import json
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO usage_events (tenant_id, event_type, value, cost_usd, job_id, metadata) "
+        "VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
+        (tenant_id, event_type, value, cost_usd, job_id, json.dumps(metadata or {}))
+    )
+    eid = cur.fetchone()[0]
+    conn.commit()
+    return eid
