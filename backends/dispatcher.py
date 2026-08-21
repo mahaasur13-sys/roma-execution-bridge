@@ -56,18 +56,26 @@ def list_backends() -> dict:
 
 async def dispatch_job(job_id: str = "", tenant_id: str = "", payload: dict = None) -> dict:
     """Route job to active backend."""
+    p = payload or {}
     ctx = JobContext(
         job_id=job_id,
         tenant_id=tenant_id,
-        payload=payload or {},
+        instance_type=p.get("instance_type", "any"),
+        image=p.get("image", ""),
+        gpu_required=p.get("gpu_required", False),
+        priority=p.get("priority", 5),
+        payload=p,
     )
     backend = get_backend()
+    return await backend.dispatch(ctx)
     return await backend.dispatch(ctx)
 
 
 async def backend_cancel_job(job_id: str, tenant_id: str = "") -> dict:
     """Cancel job on active backend (adapter for main.py)."""
     ctx = JobContext(job_id=job_id, tenant_id=tenant_id, payload={})
+    backend = get_backend()
+    return await backend.cancel_job(ctx)
     backend = get_backend()
     return await backend.cancel_job(ctx)
 

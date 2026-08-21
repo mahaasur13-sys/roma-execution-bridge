@@ -16,6 +16,7 @@ if _env_path.exists():
     print(f"✅ Loaded {_env_path}", flush=True)
 
 
+import asyncio
 import json
 import logging
 import os
@@ -58,7 +59,7 @@ from billing.pg_ledger import PGBillingLedger as BillingLedger
 
 metering_engine = MeteringEngine()
 billing_ledger = BillingLedger()
-from billing.execution_worker import init_worker, execute_and_bill, bill_job
+from billing.execution_worker import init_worker, execute_and_bill, bill_job, poll_and_execute
 alert_dispatcher = AlertDispatcher()
 
 from saas.email.service import EmailService, EmailProvider as _EmailProvider
@@ -157,7 +158,7 @@ def _check_spend_cap(tenant_id: str, estimated_cost: float, plan_name: str = "fr
     plan = PLANS.get(plan_name, PLANS.get("free", {}))
     cap = plan.get("spend_cap_usd", 0)
     if cap <= 0:
-        return True, ""
+        return True, "Free plan: no spend-cap. Upgrade to Start ($5 cap) for GPU access."
     balance = billing_ledger.get_tenant_balance(tenant_id) if hasattr(billing_ledger, "get_tenant_balance") else billing_ledger.get_balance(tenant_id) if hasattr(billing_ledger, "get_balance") else 0.0
     projected = balance + estimated_cost
     track_spend_cap(tenant_id, plan_name, balance, cap)
@@ -287,7 +288,7 @@ def verify_api_key(x_api_key: str = Header(None)) -> dict:
 # ============================================
 
 PLANS: dict = {
-    "free": {"max_jobs_per_month": 50, "max_gpu_seconds": 0, "spend_cap_usd": 0.00, "overage_rate": 0.0},
+    "free": {"max_jobs_per_month": 50, "max_gpu_seconds": 300, "spend_cap_usd": 0.50, "overage_rate": 0.0},
     "start": {"max_jobs_per_month": 50, "max_gpu_seconds": 3600, "spend_cap_usd": 5.00, "overage_rate": 0.000005},
     "pro": {"max_jobs_per_month": 150, "max_gpu_seconds": 36000, "spend_cap_usd": 50.00, "overage_rate": 0.000003},
     "enterprise": {"max_jobs_per_month": -1, "max_gpu_seconds": -1, "spend_cap_usd": -1.0, "overage_rate": 0.0},
@@ -946,7 +947,7 @@ async def submit_task(payload: RomaTaskInput, request: Request, key_info: dict =
 
     # Audit: job.created
     try:
-        on_job_created(tenant_id, job_id, decision.decision_id)
+        on_job_created(tenant_id, job_id, str(uuid.uuid4()))
     except Exception as exc:
         logger.warning("audit.job_created failed tenant=%s job=%s: %s", tenant_id, job_id, exc)
 
@@ -2935,6 +2936,7 @@ async def startup_event():
         billing_ledger._pg._ensure_pool()
         try:
             init_worker()
+            asyncio.create_task(poll_and_execute())
             logger.info("execution_worker initialized")
         except Exception as e:
             logger.warning("Failed to init execution_worker: %s", e)

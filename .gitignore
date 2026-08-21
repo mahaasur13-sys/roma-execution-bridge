@@ -17,3 +17,7 @@ venv/
 ENV/
 .DS_Store
 usage.json
+api_keys.json
+.env.bak
+.backup_dir/
+.pids/

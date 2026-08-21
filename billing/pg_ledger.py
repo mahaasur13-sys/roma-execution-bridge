@@ -43,6 +43,7 @@ class PGBillingLedger:
 
     def append(self, tenant_id: str, entry_type: str, amount: float,
                currency: str = "USD", metadata: dict = None) -> None:
+        entry_type = entry_type.upper()
         meta_json = json.dumps(metadata or {})
         ledger_id = f"led-{int(time.time() * 1000)}-{hash(tenant_id + entry_type + str(amount)) & 0xFFFFF:05x}"
         try:

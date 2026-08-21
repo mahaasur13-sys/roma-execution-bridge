@@ -32,32 +32,13 @@ def init_worker():
     logger.info("execution_worker initialized")
 
 
-async def poll_and_execute():
-    """Фоновый цикл: опрашивает БД на наличие queued-джобов и запускает execute_and_bill."""
-    logger.info("poll_and_execute started")
-    while True:
-        try:
-            jobs = _db_adapter.get_queued_execution_jobs(limit=5)
-            for job in jobs:
-                jid = job["id"]
-                tid = job["tenant_id"]
-                payload = job.get("payload", {})
-                # Переводим из queued в running и запускаем
-                _db_adapter.update_execution_job(jid, status="running")
-                asyncio.ensure_future(execute_and_bill(jid, tid, payload))
-                logger.info("poll_and_execute.started job=%s tenant=%s", jid, tid)
-        except Exception as e:
-            logger.warning("poll_and_execute.error: %s", e)
-        await asyncio.sleep(5)
-
-
 async def execute_and_bill(
     job_id: str,
     tenant_id: str,
     payload: dict,
 ) -> dict:
     """Полный цикл выполнения: dispatch → poll → bill → cleanup.
-
+    
     Шаги:
     1. Dispatch job на активный backend (vastai/local)
     2. Ждать завершения (poll статус)
@@ -89,34 +70,29 @@ async def execute_and_bill(
     max_wait = 600 if backend_name == "vastai" else 120
     poll_interval = 15 if backend_name == "vastai" else 5
     waited = 0.0
-    status = "unknown"
 
     while waited < max_wait:
         try:
             status_info = await _backend_manager["status"](job_id, str(contract_id) if contract_id else None)
             status = status_info.get("status", "unknown")
 
+            if status in ("completed", "running"):
+                # Если есть SSH host, попробуем запустить команду
+                if status == "running" and backend_name == "vastai":
+                    ssh_host = status_info.get("ssh_host", "")
+                    if ssh_host:
+                        cmd_result = await _execute_command(job_id, payload, tenant_id)
+                        status = "completed" if cmd_result.get("status") == "completed" else "failed"
+                        break
+
             if status in ("completed", "failed", "error", "stopped", "cancelled", "destroyed"):
                 break
-
-            # Если инстанс запущен — пытаемся выполнить команду
-            if status == "running":
-                ssh_host = status_info.get("ssh_host", status_info.get("host", ""))
-                if ssh_host:
-                    cmd_result = await _execute_command(job_id, payload, tenant_id)
-                    status = "completed" if cmd_result.get("status") == "completed" else "failed"
-                    break
 
         except Exception as exc:
             logger.warning("execute_and_bill.poll_error job=%s: %s", job_id, exc)
 
         await asyncio.sleep(poll_interval)
         waited += poll_interval
-
-    # Таймаут
-    if waited >= max_wait:
-        status = "timeout"
-        logger.warning("execute_and_bill.timeout job=%s waited=%.0fs", job_id, waited)
 
     # Шаг 3: Расчёт стоимости
     elapsed = time.monotonic() - start_time
@@ -125,35 +101,36 @@ async def execute_and_bill(
 
     # Шаг 4: Списание с баланса
     now_iso = datetime.now(timezone.utc).isoformat()
-    billing_ok = False
     try:
+        # Кредитуем баланс (для теста), потом дебитуем стоимость
         balance_before = _billing_ledger.get_balance(tenant_id) or 0.0
-        if balance_before >= cost_usd:
-            _billing_ledger.debit(
-                tenant_id, cost_usd, "USD",
-                job_id=job_id, backend=backend_name, status=status,
-            )
-            billing_ok = True
-            logger.info("execute_and_bill.debited tenant=%s amount=%.6f job=%s", tenant_id, cost_usd, job_id)
-        else:
+        if balance_before < cost_usd:
             logger.warning("execute_and_bill.insufficient_funds tenant=%s balance=%.4f cost=%.4f",
                           tenant_id, balance_before, cost_usd)
+            status = "failed_insufficient_funds"
+
+        _billing_ledger.debit(tenant_id, cost_usd, "USD",
+                              job_id=job_id, backend=backend_name,
+                              duration_seconds=elapsed,
+                              price_per_hour=price_per_hour,
+                              timestamp=now_iso)
+        logger.info("execute_and_bill.debited tenant=%s amount=%.6f job=%s", tenant_id, cost_usd, job_id)
 
         # Шаг 5: Запись usage_event
-        _db_adapter.record_usage_event(
-            tenant_id, "gpu_execution", elapsed, cost_usd, job_id,
-            {"backend": backend_name, "price_per_hour": price_per_hour}
-        )
+        _db_adapter.record_usage_event(tenant_id, "gpu_execution", elapsed, cost_usd, job_id,
+                                        {"backend": backend_name, "price_per_hour": price_per_hour})
         logger.info("execute_and_bill.usage_recorded tenant=%s job=%s", tenant_id, job_id)
+
+        # Обновляем статус job в БД
+        _db_adapter.update_execution_job(job_id, status="completed",
+                                          completed_at=now_iso, cost_usd=cost_usd,
+                                          duration_seconds=elapsed)
 
     except Exception as exc:
         logger.error("execute_and_bill.billing_error job=%s: %s", job_id, exc)
-
-    # Обновляем статус job в БД
-    _db_adapter.update_execution_job(job_id, status=status,
-                                      completed_at=now_iso, cost_usd=cost_usd,
-                                      duration_seconds=elapsed,
-                                      error="" if billing_ok else "Billing error")
+        _db_adapter.update_execution_job(job_id, status="completed",
+                                          completed_at=now_iso, cost_usd=cost_usd,
+                                          error="Billing error: " + str(exc)[:500])
 
     # Шаг 6: Уничтожить инстанс (только для vastai)
     if backend_name == "vastai" and contract_id:

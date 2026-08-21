@@ -87,9 +87,10 @@ def _pg_conn():
                 _PG_POOL = psycopg2.pool.ThreadedConnectionPool(
                     _PG_POOL_CONFIG["minconn"], _PG_POOL_CONFIG["maxconn"], _dsn
                 )
+                import re as _re; _masked = _re.sub(r":[^:@]\+@", r":***@", pg_dsn)
                 logger.info("PG pool created: min=%d max=%d, dsn=%s",
                            _PG_POOL_CONFIG["minconn"], _PG_POOL_CONFIG["maxconn"],
-                           pg_dsn[:50] + "..." if len(pg_dsn) > 50 else pg_dsn)
+                           _masked)
     try:
         return _PG_POOL.getconn()
     except psycopg2.pool.PoolError:
@@ -1218,14 +1219,43 @@ def _get_execution_job_sqlite(job_id):
     finally:
         c.close()
 
+def get_queued_execution_jobs(limit: int = 10) -> list[dict]:
+    """Return queued (not yet running) execution jobs, ordered by created_at ASC."""
+    if _pg_enabled():
+        try:
+            conn = _pg_conn()
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT * FROM execution_jobs WHERE status='queued' ORDER BY created_at ASC LIMIT %s",
+                    (limit,),
+                )
+                rows = cur.fetchall()
+                cols = [d[0] for d in cur.description]
+                return [dict(zip(cols, r)) for r in rows] if rows else []
+        except Exception:
+            return []
+        finally:
+            _pg_return(conn)
+    c = _sqlite_conn()
+    try:
+        rows = c.execute(
+            "SELECT * FROM execution_jobs WHERE status='queued' ORDER BY created_at ASC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(zip(cols, r)) for r in rows] if rows else []
+    finally:
+        c.close()
+
+
 
 def update_execution_job(job_id: str, status: str | None = None,
+                         backend: str | None = None, backend_job_id: str | None = None,
                          completed_at: str | None = None, error: str | None = None):
     if _pg_enabled():
-        return _run_async(_update_execution_job_pg(job_id, status, completed_at, error))
-    return _update_execution_job_sqlite(job_id, status, completed_at, error)
+        return _run_async(_update_execution_job_pg(job_id, status, completed_at, error, backend, backend_job_id))
+    return _update_execution_job_sqlite(job_id, status, completed_at, error, backend, backend_job_id)
 
-async def _update_execution_job_pg(job_id, status, completed_at, error):
+async def _update_execution_job_pg(job_id, status, completed_at, error, backend, backend_job_id):
     conn = _pg_conn()
     try:
         with conn.cursor() as cur:
@@ -1249,7 +1279,7 @@ async def _update_execution_job_pg(job_id, status, completed_at, error):
     finally:
         _pg_return(conn)
 
-def _update_execution_job_sqlite(job_id, status, completed_at, error):
+def _update_execution_job_sqlite(job_id, status, completed_at, error, backend, backend_job_id):
     c = _sqlite_conn()
     try:
         sets = []

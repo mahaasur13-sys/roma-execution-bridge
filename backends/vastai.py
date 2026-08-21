@@ -29,16 +29,15 @@ logger = logging.getLogger("roma.backends.vastai")
 
 VASTAI_API_BASE = "https://console.vast.ai/api/v0"
 
-
 # ──────────────────────────────────────────────────────────────────────
 # Data models
 # ──────────────────────────────────────────────────────────────────────
-
 
 @dataclass
 class VastaiOffer:
     """Parsed Vast.ai machine offer."""
 
+    ask_contract_id: int
     instance_id: int
     hostname: str
     gpu_name: str
@@ -54,12 +53,12 @@ class VastaiOffer:
     direct_port_count: int
     country: str = ""
 
-
 @dataclass
 class VastaiInstance:
     """Active rented instance on Vast.ai."""
 
     contract_id: int
+    ask_contract_id: int
     instance_id: int
     machine_id: int
     ssh_host: str
@@ -74,7 +73,6 @@ class VastaiInstance:
     def duration_seconds(self) -> float:
         return time.time() - self.start_date
 
-
 # ──────────────────────────────────────────────────────────────────────
 # Known GPU tiers (for smart selection)
 # ──────────────────────────────────────────────────────────────────────
@@ -88,11 +86,9 @@ GPU_TIERS: dict[str, dict] = {
                   "max_price": 2.00, "min_ram_mb": 24 * 1024},
 }
 
-
 # ──────────────────────────────────────────────────────────────────────
 # VastaiBackend
 # ──────────────────────────────────────────────────────────────────────
-
 
 class VastaiBackend(BaseBackend):
     """Vast.ai execution backend — real GPU compute."""
@@ -103,7 +99,7 @@ class VastaiBackend(BaseBackend):
         self._api_key = (os.getenv("VAST_KEY") or os.getenv("VASTAI_API_KEY", "")).strip()
         self._default_gpu = os.getenv("VASTAI_DEFAULT_GPU", "RTX_4090")
         self._max_price = float(os.getenv("VASTAI_MAX_PRICE", "0.60"))
-        self._default_image = os.getenv("VASTAI_IMAGE", "nvidia/cuda:12.1-runtime-ubuntu22.04")
+        self._default_image = os.getenv("VASTAI_IMAGE", "vastai/pytorch:cuda-13.2.1-auto")
         self._min_disk_gb = int(os.getenv("VASTAI_DISK_GB", "20"))
         self._max_gpu_count = int(os.getenv("VASTAI_MAX_GPU_COUNT", "5"))
         self._session = requests.Session()
@@ -148,6 +144,11 @@ class VastaiBackend(BaseBackend):
         body = r.json() if r.text else {}
         return body if isinstance(body, dict | bool) else {"raw": body}
 
+    def _api_post(self, path: str, json_data: dict | None = None) -> dict:
+        url = f"{VASTAI_API_BASE}{path}"
+        r = self._session.post(url, headers=self._headers(), json=json_data, timeout=15)
+        r.raise_for_status()
+        return r.json() if r.text else {}
     # ── instance management ────────────────────────────────────────
 
     def search_offers(self, gpu_filter: str | None = None,
@@ -158,25 +159,34 @@ class VastaiBackend(BaseBackend):
                       min_reliability: float = 0.80,
                       limit: int = 10) -> list[VastaiOffer]:
         """Search available instances on Vast.ai matching filters."""
-        params: dict = {
+        import json, urllib.parse
+        
+        gpu = gpu_filter or self._default_gpu
+        q_obj: dict = {
             "type": "on-demand",
-            "gpu_name": gpu_filter or self._default_gpu,
-            "min_gpu_ram": min_ram_mb,
-            "min_disk": min_disk_gb * 1024,  # Vast.ai expects MB
-            "min_inet_down": min_inet_down,
-            "reliability2": min_reliability,
+            "gpu_name": {"eq": gpu.replace("_", " ")},
+            "gpu_ram": {"gte": min_ram_mb},
+            "disk_space": {"gte": min_disk_gb},
+            "reliability2": {"gte": min_reliability},
+            "verified": {"eq": True},
             "limit": limit,
-            "order": [("dph_total", "asc")],  # cheapest first
+            "order": [["dph_total", "asc"]],
         }
-        if max_price:
-            params["max_dph"] = max_price * 1000  # Vast.ai uses dph = $/hour * 1000
 
-        data = self._api_get("/bundles", params=params)
+        q_str = json.dumps(q_obj)
+        url = f"{VASTAI_API_BASE}/bundles/?q={urllib.parse.quote(q_str)}"
+        
+        r = self._session.get(url, headers=self._headers(), timeout=15)
+        r.raise_for_status()
+        data = r.json()
         offers_raw = data.get("offers", [])
         offers: list[VastaiOffer] = []
 
         for o in offers_raw:
+            if not o.get("rentable", True):
+                continue
             offers.append(VastaiOffer(
+                ask_contract_id=o.get("ask_contract_id", o["id"]),
                 instance_id=o["id"],
                 hostname=o.get("hostname", ""),
                 gpu_name=o.get("gpu_name", "unknown"),
@@ -184,17 +194,23 @@ class VastaiBackend(BaseBackend):
                 gpu_ram_mb=o.get("gpu_ram", 0),
                 cpu_cores=o.get("cpu_cores", 0),
                 ram_mb=o.get("ram", 0),
-                disk_gb=o.get("disk_space", 0) / 1024.0,
-                price_per_hour=o.get("dph_total", 0) / 1000.0,
+                disk_gb=o.get("disk_space", 0),
+                price_per_hour=o.get("dph_total", 0),
                 score=o.get("score", 0),
                 inet_down_mbps=o.get("inet_down", 0),
                 inet_up_mbps=o.get("inet_up", 0),
                 direct_port_count=o.get("direct_port_count", 0),
-                country=o.get("geolocation", {}).get("country", ""),
+                country=o.get("country", o.get("geolocation", "")) if isinstance(o.get("geolocation"), str) else o.get("geolocation", {}).get("country", ""),
             ))
 
         logger.info("vastai.search found=%d gpu=%s max_price=%s",
                      len(offers), gpu_filter or self._default_gpu, max_price)
+        # Client-side price filter
+        # Filter out non-rentable offers
+        offers = [o for o in offers if o.get("rentable", True) is not False]
+
+        if max_price is not None:
+            offers = [o for o in offers if o.price_per_hour <= max_price]
         return sorted(offers, key=lambda o: o.price_per_hour)
 
     def rent_instance(self, offer: VastaiOffer, image: str | None = None,
@@ -202,20 +218,12 @@ class VastaiBackend(BaseBackend):
                       label: str = "") -> dict | None:
         """Rent a specific instance."""
         payload: dict = {
-            "instance_id": offer.instance_id,
             "image": image or self._default_image,
-            "env": env or {},
-            "disk": disk_gb,
-            "runtype": "ssh",  # direct SSH access
-            "label": label or f"roma-{int(time.time())}",
-            "onstart": "",  # no startup script — we handle via SSH
+            "disk": int(disk_gb),
+            "runtype": "ssh_direct"
         }
 
-        # For instances that support it, add direct ports
-        if offer.direct_port_count > 0:
-            payload["use_jupyter_lab"] = False
-
-        result = self._api_put(f"/asks/{offer.instance_id}/", json_data=payload)
+        result = self._api_put(f"/asks/{offer.ask_contract_id}/", json_data=payload)
 
         if isinstance(result, dict):
             contract_id = result.get("contract_id") or result.get("new_contract")
@@ -224,7 +232,7 @@ class VastaiBackend(BaseBackend):
                             offer.instance_id, contract_id, offer.price_per_hour)
                 return {
                     "contract_id": contract_id,
-                    "instance_id": offer.instance_id,
+                    "client_id": "roma-" + str(int(time.time())),
                     "gpu_name": offer.gpu_name,
                     "price_per_hour": offer.price_per_hour,
                     "status": "provisioning",
@@ -293,52 +301,78 @@ class VastaiBackend(BaseBackend):
         image = ctx.docker_image
 
         # Step 1: search
-        offers = self.search_offers(
-            gpu_filter=gpu_filter,
-            max_price=max_price,
-            min_ram_mb=min_ram,
-            min_disk_gb=self._min_disk_gb,
-            limit=5,
-        )
+        # Step 1-3 retry loop: fresh search + rent, handle stale offers & rate limits
+        import random as _random
+        last_error = None
+        for attempt in range(1, 5):
+            try:
+                offers = self.search_offers(
+                    gpu_filter=gpu_filter,
+                    max_price=max_price,
+                    min_ram_mb=min_ram,
+                    min_disk_gb=self._min_disk_gb,
+                    limit=5,
+                )
 
-        if not offers:
-            logger.error("vastai.no_offers gpu=%s max_price=%s", gpu_filter, max_price)
-            return {
-                "status": "failed",
-                "job_id": ctx.job_id,
-                "message": f"No GPU instances found for {gpu_filter} ≤ ${max_price}/hr",
-            }
+                if not offers:
+                    logger.warning("vastai.no_offers gpu=%s attempt=%d", gpu_filter, attempt)
+                    last_error = "No offers found"
+                    continue
 
-        # Step 2: pick best offer (cheapest + best reliability)
-        best = offers[0]  # already sorted by price
-        logger.info("vastai.selected instance=%d gpu=%s score=%.2f price=%.4f/hr",
-                     best.instance_id, best.gpu_name, best.score, best.price_per_hour)
+                best = offers[0]
+                logger.info("vastai.selected instance=%d gpu=%s score=%.2f price=%.4f/hr attempt=%d",
+                             best.instance_id, best.gpu_name, best.score, best.price_per_hour, attempt)
 
-        # Step 3: rent
-        label = f"roma-{ctx.tenant_id[:12]}-{ctx.job_id[:8]}"
-        rental = self.rent_instance(
-            offer=best, image=image, disk_gb=self._min_disk_gb, label=label
-        )
+                label = f"roma-{ctx.tenant_id[:12]}-{ctx.job_id[:8]}"
+                rental = self.rent_instance(
+                    offer=best, image=image, disk_gb=self._min_disk_gb, label=label
+                )
 
-        if not rental:
-            return {"status": "failed", "job_id": ctx.job_id,
-                    "message": f"Failed to rent instance {best.instance_id}"}
+                if rental:
+                    contract_id = rental["contract_id"]
+                    self._job_instance_map[ctx.job_id] = contract_id
+                    return {
+                        "backend": "vastai",
+                        "status": "provisioning",
+                        "job_id": ctx.job_id,
+                        "contract_id": contract_id,
+                        "instance_id": best.instance_id,
+                        "gpu_name": best.gpu_name,
+                        "price_per_hour": best.price_per_hour,
+                        "ssh_host": "",
+                        "estimated_boot_sec": 60,
+                    }
 
-        contract_id = rental["contract_id"]
+                last_error = f"rent_instance returned None for {best.instance_id}"
 
-        # Step 4: track
-        self._job_instance_map[ctx.job_id] = contract_id
+            except Exception as e:
+                last_error = e
+                error_text = str(e).lower()
 
+                # no_such_ask — stale offer, re-search
+                if "no_such_ask" in error_text or "not available" in error_text:
+                    logger.warning("vastai.no_such_ask attempt=%d: %s", attempt, e)
+                    _random.uniform(0, 0.3)  # tiny jitter before re-search
+                    continue
+
+                # 429 rate limit — exponential backoff
+                if "429" in error_text or "too frequent" in error_text or "rate" in error_text or "too many requests" in error_text:
+                    wait = (2 ** attempt) + _random.uniform(0, 1)
+                    logger.warning("vastai.rate_limited attempt=%d sleep=%.1fs", attempt, wait)
+                    time.sleep(wait)
+                    continue
+
+                # Unexpected error — fail this attempt, retry with fresh search
+                logger.warning("vastai.rent_error attempt=%d: %s", attempt, e)
+                continue
+
+        # All attempts exhausted
+        logger.error("vastai.dispatch_exhausted gpu=%s attempts=%d last_error=%s",
+                      gpu_filter, 4, last_error)
         return {
-            "backend": "vastai",
-            "status": "provisioning",
+            "status": "failed",
             "job_id": ctx.job_id,
-            "contract_id": contract_id,
-            "instance_id": best.instance_id,
-            "gpu_name": best.gpu_name,
-            "price_per_hour": best.price_per_hour,
-            "ssh_host": "",  # filled after instance boots (via monitor)
-            "estimated_boot_sec": 60,
+            "message": f"Failed to rent after 4 attempts. Last error: {last_error}",
         }
 
     async def get_status(self, job_id: str, instance_id: str | None = None) -> dict:
