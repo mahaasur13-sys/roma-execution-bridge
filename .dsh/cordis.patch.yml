@@ -1,6 +1,6 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # ROMA + Zo Integration — cordis.patch.yml (host-level hardening)
-# DSH_HOME: /home/workspace/.dsh
+# DSH_HOME: /home/felix/.dsh
 # Version:  2026-08-21-audit
 # ═══════════════════════════════════════════════════════════════════════════════
 #
@@ -33,14 +33,14 @@
       config:
         serverName: roma
         transport: stdio
-        command: python3
+        command: /home/felix/.dsh/mcp-venv/bin/python
         args:
-          - '/home/workspace/.dsh/mcp-servers/roma_bridge.py'
+          - '/home/felix/.dsh/mcp-servers/roma_bridge.py'
         env:
           ROMA_API_KEY: !!js process.env.ROMA_API_KEY || ''
           ROMA_API_URL: 'http://localhost:8900'
         failOnStartupError: true
-        toolCallTimeoutMs: 30000
+        toolCallTimeoutMs: 120000
         reconnect:
           enabled: true
           initialDelayMs: 2000
@@ -53,9 +53,9 @@
       config:
         serverName: zo
         transport: stdio
-        command: python3
+        command: /home/felix/.dsh/mcp-venv/bin/python
         args:
-          - '/home/workspace/.dsh/mcp-servers/zo_bridge.py'
+          - '/home/felix/.dsh/mcp-servers/zo_bridge.py'
         failOnStartupError: true
         toolCallTimeoutMs: 10000
         reconnect:
@@ -71,7 +71,7 @@
 - id: sandbox-policy
   config:
     mode: workspace-write
-    workspaceRoot: '/home/workspace'
+    workspaceRoot: '/home/felix'
 
 # ── Approval Policy: FORCE ask ───────────────────────────────────────────
 # Never auto-approve. Every dangerous call requires human confirmation.
@@ -97,7 +97,7 @@
 
 - id: session-persistence-jsonl
   config:
-    root: '/home/.z/dsh-sessions'
+    root: '/home/felix/.dsh/sessions'
 
 # ── Code Mode: DISABLED (security) ────────────────────────────────────────
 # Code mode runs in worker-thread and bypasses OS sandboxing.
@@ -121,3 +121,12 @@
 - id: tools
   config:
     mode: native
+
+# Force in-browser directory picker (fix native picker issues)
+- id: directory-picker
+  disabled: true
+- insert:
+  - id: directory-picker-browse
+    name: '@deepseek-ai/dsh-host-directory-picker-browse'
+  - id: ui-directory-picker-browse
+    name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'

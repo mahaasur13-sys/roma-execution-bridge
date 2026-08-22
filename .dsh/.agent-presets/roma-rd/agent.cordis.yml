@@ -95,8 +95,6 @@
         provider: fork
         toolName: subagent_fork
         backgroundMode: continuable
-      config:
-        provider: spawn
     - id: tool-workflow
       name: '@deepseek-ai/dsh-tool-workflow'
     - id: tool-ralph
