@@ -71,9 +71,8 @@ def evaluate_policies(tenant_id: str, action: str, context: dict | None = None) 
 
 
     if action.startswith("tool_call"):
-        if not context.get("tenant_key"):
-            return {"result": "denied", "reason": "AI tool call without tenant key", "policy_name": "default"}
-        return {"result": "allowed", "reason": "default policy passed", "policy_name": "default"}
+        # deny-all: tool_call requires an explicit allow policy — never default-allow.
+        return {"result": "denied", "reason": "tool_call requires explicit allow policy", "policy_name": "default_deny"}
 
     if action == "crypto_create_invoice":
         tenant_id = context.get("tenant_id", "")

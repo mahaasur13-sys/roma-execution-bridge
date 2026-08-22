@@ -259,6 +259,13 @@ def _save_json(filename: str, data: dict) -> None:
 # ============================================
 
 API_KEYS: dict[str, dict] = {}
+# Load keys from config
+_keys_path = Path(__file__).parent / "config" / "api_keys.json"
+if _keys_path.exists():
+    import json as _json
+    API_KEYS.update(_json.loads(_keys_path.read_text()))
+    print(f"✅ Loaded {len(API_KEYS)} API keys from api_keys.json")
+
 
 db.init_db()
 db.seed_tenants(API_KEYS)
@@ -535,6 +542,9 @@ roma_cloudpayments_failure = Counter("roma_cloudpayments_failure_total", "CloudP
 # MIDDLEWARE — structured logging + metrics
 # ============================================
 
+import alert_registry
+
+
 @app.middleware("http")
 async def tracking_middleware(request: Request, call_next) -> Response:
     start = time.monotonic()
@@ -542,7 +552,21 @@ async def tracking_middleware(request: Request, call_next) -> Response:
     api_key_masked = _mask_key(api_key_raw)
     tenant_id = API_KEYS.get(api_key_raw, {}).get("tenant_id") if api_key_raw else None
 
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception as exc:  # noqa: BLE001 — record the alert, then re-raise
+        logger.exception(f"{request.method} {request.url.path} → unhandled exception")
+        try:
+            alert_registry.record_alert(
+                "critical",
+                f"Unhandled exception on {request.method} {request.url.path}",
+                f"{type(exc).__name__}: {exc}",
+                source="tracking_middleware",
+                dedup_key=f"exc:{request.method}:{request.url.path}",
+            )
+        except Exception:
+            pass
+        raise
 
     duration_ms = round((time.monotonic() - start) * 1000, 2)
     endpoint = request.url.path
@@ -574,12 +598,46 @@ async def tracking_middleware(request: Request, call_next) -> Response:
 
     if status >= 500:
         logger.error(f"{method} {endpoint} → {status}", extra=extra)
+        try:
+            alert_registry.record_alert(
+                "critical",
+                f"HTTP {status} on {method} {endpoint}",
+                f"{method} {endpoint} returned {status} (tenant={tenant_id or 'anonymous'})",
+                source="tracking_middleware",
+                dedup_key=f"http5xx:{method}:{endpoint}",
+            )
+        except Exception:
+            pass
     elif status >= 400:
         logger.warning(f"{method} {endpoint} → {status}", extra=extra)
     else:
         logger.info(f"{method} {endpoint} → {status}", extra=extra)
 
     return response
+
+
+# ============================================
+# ENDPOINTS — Alerts (basic monitoring)
+# ============================================
+
+@app.get("/alerts/status", dependencies=[Depends(verify_api_key)])
+async def alerts_status():
+    alerts = alert_registry.list_open_alerts()
+    return {"open": len(alerts), "alerts": alerts}
+
+
+@app.post("/alerts/{alert_id}/ack", dependencies=[Depends(verify_api_key)])
+async def alerts_ack(alert_id: str):
+    if not alert_registry.ack_alert(alert_id):
+        raise HTTPException(status_code=404, detail="Alert not found or already resolved")
+    return {"alert_id": alert_id, "status": "acknowledged"}
+
+
+@app.post("/alerts/{alert_id}/resolve", dependencies=[Depends(verify_api_key)])
+async def alerts_resolve(alert_id: str):
+    if not alert_registry.resolve_alert(alert_id):
+        raise HTTPException(status_code=404, detail="Alert not found or already resolved")
+    return {"alert_id": alert_id, "status": "resolved"}
 
 
 # ============================================
@@ -1023,7 +1081,7 @@ async def complete_job(job_id: str, key_info: dict = Depends(verify_api_key)):
         except Exception:
             actual_duration_s = 300
     gpu_sec = max(actual_duration_s, 0)
-    _increment_usage(tenant_id, gpu_sec, cost_only=True)
+    _increment_usage(tenant_id, gpu_sec)
 
     # Cleanup backend instance (Vast.ai destroy etc.)
     try:

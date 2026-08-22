@@ -39,9 +39,14 @@ async def poll_and_execute():
         try:
             jobs = _db_adapter.get_queued_execution_jobs(limit=5)
             for job in jobs:
+                payload = job.get("payload", {}) or {}
+                # Local-задачи выполняет внешний local_worker через safe_exec.
+                # Не трогаем их здесь, иначе local_worker не найдёт их в queued.
+                backend = (job.get("backend") or payload.get("backend") or "").lower()
+                if backend == "local":
+                    continue
                 jid = job["id"]
                 tid = job["tenant_id"]
-                payload = job.get("payload", {})
                 # Переводим из queued в running и запускаем
                 _db_adapter.update_execution_job(jid, status="running")
                 asyncio.ensure_future(execute_and_bill(jid, tid, payload))
