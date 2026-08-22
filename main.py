@@ -747,11 +747,7 @@ ROMA_TOOLS = [
     _tool_schema("list_jobs", "Получить задачи текущего tenant.", {"limit": {"type": "integer", "minimum": 1, "maximum": 50}}),
     _tool_schema("cancel_job", "Отменить задачу.", {"job_id": {"type": "string"}}, ["job_id"]),
     _tool_schema("list_workers", "Получить список воркеров.", {}),
-    _tool_schema("drain_worker", "Перевести воркер в drain.", {"worker_id": {"type": "string"}}, ["worker_id"]),
-    _tool_schema("slurm_status", "Получить статус Slurm-задачи.", {"slurm_job_id": {"type": "string"}}, ["slurm_job_id"]),
-    _tool_schema("slurm_cancel", "Отменить Slurm-задачу.", {"slurm_job_id": {"type": "string"}}, ["slurm_job_id"]),
     _tool_schema("get_usage", "Получить использование и лимиты.", {}),
-    _tool_schema("create_checkout_session", "Создать checkout-сессию CloudPayments для плана.", {"plan": {"type": "string", "enum": ["free", "pro", "enterprise"]}}, ["plan"]),
     _tool_schema("get_daily_stats", "Получить дневную статистику.", {}),
     _tool_schema("get_balance", "Получить текущий баланс и spend-cap тенанта.", {}),
     _tool_schema("get_billing_ledger", "Получить историю списаний (дебет/кредит).", {"limit": {"type": "integer", "minimum": 1, "maximum": 100}}),
@@ -783,6 +779,9 @@ async def execute_tool(name: str, arguments: dict, api_key: str | None = None) -
         path = template.format(**arguments)
         payload = arguments if method == "POST" else None
         params = arguments if method == "GET" and "{" not in template else None
+        # Security: chat can only submit to the LOCAL backend (never vast/slurm/ray)
+        if name == "submit_task" and payload is not None:
+            payload = {**payload, "backend": "local", "execution_mode": "local"}
         async with httpx.AsyncClient(base_url=ROMA_INTERNAL_BASE_URL, timeout=45.0) as http:
             response = await http.request(method, path, json=payload, params=params, headers=headers)
         if response.status_code >= 400:
@@ -835,10 +834,14 @@ async def stream_with_tools(message: str, history: list[ChatMessage], api_key: s
         selected_model = DEEPSEEK_MODEL
         for model in (DEEPSEEK_MODEL,):
             try:
-                stream = await DEEPSEEK_CLIENT.chat.completions.create(
-                    model=model, messages=messages,
-                    tools=ROMA_TOOLS, tool_choice="auto", temperature=0.25, max_tokens=2200, stream=True,
-                )
+                kwargs = {
+                    "model": model, "messages": messages,
+                    "temperature": 0.25, "max_tokens": 2200, "stream": True,
+                }
+                if api_key:
+                    kwargs["tools"] = ROMA_TOOLS
+                    kwargs["tool_choice"] = "auto"
+                stream = await DEEPSEEK_CLIENT.chat.completions.create(**kwargs)
                 selected_model = model
                 selected_model = model
                 break
@@ -887,22 +890,24 @@ async def stream_with_tools(message: str, history: list[ChatMessage], api_key: s
     yield "\n\nДостигнут лимит последовательных вызовов инструментов."
 
 
+@limiter.limit("30/minute")
 @app.post("/api/chat/stream")
 async def chat_stream(
-    request: ChatRequest,
+    body: ChatRequest,
+    request: Request,
     x_api_key: str | None = Header(None, alias="X-API-Key"),
     authorization: str | None = Header(None),
 ):
     """Потоковый ROMA AI endpoint; X-API-Key имеет приоритет над Bearer."""
-    message = request.message.strip()
+    message = body.message.strip()
     if not message:
         raise HTTPException(status_code=400, detail="Сообщение пустое")
     api_key = x_api_key
     if not api_key and authorization:
         api_key = authorization[7:].strip() if authorization.lower().startswith("bearer ") else authorization.strip()
-    logger.info("Chat request: message=%r history=%d api_key_present=%s", message[:100], len(request.history), bool(api_key))
+    logger.info("Chat request: message=%r history=%d api_key_present=%s", message[:100], len(body.history), bool(api_key))
     return StreamingResponse(
-        stream_with_tools(message, request.history[-10:], api_key, request.name.strip() if request.name else None),
+        stream_with_tools(message, body.history[-10:], api_key, body.name.strip() if body.name else None),
         media_type="text/plain; charset=utf-8",
         headers={"Cache-Control": "no-cache, no-store", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
