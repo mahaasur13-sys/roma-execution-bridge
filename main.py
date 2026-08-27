@@ -417,7 +417,7 @@ class RomaTaskInput(BaseModel):
     gpu_required: bool = Field(default=False)
     priority: int = Field(default=5, ge=1, le=10)
     execution_mode: str = Field(default="k8s_job")
-    backend: str = Field(default="local", pattern="^(local|slurm|ray)$")
+    backend: Optional[str] = Field(default=None, pattern="^(local|slurm|ray|tensordock|vastai|runpod|gpu_worker|aws_ec2)$")
     instance_type: str = Field(default="any", description="GPU type: any, RTX 3060, A100, H100")
 
 
@@ -438,6 +438,8 @@ class RomaStatusResponse(BaseModel):
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
     error: Optional[str] = None
+    backend: Optional[str] = None
+    backend_job_id: Optional[str] = None
 
 
 class CheckoutRequest(BaseModel):
@@ -926,21 +928,13 @@ async def submit_task(payload: RomaTaskInput, request: Request, key_info: dict =
         status="queued",
         payload=payload.model_dump(),
     )
+    db.update_execution_job(job_id, backend=payload.backend)
 
     # Increment usage
-    # Dispatch to execution backend (local/vastai/slurm/ray)
+    # Dispatch — ТОЛЬКО фоновый poll_and_execute (одна точка). Не рентим здесь,
+    # иначе Vast создаётся дважды (submit + worker) → утечка инстанса.
     backend_protocol = "rom"
     backend_target = f"rom://local/{job_id}"
-    try:
-        backend_result = await dispatch_job(
-            job_id=job_id,
-            tenant_id=tenant_id,
-            payload=payload.model_dump(),
-        )
-        backend_protocol = backend_result.get("protocol", "rom")
-        backend_target = backend_result.get("target", f"rom://local/{job_id}")
-    except Exception as exc:
-        logger.warning("backend.dispatch.failed tenant=%s job=%s: %s", tenant_id, job_id, exc)
 
     gpu_sec = 300 if payload.gpu_required else 0
     _increment_usage(tenant_id, gpu_sec)
@@ -988,6 +982,8 @@ async def get_status(job_id: str, key_info: dict = Depends(verify_api_key)):
         started_at=job.get("started_at"),
         completed_at=job.get("completed_at"),
         error=job.get("error"),
+        backend=job.get("backend"),
+        backend_job_id=job.get("backend_job_id"),
     )
 
 
@@ -998,6 +994,11 @@ async def cancel_job(job_id: str, key_info: dict = Depends(verify_api_key)):
     if not job or job.get("tenant_id") != tenant_id:
         raise HTTPException(status_code=404, detail="Job not found")
     db.update_execution_job(job_id, status="cancelled")
+    # Гасим backend-инстанс (Vast.ai destroy и т.п.)
+    try:
+        await backend_cancel_job(tenant_id=tenant_id, job_id=job_id)
+    except Exception as exc:
+        logger.warning("cancel.backend_cleanup_failed tenant=%s job=%s: %s", tenant_id, job_id, exc)
     try:
         write_event(tenant_id, "job.cancelled", "job", job_id, {})
     except Exception:
