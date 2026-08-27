@@ -83,6 +83,16 @@ async def execute_and_bill(
         price_per_hour = result.get("price_per_hour", 0.0)
         contract_id = result.get("contract_id")
 
+        if result.get("status") == "failed":
+            logger.warning("execute_and_bill.dispatch_failed job=%s: %s", job_id, result.get("message", ""))
+            _db_adapter.update_execution_job(
+                job_id,
+                status="failed",
+                backend=backend_name if backend_name != "local" else payload.get("backend"),
+                error=str(result.get("message", "dispatch failed"))[:500],
+            )
+            return {"status": "failed", "job_id": job_id, "error": result.get("message", "")}
+
         _db_adapter.update_execution_job(job_id, status="running", backend=backend_name,
                                           backend_job_id=str(contract_id) if contract_id else None)
     except Exception as exc:
@@ -182,7 +192,7 @@ async def _execute_command(job_id: str, payload: dict, tenant_id: str) -> dict:
     cmd = payload.get("task", payload.get("command", "echo OK"))
     try:
         from backends.dispatcher import get_backend
-        backend = get_backend()
+        backend = get_backend(payload.get("backend"))
         from backends.base import JobContext
         ctx = JobContext(job_id=job_id, tenant_id=tenant_id, payload=payload)
         result = await backend.run_command(ctx, cmd, timeout=300)
