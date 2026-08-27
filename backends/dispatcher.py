@@ -12,10 +12,10 @@ _backend: BaseBackend | None = None
 _backend_name: str = ""
 
 
-def get_backend() -> BaseBackend:
+def get_backend(name: str | None = None) -> BaseBackend:
     """Lazy-load and cache the configured backend."""
     global _backend, _backend_name
-    current = os.getenv("ROMA_EXECUTION_BACKEND", "local")
+    current = (name or os.getenv("ROMA_EXECUTION_BACKEND", "local") or "local")
 
     if _backend is not None and _backend_name == current:
         return _backend
