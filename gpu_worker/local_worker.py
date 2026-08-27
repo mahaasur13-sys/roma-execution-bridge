@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""ROMA Local Worker — финальная версия с памятью сессии"""
+"""ROMA Local Worker — финальная версия с памятью сессии (hardened)."""
 import time
 import json
-import subprocess
+import os
+import sys
 import urllib.request
 import urllib.error
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from safe_exec import run_command_checked, CommandNotAllowed  # noqa: E402
 
 API_BASE = "http://localhost:8900"
 API_KEY = "test-key-12345"
@@ -18,12 +22,14 @@ def api_get(path):
 
 def run_cmd(task):
     try:
-        r = subprocess.run(task, shell=True, capture_output=True, text=True, timeout=300)
-        return {"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr, "code": r.returncode}
+        r = run_command_checked(task)
+        return {"ok": r["ok"], "out": r["out"], "err": r["err"], "code": r["code"]}
+    except CommandNotAllowed as e:
+        return {"ok": False, "error": str(e)}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
-print("🚀 ROMA Local Worker запущен")
+print("🚀 ROMA Local Worker запущен (hardened: whitelist, без shell)")
 print(f"   API: {API_BASE} | Ключ: {API_KEY} | Интервал: {POLL_INTERVAL}с")
 print("-" * 60)
 
@@ -43,19 +49,6 @@ while True:
         print(f"\n📥 {jid[:8]}... | приоритет={pri} | режим={mode}")
         print(f"   Команда: {task[:65]}{'...' if len(task)>65 else ''}")
 
-        if not task or task[0].isspace() or all(c.isalpha() or c.isspace() for c in task.split()[0] if task.split()):
-            first = task.split()[0].lower() if task.split() else ""
-            known = {'echo','date','ls','cat','uname','nvidia-smi','python','python3','curl','wget',
-                     'git','docker','kubectl','mkdir','rm','cp','mv','find','grep','awk','sed',
-                     'ps','top','df','du','free','ping','whoami','id','pwd','clear','exit',
-                     'bash','sh','zsh','htop','neofetch','lscpu','lsmem','lsusb','lspci'}
-            has_shell = any(c in task for c in '";|&`$()[]{}<>!#=\\')
-            if first not in known and not has_shell and '/' not in task:
-                print("   ⏭️  Пропущено: не команда")
-                processed_ids.add(jid)
-                print("-" * 60)
-                continue
-
         result = run_cmd(task)
         processed_ids.add(jid)
         if result["ok"]:
@@ -65,7 +58,7 @@ while True:
             if len(result["out"].strip().split("\n")) > 6:
                 print("      ...")
         else:
-            print(f"   ❌ Ошибка: {result.get('error', result.get('err','?'))[:100]}")
+            print(f"   ❌ Отклонено/Ошибка: {result.get('error', result.get('err','?'))[:100]}")
         print("-" * 60)
     except urllib.error.URLError as e:
         print(f"❌ Нет связи с API: {e.reason}")

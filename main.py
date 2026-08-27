@@ -259,6 +259,13 @@ def _save_json(filename: str, data: dict) -> None:
 # ============================================
 
 API_KEYS: dict[str, dict] = {}
+# Load keys from config
+_keys_path = Path(__file__).parent / "config" / "api_keys.json"
+if _keys_path.exists():
+    import json as _json
+    API_KEYS.update(_json.loads(_keys_path.read_text()))
+    print(f"✅ Loaded {len(API_KEYS)} API keys from api_keys.json")
+
 
 db.init_db()
 db.seed_tenants(API_KEYS)
@@ -417,7 +424,7 @@ class RomaTaskInput(BaseModel):
     gpu_required: bool = Field(default=False)
     priority: int = Field(default=5, ge=1, le=10)
     execution_mode: str = Field(default="k8s_job")
-    backend: str = Field(default="local", pattern="^(local|slurm|ray)$")
+    backend: Optional[str] = Field(default=None, pattern="^(local|slurm|ray|tensordock|vastai|runpod|gpu_worker|aws_ec2)$")
     instance_type: str = Field(default="any", description="GPU type: any, RTX 3060, A100, H100")
 
 
@@ -438,6 +445,8 @@ class RomaStatusResponse(BaseModel):
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
     error: Optional[str] = None
+    backend: Optional[str] = None
+    backend_job_id: Optional[str] = None
 
 
 class CheckoutRequest(BaseModel):
@@ -535,6 +544,9 @@ roma_cloudpayments_failure = Counter("roma_cloudpayments_failure_total", "CloudP
 # MIDDLEWARE — structured logging + metrics
 # ============================================
 
+import alert_registry
+
+
 @app.middleware("http")
 async def tracking_middleware(request: Request, call_next) -> Response:
     start = time.monotonic()
@@ -542,7 +554,21 @@ async def tracking_middleware(request: Request, call_next) -> Response:
     api_key_masked = _mask_key(api_key_raw)
     tenant_id = API_KEYS.get(api_key_raw, {}).get("tenant_id") if api_key_raw else None
 
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception as exc:  # noqa: BLE001 — record the alert, then re-raise
+        logger.exception(f"{request.method} {request.url.path} → unhandled exception")
+        try:
+            alert_registry.record_alert(
+                "critical",
+                f"Unhandled exception on {request.method} {request.url.path}",
+                f"{type(exc).__name__}: {exc}",
+                source="tracking_middleware",
+                dedup_key=f"exc:{request.method}:{request.url.path}",
+            )
+        except Exception:
+            pass
+        raise
 
     duration_ms = round((time.monotonic() - start) * 1000, 2)
     endpoint = request.url.path
@@ -574,12 +600,46 @@ async def tracking_middleware(request: Request, call_next) -> Response:
 
     if status >= 500:
         logger.error(f"{method} {endpoint} → {status}", extra=extra)
+        try:
+            alert_registry.record_alert(
+                "critical",
+                f"HTTP {status} on {method} {endpoint}",
+                f"{method} {endpoint} returned {status} (tenant={tenant_id or 'anonymous'})",
+                source="tracking_middleware",
+                dedup_key=f"http5xx:{method}:{endpoint}",
+            )
+        except Exception:
+            pass
     elif status >= 400:
         logger.warning(f"{method} {endpoint} → {status}", extra=extra)
     else:
         logger.info(f"{method} {endpoint} → {status}", extra=extra)
 
     return response
+
+
+# ============================================
+# ENDPOINTS — Alerts (basic monitoring)
+# ============================================
+
+@app.get("/alerts/status", dependencies=[Depends(verify_api_key)])
+async def alerts_status():
+    alerts = alert_registry.list_open_alerts()
+    return {"open": len(alerts), "alerts": alerts}
+
+
+@app.post("/alerts/{alert_id}/ack", dependencies=[Depends(verify_api_key)])
+async def alerts_ack(alert_id: str):
+    if not alert_registry.ack_alert(alert_id):
+        raise HTTPException(status_code=404, detail="Alert not found or already resolved")
+    return {"alert_id": alert_id, "status": "acknowledged"}
+
+
+@app.post("/alerts/{alert_id}/resolve", dependencies=[Depends(verify_api_key)])
+async def alerts_resolve(alert_id: str):
+    if not alert_registry.resolve_alert(alert_id):
+        raise HTTPException(status_code=404, detail="Alert not found or already resolved")
+    return {"alert_id": alert_id, "status": "resolved"}
 
 
 # ============================================
@@ -689,11 +749,7 @@ ROMA_TOOLS = [
     _tool_schema("list_jobs", "Получить задачи текущего tenant.", {"limit": {"type": "integer", "minimum": 1, "maximum": 50}}),
     _tool_schema("cancel_job", "Отменить задачу.", {"job_id": {"type": "string"}}, ["job_id"]),
     _tool_schema("list_workers", "Получить список воркеров.", {}),
-    _tool_schema("drain_worker", "Перевести воркер в drain.", {"worker_id": {"type": "string"}}, ["worker_id"]),
-    _tool_schema("slurm_status", "Получить статус Slurm-задачи.", {"slurm_job_id": {"type": "string"}}, ["slurm_job_id"]),
-    _tool_schema("slurm_cancel", "Отменить Slurm-задачу.", {"slurm_job_id": {"type": "string"}}, ["slurm_job_id"]),
     _tool_schema("get_usage", "Получить использование и лимиты.", {}),
-    _tool_schema("create_checkout_session", "Создать checkout-сессию CloudPayments для плана.", {"plan": {"type": "string", "enum": ["free", "pro", "enterprise"]}}, ["plan"]),
     _tool_schema("get_daily_stats", "Получить дневную статистику.", {}),
     _tool_schema("get_balance", "Получить текущий баланс и spend-cap тенанта.", {}),
     _tool_schema("get_billing_ledger", "Получить историю списаний (дебет/кредит).", {"limit": {"type": "integer", "minimum": 1, "maximum": 100}}),
@@ -725,6 +781,9 @@ async def execute_tool(name: str, arguments: dict, api_key: str | None = None) -
         path = template.format(**arguments)
         payload = arguments if method == "POST" else None
         params = arguments if method == "GET" and "{" not in template else None
+        # Security: chat can only submit to the LOCAL backend (never vast/slurm/ray)
+        if name == "submit_task" and payload is not None:
+            payload = {**payload, "backend": "local", "execution_mode": "local"}
         async with httpx.AsyncClient(base_url=ROMA_INTERNAL_BASE_URL, timeout=45.0) as http:
             response = await http.request(method, path, json=payload, params=params, headers=headers)
         if response.status_code >= 400:
@@ -777,10 +836,14 @@ async def stream_with_tools(message: str, history: list[ChatMessage], api_key: s
         selected_model = DEEPSEEK_MODEL
         for model in (DEEPSEEK_MODEL,):
             try:
-                stream = await DEEPSEEK_CLIENT.chat.completions.create(
-                    model=model, messages=messages,
-                    tools=ROMA_TOOLS, tool_choice="auto", temperature=0.25, max_tokens=2200, stream=True,
-                )
+                kwargs = {
+                    "model": model, "messages": messages,
+                    "temperature": 0.25, "max_tokens": 2200, "stream": True,
+                }
+                if api_key:
+                    kwargs["tools"] = ROMA_TOOLS
+                    kwargs["tool_choice"] = "auto"
+                stream = await DEEPSEEK_CLIENT.chat.completions.create(**kwargs)
                 selected_model = model
                 selected_model = model
                 break
@@ -829,22 +892,24 @@ async def stream_with_tools(message: str, history: list[ChatMessage], api_key: s
     yield "\n\nДостигнут лимит последовательных вызовов инструментов."
 
 
+@limiter.limit("30/minute")
 @app.post("/api/chat/stream")
 async def chat_stream(
-    request: ChatRequest,
+    body: ChatRequest,
+    request: Request,
     x_api_key: str | None = Header(None, alias="X-API-Key"),
     authorization: str | None = Header(None),
 ):
     """Потоковый ROMA AI endpoint; X-API-Key имеет приоритет над Bearer."""
-    message = request.message.strip()
+    message = body.message.strip()
     if not message:
         raise HTTPException(status_code=400, detail="Сообщение пустое")
     api_key = x_api_key
     if not api_key and authorization:
         api_key = authorization[7:].strip() if authorization.lower().startswith("bearer ") else authorization.strip()
-    logger.info("Chat request: message=%r history=%d api_key_present=%s", message[:100], len(request.history), bool(api_key))
+    logger.info("Chat request: message=%r history=%d api_key_present=%s", message[:100], len(body.history), bool(api_key))
     return StreamingResponse(
-        stream_with_tools(message, request.history[-10:], api_key, request.name.strip() if request.name else None),
+        stream_with_tools(message, body.history[-10:], api_key, body.name.strip() if body.name else None),
         media_type="text/plain; charset=utf-8",
         headers={"Cache-Control": "no-cache, no-store", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
@@ -926,21 +991,13 @@ async def submit_task(payload: RomaTaskInput, request: Request, key_info: dict =
         status="queued",
         payload=payload.model_dump(),
     )
+    db.update_execution_job(job_id, backend=payload.backend)
 
     # Increment usage
-    # Dispatch to execution backend (local/vastai/slurm/ray)
+    # Dispatch — ТОЛЬКО фоновый poll_and_execute (одна точка). Не рентим здесь,
+    # иначе Vast создаётся дважды (submit + worker) → утечка инстанса.
     backend_protocol = "rom"
     backend_target = f"rom://local/{job_id}"
-    try:
-        backend_result = await dispatch_job(
-            job_id=job_id,
-            tenant_id=tenant_id,
-            payload=payload.model_dump(),
-        )
-        backend_protocol = backend_result.get("protocol", "rom")
-        backend_target = backend_result.get("target", f"rom://local/{job_id}")
-    except Exception as exc:
-        logger.warning("backend.dispatch.failed tenant=%s job=%s: %s", tenant_id, job_id, exc)
 
     gpu_sec = 300 if payload.gpu_required else 0
     _increment_usage(tenant_id, gpu_sec)
@@ -988,6 +1045,8 @@ async def get_status(job_id: str, key_info: dict = Depends(verify_api_key)):
         started_at=job.get("started_at"),
         completed_at=job.get("completed_at"),
         error=job.get("error"),
+        backend=job.get("backend"),
+        backend_job_id=job.get("backend_job_id"),
     )
 
 
@@ -998,6 +1057,11 @@ async def cancel_job(job_id: str, key_info: dict = Depends(verify_api_key)):
     if not job or job.get("tenant_id") != tenant_id:
         raise HTTPException(status_code=404, detail="Job not found")
     db.update_execution_job(job_id, status="cancelled")
+    # Гасим backend-инстанс (Vast.ai destroy и т.п.)
+    try:
+        await backend_cancel_job(tenant_id=tenant_id, job_id=job_id)
+    except Exception as exc:
+        logger.warning("cancel.backend_cleanup_failed tenant=%s job=%s: %s", tenant_id, job_id, exc)
     try:
         write_event(tenant_id, "job.cancelled", "job", job_id, {})
     except Exception:
@@ -1023,7 +1087,7 @@ async def complete_job(job_id: str, key_info: dict = Depends(verify_api_key)):
         except Exception:
             actual_duration_s = 300
     gpu_sec = max(actual_duration_s, 0)
-    _increment_usage(tenant_id, gpu_sec, cost_only=True)
+    _increment_usage(tenant_id, gpu_sec)
 
     # Cleanup backend instance (Vast.ai destroy etc.)
     try:
