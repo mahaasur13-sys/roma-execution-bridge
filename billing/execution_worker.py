@@ -84,6 +84,7 @@ async def execute_and_bill(
                 job_id,
                 status="failed",
                 backend=backend_name if backend_name != "local" else payload.get("backend"),
+                completed_at=datetime.now(timezone.utc).isoformat(),
                 error=str(result.get("message", "dispatch failed"))[:500],
             )
             return {"status": "failed", "job_id": job_id, "error": result.get("message", "")}
@@ -92,7 +93,7 @@ async def execute_and_bill(
                                           backend_job_id=str(contract_id) if contract_id else None)
     except Exception as exc:
         logger.error("execute_and_bill.dispatch_failed job=%s: %s", job_id, exc)
-        _db_adapter.update_execution_job(job_id, status="failed", error=str(exc)[:500])
+        _db_adapter.update_execution_job(job_id, status="failed", completed_at=datetime.now(timezone.utc).isoformat(), error=str(exc)[:500])
         return {"status": "failed", "error": str(exc)}
 
     # Шаг 2: Poll до завершения (макс 10 мин для GPU, 2 мин для local)
@@ -161,8 +162,7 @@ async def execute_and_bill(
 
     # Обновляем статус job в БД
     _db_adapter.update_execution_job(job_id, status=status,
-                                      completed_at=now_iso, cost_usd=cost_usd,
-                                      duration_seconds=elapsed,
+                                      completed_at=now_iso,
                                       error="" if billing_ok else "Billing error")
 
     # Шаг 6: Уничтожить инстанс (только для vastai)

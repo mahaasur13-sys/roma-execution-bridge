@@ -993,7 +993,7 @@ async def cancel_job(job_id: str, key_info: dict = Depends(verify_api_key)):
     job = db.get_execution_job(job_id)
     if not job or job.get("tenant_id") != tenant_id:
         raise HTTPException(status_code=404, detail="Job not found")
-    db.update_execution_job(job_id, status="cancelled")
+    db.update_execution_job(job_id, status="cancelled", completed_at=datetime.now(timezone.utc).isoformat())
     # Гасим backend-инстанс (Vast.ai destroy и т.п.)
     try:
         await backend_cancel_job(tenant_id=tenant_id, job_id=job_id)
