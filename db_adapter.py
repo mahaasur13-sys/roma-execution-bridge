@@ -1272,6 +1272,12 @@ async def _update_execution_job_pg(job_id, status, completed_at, error, backend,
             if error is not None:
                 sets.append("error = %s")
                 params.append(error)
+            if backend is not None:
+                sets.append("backend = %s")
+                params.append(backend)
+            if backend_job_id is not None:
+                sets.append("backend_job_id = %s")
+                params.append(backend_job_id)
             if sets:
                 params.append(job_id)
                 cur.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = %s", params)
@@ -1295,6 +1301,12 @@ def _update_execution_job_sqlite(job_id, status, completed_at, error, backend, b
         if error is not None:
             sets.append("error = ?")
             params.append(error)
+        if backend is not None:
+            sets.append("backend = ?")
+            params.append(backend)
+        if backend_job_id is not None:
+            sets.append("backend_job_id = ?")
+            params.append(backend_job_id)
         if sets:
             params.append(job_id)
             c.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = ?", params)

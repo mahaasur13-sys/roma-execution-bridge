@@ -74,7 +74,7 @@ async def execute_and_bill(
         result = await _backend_manager["dispatch"](
             job_id=job_id, tenant_id=tenant_id, payload=payload
         )
-        backend_name = result.get("backend", "local")
+        backend_name = result.get("backend") or payload.get("backend") or "local"
         price_per_hour = result.get("price_per_hour", 0.0)
         contract_id = result.get("contract_id")
 

@@ -370,6 +370,7 @@ class VastaiBackend(BaseBackend):
         logger.error("vastai.dispatch_exhausted gpu=%s attempts=%d last_error=%s",
                       gpu_filter, 4, last_error)
         return {
+            "backend": "vastai",
             "status": "failed",
             "job_id": ctx.job_id,
             "message": f"Failed to rent after 4 attempts. Last error: {last_error}",
