@@ -210,9 +210,6 @@ class VastaiBackend(BaseBackend):
         logger.info("vastai.search found=%d gpu=%s max_price=%s",
                      len(offers), gpu_filter or self._default_gpu, max_price)
         # Client-side price filter
-        # Filter out non-rentable offers
-        offers = [o for o in offers if o.get("rentable", True) is not False]
-
         if max_price is not None:
             offers = [o for o in offers if o.price_per_hour <= max_price]
         return sorted(offers, key=lambda o: o.price_per_hour)
