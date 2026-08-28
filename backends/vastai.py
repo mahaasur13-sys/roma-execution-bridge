@@ -86,6 +86,10 @@ GPU_TIERS: dict[str, dict] = {
                   "max_price": 2.00, "min_ram_mb": 24 * 1024},
 }
 
+# Vast.ai model fallback chain — tried in order at the SAME max_price.
+# Requested model first (if in chain), then progressively cheaper/different models.
+GPU_FALLBACK_CHAIN = ["RTX_4090", "RTX_4080", "RTX_3090"]
+
 # ──────────────────────────────────────────────────────────────────────
 # VastaiBackend
 # ──────────────────────────────────────────────────────────────────────
@@ -290,90 +294,113 @@ class VastaiBackend(BaseBackend):
     # ── job dispatch ───────────────────────────────────────────────
 
     async def dispatch(self, ctx: JobContext) -> dict:
-        """Full dispatch: search → rent → launch on Vast.ai."""
+        """Full dispatch: search → rent → launch on Vast.ai.
 
+        Falls back through GPU_FALLBACK_CHAIN at the same max_price
+        when a model has no offers (not on rate-limit).
+        """
         if not self.enabled:
             return {"status": "error", "message": "Vast.ai not configured: missing VAST_KEY / VASTAI_API_KEY"}
 
-        gpu_filter = ctx.instance_type if ctx.instance_type != "any" else self._default_gpu
+        requested_gpu = ctx.instance_type if ctx.instance_type != "any" else self._default_gpu
         max_price = self._gpu_tier.get("max_price", self._max_price)
         min_ram = self._gpu_tier.get("min_ram_mb", 8 * 1024)
         image = ctx.docker_image
 
-        # Step 1: search
-        # Step 1-3 retry loop: fresh search + rent, handle stale offers & rate limits
+        # Build the model chain: requested model first (if in chain, start there),
+        # otherwise requested then the fixed fallback chain.
+        if requested_gpu in GPU_FALLBACK_CHAIN:
+            gpu_chain = GPU_FALLBACK_CHAIN[GPU_FALLBACK_CHAIN.index(requested_gpu):]
+        else:
+            gpu_chain = [requested_gpu] + GPU_FALLBACK_CHAIN
+
         import random as _random
         last_error = None
-        for attempt in range(1, 5):
-            try:
-                offers = self.search_offers(
-                    gpu_filter=gpu_filter,
-                    max_price=max_price,
-                    min_ram_mb=min_ram,
-                    min_disk_gb=self._min_disk_gb,
-                    limit=5,
-                )
 
-                if not offers:
-                    logger.warning("vastai.no_offers gpu=%s attempt=%d", gpu_filter, attempt)
-                    last_error = "No offers found"
+        for gpu_model in gpu_chain:
+            rate_limit_hits = 0
+            for attempt in range(1, 5):
+                try:
+                    offers = self.search_offers(
+                        gpu_filter=gpu_model,
+                        max_price=max_price,
+                        min_ram_mb=min_ram,
+                        min_disk_gb=self._min_disk_gb,
+                        limit=5,
+                    )
+
+                    if not offers:
+                        logger.warning("vastai.no_offers gpu=%s attempt=%d", gpu_model, attempt)
+                        last_error = f"No offers for {gpu_model}"
+                        break  # no offers → next model in chain
+
+                    best = offers[0]
+                    logger.info("vastai.selected instance=%d gpu=%s score=%.2f price=%.4f/hr attempt=%d",
+                                 best.instance_id, best.gpu_name, best.score, best.price_per_hour, attempt)
+
+                    label = f"roma-{ctx.tenant_id[:12]}-{ctx.job_id[:8]}"
+                    rental = self.rent_instance(
+                        offer=best, image=image, disk_gb=self._min_disk_gb, label=label
+                    )
+
+                    if rental:
+                        contract_id = rental["contract_id"]
+                        self._job_instance_map[ctx.job_id] = contract_id
+                        used_model = best.gpu_name or gpu_model
+                        result = {
+                            "backend": "vastai",
+                            "status": "provisioning",
+                            "job_id": ctx.job_id,
+                            "contract_id": contract_id,
+                            "instance_id": best.instance_id,
+                            "gpu_name": used_model,
+                            "price_per_hour": best.price_per_hour,
+                            "ssh_host": "",
+                            "estimated_boot_sec": 60,
+                        }
+                        if gpu_model != requested_gpu:
+                            result["message"] = f"fallback used={used_model} requested={requested_gpu}"
+                            logger.info("vastai.fallback used=%s requested=%s job=%s",
+                                        used_model, requested_gpu, ctx.job_id)
+                        return result
+
+                    last_error = f"rent_instance returned None for {best.instance_id}"
+
+                except Exception as e:
+                    last_error = e
+                    error_text = str(e).lower()
+
+                    # no_such_ask — stale offer, re-search same model
+                    if "no_such_ask" in error_text or "not available" in error_text:
+                        logger.warning("vastai.no_such_ask gpu=%s attempt=%d: %s", gpu_model, attempt, e)
+                        _random.uniform(0, 0.3)  # tiny jitter before re-search
+                        continue
+
+                    # 429 rate limit — backoff, 1 retry same model, then next model
+                    if "429" in error_text or "too frequent" in error_text or "rate" in error_text or "too many requests" in error_text:
+                        rate_limit_hits += 1
+                        wait = (2 ** attempt) + _random.uniform(0, 1)
+                        logger.warning("vastai.rate_limited gpu=%s attempt=%d hits=%d sleep=%.1fs",
+                                       gpu_model, attempt, rate_limit_hits, wait)
+                        time.sleep(wait)
+                        if rate_limit_hits >= 2:
+                            break  # two rate-limit hits → next model
+                        continue
+
+                    # Unexpected error — fail this attempt, retry same model
+                    logger.warning("vastai.rent_error gpu=%s attempt=%d: %s", gpu_model, attempt, e)
                     continue
 
-                best = offers[0]
-                logger.info("vastai.selected instance=%d gpu=%s score=%.2f price=%.4f/hr attempt=%d",
-                             best.instance_id, best.gpu_name, best.score, best.price_per_hour, attempt)
+            logger.info("vastai.gpu_exhausted gpu=%s", gpu_model)
 
-                label = f"roma-{ctx.tenant_id[:12]}-{ctx.job_id[:8]}"
-                rental = self.rent_instance(
-                    offer=best, image=image, disk_gb=self._min_disk_gb, label=label
-                )
-
-                if rental:
-                    contract_id = rental["contract_id"]
-                    self._job_instance_map[ctx.job_id] = contract_id
-                    return {
-                        "backend": "vastai",
-                        "status": "provisioning",
-                        "job_id": ctx.job_id,
-                        "contract_id": contract_id,
-                        "instance_id": best.instance_id,
-                        "gpu_name": best.gpu_name,
-                        "price_per_hour": best.price_per_hour,
-                        "ssh_host": "",
-                        "estimated_boot_sec": 60,
-                    }
-
-                last_error = f"rent_instance returned None for {best.instance_id}"
-
-            except Exception as e:
-                last_error = e
-                error_text = str(e).lower()
-
-                # no_such_ask — stale offer, re-search
-                if "no_such_ask" in error_text or "not available" in error_text:
-                    logger.warning("vastai.no_such_ask attempt=%d: %s", attempt, e)
-                    _random.uniform(0, 0.3)  # tiny jitter before re-search
-                    continue
-
-                # 429 rate limit — exponential backoff
-                if "429" in error_text or "too frequent" in error_text or "rate" in error_text or "too many requests" in error_text:
-                    wait = (2 ** attempt) + _random.uniform(0, 1)
-                    logger.warning("vastai.rate_limited attempt=%d sleep=%.1fs", attempt, wait)
-                    time.sleep(wait)
-                    continue
-
-                # Unexpected error — fail this attempt, retry with fresh search
-                logger.warning("vastai.rent_error attempt=%d: %s", attempt, e)
-                continue
-
-        # All attempts exhausted
-        logger.error("vastai.dispatch_exhausted gpu=%s attempts=%d last_error=%s",
-                      gpu_filter, 4, last_error)
+        # Entire chain exhausted
+        logger.error("vastai.dispatch_exhausted requested=%s chain=%s last_error=%s",
+                      requested_gpu, gpu_chain, last_error)
         return {
             "backend": "vastai",
             "status": "failed",
             "job_id": ctx.job_id,
-            "message": f"Failed to rent after 4 attempts. Last error: {last_error}",
+            "message": f"Failed to rent after exhausting chain {gpu_chain}. Last error: {last_error}",
         }
 
     async def get_status(self, job_id: str, instance_id: str | None = None) -> dict:
