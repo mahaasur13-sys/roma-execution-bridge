@@ -54,6 +54,13 @@ def list_backends() -> dict:
         backends["vastai"] = {"enabled": v.enabled, "active": _backend_name == "vastai"}
     except Exception:
         backends["vastai"] = {"enabled": False, "active": False, "error": "import failed"}
+    # gpu_worker
+    try:
+        from backends.gpu_worker_backend import GpuWorkerBackend
+        gw = GpuWorkerBackend()
+        backends["gpu_worker"] = {"enabled": gw.enabled, "active": _backend_name == "gpu_worker"}
+    except Exception:
+        backends["gpu_worker"] = {"enabled": False, "active": False, "error": "import failed"}
     return backends
 
 
@@ -69,16 +76,13 @@ async def dispatch_job(job_id: str = "", tenant_id: str = "", payload: dict = No
         priority=p.get("priority", 5),
         payload=p,
     )
-    backend = get_backend()
-    return await backend.dispatch(ctx)
+    backend = get_backend(p.get("backend"))
     return await backend.dispatch(ctx)
 
 
 async def backend_cancel_job(job_id: str, tenant_id: str = "") -> dict:
     """Cancel job on active backend (adapter for main.py)."""
     ctx = JobContext(job_id=job_id, tenant_id=tenant_id, payload={})
-    backend = get_backend()
-    return await backend.cancel_job(ctx)
     backend = get_backend()
     return await backend.cancel_job(ctx)
 
