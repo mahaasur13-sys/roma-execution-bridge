@@ -31,6 +31,9 @@ def get_backend(name: str | None = None) -> BaseBackend:
             )
             _backend = LocalBackend()
             _backend_name = "local"
+    elif current == "gpu_worker":
+        from backends.gpu_worker_backend import GpuWorkerBackend
+        _backend = GpuWorkerBackend()
     else:
         _backend = LocalBackend()
 
