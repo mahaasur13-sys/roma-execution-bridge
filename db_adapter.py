@@ -488,6 +488,52 @@ def drain_worker(worker_id: str) -> None:
         db.drain_worker(worker_id)
 
 
+def register_worker(worker_id: str, tenant_id: str, capabilities: dict = None) -> None:
+    if _pg_enabled():
+        from db_pg_sync import register_worker as pg_fn
+        conn = _pg_conn()
+        try:
+            pg_fn(conn, worker_id, tenant_id, capabilities)
+            conn.commit()
+        finally:
+            _pg_return(conn)
+    # SQLite path has no workers table — no-op.
+
+
+def update_worker_heartbeat(worker_id: str) -> None:
+    if _pg_enabled():
+        from db_pg_sync import update_worker_heartbeat as pg_fn
+        conn = _pg_conn()
+        try:
+            pg_fn(conn, worker_id)
+            conn.commit()
+        finally:
+            _pg_return(conn)
+
+
+def release_worker(worker_id: str) -> None:
+    if _pg_enabled():
+        from db_pg_sync import release_worker as pg_fn
+        conn = _pg_conn()
+        try:
+            pg_fn(conn, worker_id)
+            conn.commit()
+        finally:
+            _pg_return(conn)
+
+
+def get_daily_stats(days: int = 7) -> dict:
+    """Daily job count + GPU hours (last 7 days) for /stats/daily."""
+    if _pg_enabled():
+        from db_pg_sync import get_daily_stats as pg_fn
+        conn = _pg_conn()
+        try:
+            return pg_fn(conn)
+        finally:
+            _pg_return(conn)
+    return {"dates": [], "jobs_count": [], "gpu_hours": []}
+
+
 def list_tenants() -> list[dict]:
     if _pg_enabled():
         from db_pg_sync import list_tenants as pg_fn
