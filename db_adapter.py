@@ -534,6 +534,65 @@ def get_daily_stats(days: int = 7) -> dict:
     return {"dates": [], "jobs_count": [], "gpu_hours": []}
 
 
+def _ensure_submit_idempotency_table(c) -> None:
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS submit_idempotency_keys (
+            tenant_id TEXT NOT NULL,
+            idempotency_key TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (tenant_id, idempotency_key)
+        )
+    """)
+
+
+def find_job_by_idempotency(tenant_id: str, idempotency_key: str):
+    """Return job_id for (tenant_id, idempotency_key), or None if not present."""
+    if _pg_enabled():
+        from db_pg_sync import find_job_by_idempotency as pg_fn
+        conn = _pg_conn()
+        try:
+            return pg_fn(conn, tenant_id, idempotency_key)
+        finally:
+            _pg_return(conn)
+    c = _sqlite_conn()
+    try:
+        _ensure_submit_idempotency_table(c)
+        row = c.execute(
+            "SELECT job_id FROM submit_idempotency_keys WHERE tenant_id=? AND idempotency_key=?",
+            (tenant_id, idempotency_key),
+        ).fetchone()
+        return row[0] if row else None
+    finally:
+        c.close()
+
+
+def create_job_idempotency(tenant_id: str, idempotency_key: str, job_id: str) -> bool:
+    """Reserve (tenant_id, idempotency_key) -> job_id atomically.
+
+    Returns True if this call created the mapping, False if the key already
+    existed (another identical submit won the race).
+    """
+    if _pg_enabled():
+        from db_pg_sync import create_job_idempotency as pg_fn
+        conn = _pg_conn()
+        try:
+            return pg_fn(conn, tenant_id, idempotency_key, job_id)
+        finally:
+            _pg_return(conn)
+    c = _sqlite_conn()
+    try:
+        _ensure_submit_idempotency_table(c)
+        c.execute(
+            "INSERT OR IGNORE INTO submit_idempotency_keys (tenant_id, idempotency_key, job_id) VALUES (?,?,?)",
+            (tenant_id, idempotency_key, job_id),
+        )
+        c.commit()
+        return c.rowcount > 0
+    finally:
+        c.close()
+
+
 def list_tenants() -> list[dict]:
     if _pg_enabled():
         from db_pg_sync import list_tenants as pg_fn
