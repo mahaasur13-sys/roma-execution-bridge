@@ -81,6 +81,15 @@ def init_db(conn) -> None:
             updated_at TIMESTAMP DEFAULT now()
         )
     """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS submit_idempotency_keys (
+            tenant_id TEXT NOT NULL,
+            idempotency_key TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT now(),
+            PRIMARY KEY (tenant_id, idempotency_key)
+        )
+    """)
     conn.commit()
 
 
@@ -426,6 +435,32 @@ def get_daily_stats(conn) -> dict:
         "jobs_count": [int(jobs_by_day.get(d, 0)) for d in dates],
         "gpu_hours": [round(float(gpu_by_day.get(d, 0)) / 3600.0, 4) for d in dates],
     }
+
+
+def find_job_by_idempotency(conn, tenant_id: str, idempotency_key: str):
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT job_id FROM submit_idempotency_keys WHERE tenant_id=%s AND idempotency_key=%s",
+        (tenant_id, idempotency_key)
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+def create_job_idempotency(conn, tenant_id: str, idempotency_key: str, job_id: str) -> bool:
+    """Atomically reserve (tenant_id, idempotency_key) -> job_id.
+
+    Returns True if this call created the mapping, False if the key already
+    existed (another identical submit won the race).
+    """
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO submit_idempotency_keys (tenant_id, idempotency_key, job_id) "
+        "VALUES (%s,%s,%s) ON CONFLICT (tenant_id, idempotency_key) DO NOTHING",
+        (tenant_id, idempotency_key, job_id)
+    )
+    conn.commit()
+    return cur.rowcount > 0
 
 
 def list_tenants(conn) -> list[dict]:
