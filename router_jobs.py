@@ -13,15 +13,16 @@ router = APIRouter(prefix="/v1/jobs", tags=["jobs"])
 
 
 def _tenant_from_key(x_api_key: str = Header(None)) -> str:
+    """Resolve the tenant from the API key via the canonical DB lookup.
+
+    Never derive a tenant_id from the key string itself.
+    """
     if not x_api_key:
         raise HTTPException(401, "Missing X-API-Key")
-    tenant = db.get_tenant(x_api_key)
+    tenant = db.find_tenant_by_key(x_api_key)
     if not tenant:
-        tenant_id = x_api_key if len(x_api_key) > 20 else "tenant-" + x_api_key[:12]
-        if not db.get_tenant(tenant_id):
-            raise HTTPException(401, "Invalid API key")
-        return tenant_id
-    return tenant.get("id", x_api_key)
+        raise HTTPException(401, "Invalid API key")
+    return tenant.get("tenant_id", "")
 
 
 @router.post("/{job_id}/retry")
@@ -75,10 +76,10 @@ async def cancel_job(job_id: str, x_api_key: str = Header(None)):
 
 @router.post("/{job_id}/complete")
 async def complete_job(job_id: str, payload: dict = {}, x_api_key: str = Header(None)):
+    tenant_id = _tenant_from_key(x_api_key)
     job = db.get_execution_job(job_id)
-    if not job:
+    if not job or job.get("tenant_id") != tenant_id:
         raise HTTPException(404, "Job not found")
-    tenant_id = job.get("tenant_id", "")
     current = job.get("status", "")
     tr = validate_transition(current, "completed")
     if not tr["allowed"]:
@@ -91,13 +92,16 @@ async def complete_job(job_id: str, payload: dict = {}, x_api_key: str = Header(
 
 @router.post("/{job_id}/worker-ack")
 async def worker_ack(job_id: str, payload: dict, x_api_key: str = Header(None)):
+    # FIXME(P0-4): if this is meant to be called BY workers (not tenants), it needs
+    # a separate worker token and an assignment check. Until then it is tenant-scoped:
+    # the caller may only acknowledge their own job.
     action = payload.get("action", "start")
     if action not in ("start", "complete", "fail"):
         raise HTTPException(400, "action must be start|complete|fail")
+    tenant_id = _tenant_from_key(x_api_key)
     job = db.get_execution_job(job_id)
-    if not job:
+    if not job or job.get("tenant_id") != tenant_id:
         raise HTTPException(404, "Job not found")
-    tenant_id = job.get("tenant_id", "")
 
     status_map = {"start": "running", "complete": "completed", "fail": "failed"}
     new_status = status_map[action]
