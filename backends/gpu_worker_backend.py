@@ -42,7 +42,7 @@ class GpuWorkerBackend(BaseBackend):
         reject the request with 401.
         """
         token = os.getenv("ROMA_GPU_WORKER_TOKEN", "")
-        return {"X-Worker-Token": token} if token else {}
+        return {"X-Roma-Worker-Token": token} if token else {}
 
     async def dispatch(self, ctx: JobContext) -> dict:
         url = _worker_url()

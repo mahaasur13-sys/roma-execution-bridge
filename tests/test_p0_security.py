@@ -205,7 +205,7 @@ def test_execute_wrong_worker_token(monkeypatch):
     resp = client.post(
         "/execute",
         json={"job_id": "j1", "command": "python -c 'print(1)'"},
-        headers={"X-Worker-Token": "wrong"},
+        headers={"X-Roma-Worker-Token": "wrong"},
     )
     assert resp.status_code == 401
     assert called == []
@@ -221,7 +221,7 @@ def test_execute_rejects_command_outside_allowlist(monkeypatch):
     resp = client.post(
         "/execute",
         json={"job_id": "j1", "command": "sh -c 'id'"},
-        headers={"X-Worker-Token": "sekret-token"},
+        headers={"X-Roma-Worker-Token": "sekret-token"},
     )
     assert resp.status_code == 403
     assert called == []
@@ -241,7 +241,7 @@ def test_execute_rejects_mount_paths(monkeypatch):
             "command": "python -c 'print(1)'",
             "mount_paths": {"/host/etc": "/etc"},
         },
-        headers={"X-Worker-Token": "sekret-token"},
+        headers={"X-Roma-Worker-Token": "sekret-token"},
     )
     assert resp.status_code == 403
     assert called == []
@@ -257,7 +257,7 @@ def test_execute_rejects_image_outside_allowlist(monkeypatch):
     resp = client.post(
         "/execute",
         json={"job_id": "j1", "command": "python -c 'print(1)'", "image": "alpine:latest"},
-        headers={"X-Worker-Token": "sekret-token"},
+        headers={"X-Roma-Worker-Token": "sekret-token"},
     )
     assert resp.status_code == 403
     assert called == []

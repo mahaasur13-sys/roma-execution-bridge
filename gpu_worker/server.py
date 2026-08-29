@@ -255,7 +255,7 @@ def health():
 async def execute_job(
     job: JobRequest,
     background_tasks: BackgroundTasks,
-    x_worker_token: Optional[str] = Header(None, alias="X-Worker-Token"),
+    x_worker_token: Optional[str] = Header(None, alias="X-Roma-Worker-Token"),
 ):
     """Execute a GPU job. Requires a valid worker token (fail-closed)."""
     if not _worker_token_valid(x_worker_token):
