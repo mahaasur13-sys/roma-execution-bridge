@@ -375,6 +375,59 @@ def drain_worker(conn, worker_id: str) -> None:
     conn.commit()
 
 
+def register_worker(conn, worker_id: str, tenant_id: str, capabilities: dict = None) -> None:
+    import json
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO workers (id, tenant_id, status, capabilities, last_heartbeat) "
+        "VALUES (%s,%s,'idle',%s,now()) "
+        "ON CONFLICT (id) DO UPDATE SET tenant_id=EXCLUDED.tenant_id, "
+        "status='idle', capabilities=EXCLUDED.capabilities, "
+        "last_heartbeat=now(), updated_at=now()",
+        (worker_id, tenant_id, json.dumps(capabilities or {}))
+    )
+    conn.commit()
+
+
+def update_worker_heartbeat(conn, worker_id: str) -> None:
+    cur = conn.cursor()
+    cur.execute("UPDATE workers SET last_heartbeat=now(), updated_at=now() WHERE id=%s", (worker_id,))
+    conn.commit()
+
+
+def release_worker(conn, worker_id: str) -> None:
+    cur = conn.cursor()
+    cur.execute("UPDATE workers SET status='idle', updated_at=now() WHERE id=%s", (worker_id,))
+    conn.commit()
+
+
+def get_daily_stats(conn) -> dict:
+    """Daily job count + GPU hours over the last 7 days (for /stats/daily)."""
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT to_char(d, 'YYYY-MM-DD') FROM generate_series(now() - interval '7 days', now(), interval '1 day') d"
+    )
+    dates = [r[0] for r in cur.fetchall()]
+
+    cur.execute(
+        "SELECT to_char(created_at, 'YYYY-MM-DD') d, count(*) FROM execution_jobs "
+        "WHERE created_at >= now() - interval '7 days' GROUP BY d"
+    )
+    jobs_by_day = {r[0]: r[1] for r in cur.fetchall()}
+
+    cur.execute(
+        "SELECT to_char(created_at, 'YYYY-MM-DD') d, sum(value) FROM usage_events "
+        "WHERE created_at >= now() - interval '7 days' AND event_type='gpu_execution' GROUP BY d"
+    )
+    gpu_by_day = {r[0]: r[1] for r in cur.fetchall()}
+
+    return {
+        "dates": dates,
+        "jobs_count": [int(jobs_by_day.get(d, 0)) for d in dates],
+        "gpu_hours": [round(float(gpu_by_day.get(d, 0)) / 3600.0, 4) for d in dates],
+    }
+
+
 def list_tenants(conn) -> list[dict]:
     cur = conn.cursor()
     cur.execute("SELECT * FROM tenants ORDER BY created_at DESC")

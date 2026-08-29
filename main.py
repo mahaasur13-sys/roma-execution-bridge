@@ -190,6 +190,45 @@ def _check_spend_cap(tenant_id: str, estimated_cost: float, plan_name: str = "fr
         ))
     return True, ""
 
+
+def finalize_job_billing(tenant_id: str, job_id: str, gpu_sec: float,
+                         plan_name: str = "free") -> bool:
+    """Single source of truth for debiting a job at terminal state.
+
+    Both /complete/{job_id} (manual) and billing.execution_worker.execute_and_bill
+    (background) MUST go through this function so a job is debited exactly once.
+    Idempotent: a job that is already terminal is never debited again.
+
+    Returns True if a debit was applied, False otherwise (already finalized or
+    not owned by `tenant_id`).
+    """
+    job = db.get_execution_job(job_id)
+    if not job or job.get("tenant_id") != tenant_id:
+        return False
+    if job.get("status") in ("completed", "cancelled", "failed", "timeout"):
+        return False
+    _increment_usage(tenant_id, gpu_sec, plan_name=plan_name, job_id=job_id)
+    return True
+
+
+def _check_limits(tenant_id: str) -> tuple[bool, str]:
+    """Quota check for the internal/demo submit path. Returns (allowed, reason)."""
+    t = db.get_tenant(tenant_id)
+    plan_name = t.get("plan", "free") if t else "free"
+    plan = PLANS.get(plan_name, PLANS.get("free", {}))
+    max_jobs = plan.get("max_jobs_per_month", 50)
+    if max_jobs < 0:
+        return True, ""
+    used = db.count_jobs_for_tenant(tenant_id)
+    if used >= max_jobs:
+        return False, f"Monthly job limit reached: {used}/{max_jobs}"
+    return True, ""
+
+
+def _get_tenant_usage(tenant_id: str) -> dict:
+    """Usage summary for the dashboard (total_jobs + total_gpu_seconds)."""
+    return db.get_tenant_usage_db(tenant_id)
+
 from pydantic import BaseModel, Field, ConfigDict
 from starlette.requests import Request
 from starlette.middleware.cors import CORSMiddleware
@@ -516,6 +555,7 @@ roma_jobs_total = Counter("roma_jobs_total", "Total number of submitted jobs", [
 roma_jobs_active = Gauge("roma_jobs_active", "Currently active jobs", ["tenant_id"])
 roma_queue_depth = Gauge("roma_queue_depth", "Current queue depth", ["tenant_id"])
 queue_depth = 0
+jobs: dict = {}  # in-memory job registry for the demo/dashboard path
 roma_requests_total = Counter("roma_requests_total", "Total HTTP requests", ["endpoint", "method", "status"])
 roma_request_duration = Histogram("roma_request_duration_seconds", "Request duration in seconds", ["endpoint", "method"])
 
@@ -851,9 +891,8 @@ async def chat_stream(
 
 @app.get("/stats/daily")
 async def daily_stats(request: Request):
-    """Daily job/GPU stats from PostgreSQL."""
-    rows = db.get_daily_stats()
-    return {"stats": rows}
+    """Daily job/GPU stats (last 7 days)."""
+    return db.get_daily_stats()
 
 @app.get("/health")
 async def health():
@@ -927,14 +966,12 @@ async def submit_task(payload: RomaTaskInput, request: Request, key_info: dict =
     )
     db.update_execution_job(job_id, backend=payload.backend)
 
-    # Increment usage
     # Dispatch — ТОЛЬКО фоновый poll_and_execute (одна точка). Не рентим здесь,
     # иначе Vast создаётся дважды (submit + worker) → утечка инстанса.
+    # No debit at submit: the job is only queued. Actual billing happens exactly
+    # once at finalize via finalize_job_billing() (see /complete and execute_and_bill).
     backend_protocol = "rom"
     backend_target = f"rom://local/{job_id}"
-
-    gpu_sec = 300 if payload.gpu_required else 0
-    _increment_usage(tenant_id, gpu_sec)
 
     # Audit: job.created
     try:
@@ -1010,18 +1047,21 @@ async def complete_job(job_id: str, key_info: dict = Depends(verify_api_key)):
     if not job or job.get("tenant_id") != tenant_id:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # FIXED: real billing — compute actual GPU seconds from job duration
+    # Single source of truth: finalize_job_billing() debits exactly once
+    # (idempotent). Actual GPU seconds are derived from the job duration.
     actual_duration_s = 0
-    import time
     started_at = job.get("started_at")
     if started_at:
         try:
             started_dt = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
-            actual_duration_s = (datetime.utcnow() - started_dt.replace(tzinfo=None)).total_seconds()
+            if started_dt.tzinfo is None:
+                started_dt = started_dt.replace(tzinfo=timezone.utc)
+            actual_duration_s = (datetime.now(timezone.utc) - started_dt).total_seconds()
         except Exception:
-            actual_duration_s = 300
+            actual_duration_s = 0
     gpu_sec = max(actual_duration_s, 0)
-    _increment_usage(tenant_id, gpu_sec, cost_only=True)
+    plan_name = (db.get_tenant(tenant_id) or {}).get("plan", "free")
+    finalize_job_billing(tenant_id, job_id, gpu_sec, plan_name)
 
     # Cleanup backend instance (Vast.ai destroy etc.)
     try:
@@ -1387,8 +1427,8 @@ async def submit_job(payload: RomaTaskInput, key_info: dict) -> RomaTaskResponse
         queue_depth -= 1
         roma_queue_depth.labels(tenant_id=tenant_id).set(queue_depth)
         roma_jobs_total.labels(tenant_id=tenant_id).inc()
-        gpu_sec = 300 if payload.gpu_required else 0
-        _increment_usage(tenant_id, gpu_sec)
+        # No debit at demo submit — billing is finalized exactly once via
+        # finalize_job_billing() (see /complete and execute_and_bill).
         tenant_jobs = [j for j in jobs.values() if j.get("tenant_id") == tenant_id]
         roma_jobs_active.labels(tenant_id=tenant_id).set(len(tenant_jobs))
         return RomaTaskResponse(

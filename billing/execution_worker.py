@@ -129,36 +129,29 @@ async def execute_and_bill(
         status = "timeout"
         logger.warning("execute_and_bill.timeout job=%s waited=%.0fs", job_id, waited)
 
-    # Шаг 3: Расчёт стоимости
+    # Шаг 3-4: единая точка списания. Деньги списываются ровно один раз через
+    # main.finalize_job_billing() (идемпотентно). gpu_sec = фактическое время.
     elapsed = time.monotonic() - start_time
-    elapsed_hours = elapsed / 3600.0
-    cost_usd = round(elapsed_hours * price_per_hour, 6) if price_per_hour > 0 else round(elapsed_hours * 0.002, 6)
-
-    # Шаг 4: Списание с баланса
     now_iso = datetime.now(timezone.utc).isoformat()
+    cost_usd = round(elapsed * 0.00001, 8)  # single rate: $0.00001 / GPU-sec (mirrors _increment_usage)
     billing_ok = False
     try:
-        balance_before = _billing_ledger.get_balance(tenant_id) or 0.0
-        if balance_before >= cost_usd:
-            _billing_ledger.debit(
-                tenant_id, cost_usd, "USD",
-                job_id=job_id, backend=backend_name, status=status,
-            )
-            billing_ok = True
-            logger.info("execute_and_bill.debited tenant=%s amount=%.6f job=%s", tenant_id, cost_usd, job_id)
-        else:
-            logger.warning("execute_and_bill.insufficient_funds tenant=%s balance=%.4f cost=%.4f",
-                          tenant_id, balance_before, cost_usd)
-
-        # Шаг 5: Запись usage_event
-        _db_adapter.record_usage_event(
-            tenant_id, "gpu_execution", elapsed, cost_usd, job_id,
-            {"backend": backend_name, "price_per_hour": price_per_hour}
-        )
-        logger.info("execute_and_bill.usage_recorded tenant=%s job=%s", tenant_id, job_id)
-
+        # Lazy import to avoid a circular import with main.
+        from main import finalize_job_billing
+        billing_ok = finalize_job_billing(tenant_id, job_id, gpu_sec=elapsed, plan_name="free")
+        logger.info("execute_and_bill.finalized tenant=%s job=%s gpu_sec=%.1f", tenant_id, job_id, elapsed)
     except Exception as exc:
         logger.error("execute_and_bill.billing_error job=%s: %s", job_id, exc)
+
+    # Шаг 5: Запись usage_event (observability — НЕ списание денег)
+    try:
+        _db_adapter.record_usage_event(
+            tenant_id, "gpu_execution", elapsed, cost_usd, job_id,
+            {"backend": backend_name}
+        )
+        logger.info("execute_and_bill.usage_recorded tenant=%s job=%s", tenant_id, job_id)
+    except Exception as exc:
+        logger.warning("execute_and_bill.usage_record_failed job=%s: %s", job_id, exc)
 
     # Обновляем статус job в БД
     _db_adapter.update_execution_job(job_id, status=status,
