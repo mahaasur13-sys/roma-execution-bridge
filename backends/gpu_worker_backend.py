@@ -34,6 +34,16 @@ class GpuWorkerBackend(BaseBackend):
         # return an honest "failed" instead of silently falling back to local.
         return True
 
+    @staticmethod
+    def _worker_headers() -> dict:
+        """Shared worker credential sent to gpu_worker /execute.
+
+        If unset, no header is sent and the worker (which is fail-closed) will
+        reject the request with 401.
+        """
+        token = os.getenv("ROMA_GPU_WORKER_TOKEN", "")
+        return {"X-Roma-Worker-Token": token} if token else {}
+
     async def dispatch(self, ctx: JobContext) -> dict:
         url = _worker_url()
         try:
@@ -75,7 +85,7 @@ class GpuWorkerBackend(BaseBackend):
         url = _worker_url()
         payload = {"job_id": ctx.job_id, "command": command, "timeout": timeout}
         try:
-            resp = requests.post(f"{url}/execute", json=payload, timeout=timeout + 30)
+            resp = requests.post(f"{url}/execute", json=payload, headers=self._worker_headers(), timeout=timeout + 30)
         except Exception as exc:
             return {"status": "failed", "output": "", "error": str(exc)}
 

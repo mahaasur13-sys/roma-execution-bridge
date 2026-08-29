@@ -589,11 +589,8 @@ async def tracking_middleware(request: Request, call_next) -> Response:
 # ============================================
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
-if not DEEPSEEK_API_KEY:
-    try:
-        DEEPSEEK_API_KEY = (Path(__file__).parent / "config" / "deepseek_key.txt").read_text().strip()
-    except Exception:
-        pass
+# FIXME(P0-1): the key must come ONLY from env / secret manager. The committed
+# config/deepseek_key.txt fallback was removed — never read secrets from repo files.
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
 try:
@@ -1008,10 +1005,10 @@ async def cancel_job(job_id: str, key_info: dict = Depends(verify_api_key)):
 
 @app.post("/complete/{job_id}", dependencies=[Depends(verify_api_key)])
 async def complete_job(job_id: str, key_info: dict = Depends(verify_api_key)):
-    job = db.get_execution_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
     tenant_id = key_info["tenant_id"]
+    job = db.get_execution_job(job_id)
+    if not job or job.get("tenant_id") != tenant_id:
+        raise HTTPException(status_code=404, detail="Job not found")
 
     # FIXED: real billing — compute actual GPU seconds from job duration
     actual_duration_s = 0
@@ -1095,15 +1092,30 @@ async def get_usage(key_info: dict = Depends(verify_api_key)):
 @limiter.limit("10/minute")
 
 @app.post("/billing/top-up")
-async def top_up_balance(request: Request, payload: dict, tenant: dict = Depends(verify_api_key)):
-    """Admin/self-service balance top-up for testing. Credits tenant balance."""
-    amount = float(payload.get("amount", 0))
+async def top_up_balance(request: Request, payload: dict):
+    """Admin-only manual balance credit. Requires admin API key + IP allowlist.
+
+    Non-admin callers get 403; the credited tenant is an EXPLICIT admin-supplied
+    target (never derived from the caller), and the action is audited.
+    """
+    admin = _admin_only(request)
+    target_tenant_id = (payload.get("tenant_id") or "").strip()
+    if not target_tenant_id:
+        raise HTTPException(status_code=400, detail="tenant_id is required for admin top-up")
+    try:
+        amount = float(payload.get("amount", 0))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Amount must be a number")
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
-    tenant_id = payload.get("tenant_id") or tenant["tenant_id"]
-    entry_id = billing_ledger.credit(tenant_id, amount, note=
-        f"Manual top-up by {tenant['tenant_id']}")
-    return {"status": "ok", "tenant_id": tenant_id, "amount": amount, "entry_id": entry_id}
+    entry_id = billing_ledger.credit(
+        target_tenant_id, amount, note=f"Admin top-up by {admin['tenant_id']}"
+    )
+    try:
+        write_event(admin["tenant_id"], "billing.topup", "tenant", target_tenant_id, {"amount": amount})
+    except Exception as exc:
+        logger.warning("audit.topup_failed admin=%s target=%s: %s", admin["tenant_id"], target_tenant_id, exc)
+    return {"status": "ok", "tenant_id": target_tenant_id, "amount": amount, "entry_id": entry_id}
 
 @app.post("/billing/create-checkout-session")
 async def create_checkout_session(

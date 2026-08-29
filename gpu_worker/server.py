@@ -4,12 +4,14 @@ Receives jobs from ROMA control plane, executes on GPU, returns results."""
 
 import os
 import uuid
+import hmac
+import shlex
 import subprocess
 import asyncio
 from datetime import datetime
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Header
 from pydantic import BaseModel
 
 # =============================================================================
@@ -20,6 +22,14 @@ GPU_WORKER_PORT = int(os.getenv("GPU_WORKER_PORT", "8000"))
 GPU_DEVICE = os.getenv("GPU_DEVICE", "0")  # NVIDIA GPU ID
 GPU_MEMORY_LIMIT = os.getenv("GPU_MEMORY_LIMIT", "16GB")
 WORKER_ID = os.getenv("WORKER_ID", f"gpu-worker-{uuid.uuid4().hex[:8]}")
+
+# Shared secret with the control plane (backends/gpu_worker_backend.py).
+# If unset, /execute is locked down (fail-closed): every request returns 401.
+WORKER_TOKEN = os.getenv("ROMA_GPU_WORKER_TOKEN", "")
+
+# Minimal, explicit execution policy. Anything outside these lists is rejected.
+ALLOWED_BINARIES = {"python", "python3"}
+ALLOWED_IMAGES = {"python:3.11-slim", "ubuntu:22.04"}
 
 # =============================================================================
 # FastAPI App
@@ -90,63 +100,45 @@ state = WorkerState()
 # =============================================================================
 # GPU Execution Engine
 # =============================================================================
-def build_docker_command(job: JobRequest) -> list:
-    """Build Docker command for GPU job."""
+def _memory_limit(memory: str) -> str:
+    """Normalize a memory spec (e.g. '8GB' -> '8g') for docker --memory."""
+    return memory.upper().replace("GB", "g").replace("MB", "m")
+
+
+def build_docker_command(job: JobRequest, argv: list) -> list:
+    """Build a Docker command for an allowed image. No shell, no host mounts."""
     base_cmd = [
         "docker", "run",
         "--rm",
-        "--gpus", f'"device={GPU_DEVICE}"',
+        "--gpus", f"device={GPU_DEVICE}",
         "-e", f"CUDA_VISIBLE_DEVICES={GPU_DEVICE}",
+        "--memory", _memory_limit(job.memory),
+        "--user", f"{os.getuid()}:{os.getgid()}",
+        "-w", "/workspace",
     ]
-
-    # Memory limit
-    mem_limit = job.memory.upper().replace("GB", "g").replace("MB", "m")
-    base_cmd.extend(["--memory", mem_limit])
-
-    # Timeout
-    base_cmd.extend(["--user", f"{os.getuid()}:{os.getgid()}"])
-
-    # Environment vars
     if job.environment:
         for k, v in job.environment.items():
             base_cmd.extend(["-e", f"{k}={v}"])
-
-    # Mount paths
-    if job.mount_paths:
-        for host_path, container_path in job.mount_paths.items():
-            base_cmd.extend(["-v", f"{host_path}:{container_path}"])
-
-    # Working dir
-    base_cmd.extend(["-w", "/workspace"])
-
-    # Image or raw command
-    if job.image:
-        base_cmd.append(job.image)
-        base_cmd.extend(job.command.split())
-    else:
-        base_cmd.append("ubuntu:22.04")
-        base_cmd.extend(["bash", "-c", job.command])
-
+    base_cmd.append(job.image)
+    base_cmd.extend(argv)
     return base_cmd
 
 
-def execute_job_sync(job: JobRequest) -> JobResult:
-    """Execute a single GPU job synchronously."""
+def execute_job_sync(job: JobRequest, argv: list) -> JobResult:
+    """Execute a single GPU job synchronously. argv is pre-validated (shell=False)."""
     start_time = asyncio.get_event_loop().time()
 
     state.register_job(job.job_id)
 
     try:
         if job.image:
-            cmd = build_docker_command(job)
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=job.timeout
-            )
+            cmd = build_docker_command(job, argv)
         else:
-            result = subprocess.run(
-                job.command, shell=True, capture_output=True, text=True,
-                timeout=job.timeout, cwd="/workspace"
-            )
+            cmd = argv
+        result = subprocess.run(
+            cmd, shell=False, capture_output=True, text=True,
+            timeout=job.timeout, cwd="/workspace"
+        )
 
         duration = asyncio.get_event_loop().time() - start_time
 
@@ -198,6 +190,44 @@ def execute_job_sync(job: JobRequest) -> JobResult:
 
 
 # =============================================================================
+# Execution policy & auth
+# =============================================================================
+def _worker_token_valid(token: Optional[str]) -> bool:
+    """Timing-safe comparison against the shared worker token (fail-closed)."""
+    if not WORKER_TOKEN:
+        return False
+    return hmac.compare_digest(token or "", WORKER_TOKEN)
+
+
+def _validate_execute_job(job: JobRequest) -> list:
+    """Validate the execution request against the worker policy.
+
+    Returns the parsed argv list. Raises HTTPException on any violation.
+    No shell, no arbitrary images, no host mounts.
+    """
+    if job.mount_paths:
+        raise HTTPException(status_code=403, detail="mount_paths are forbidden")
+
+    if job.image and job.image not in ALLOWED_IMAGES:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Image not allowed (allowlist: {sorted(ALLOWED_IMAGES)})",
+        )
+
+    try:
+        argv = shlex.split(job.command)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid command: {exc}")
+
+    if not argv or os.path.basename(argv[0]) not in ALLOWED_BINARIES:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Command not allowed (allowlist: {sorted(ALLOWED_BINARIES)})",
+        )
+    return argv
+
+
+# =============================================================================
 # API Routes
 # =============================================================================
 @app.get("/")
@@ -222,14 +252,23 @@ def health():
 
 
 @app.post("/execute", response_model=JobResult)
-async def execute_job(job: JobRequest, background_tasks: BackgroundTasks):
-    """Execute a GPU job. Runs in background to support ROMA async scheduling."""
+async def execute_job(
+    job: JobRequest,
+    background_tasks: BackgroundTasks,
+    x_worker_token: Optional[str] = Header(None, alias="X-Roma-Worker-Token"),
+):
+    """Execute a GPU job. Requires a valid worker token (fail-closed)."""
+    if not _worker_token_valid(x_worker_token):
+        raise HTTPException(status_code=401, detail="Invalid or missing worker token")
+
     if not state.gpu_available:
         raise HTTPException(status_code=503, detail="GPU not available on this worker")
 
+    argv = _validate_execute_job(job)
+
     # Run in background task for non-blocking response
     def run_sync():
-        return execute_job_sync(job)
+        return execute_job_sync(job, argv)
 
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(None, run_sync)

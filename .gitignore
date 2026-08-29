@@ -21,3 +21,8 @@ api_keys.json
 .env.bak
 .backup_dir/
 .pids/
+
+# secrets / sensitive data — never track
+config/deepseek_key.txt
+config/api_keys.json
+data/*.db
