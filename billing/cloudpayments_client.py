@@ -66,12 +66,16 @@ class CloudPaymentsClient:
         email: str = "",
         require_confirmation: bool = False,
         subscription_plan: str = "",
+        account_id: str = "",
     ) -> dict[str, Any]:
         """
         Create a one-time order. Returns a dict with:
           - Id: order ID
           - Number: order number
           - Url: hosted payment page URL (user is redirected here)
+
+        `account_id` is echoed back as `AccountId` on the webhook so the payment
+        can be attributed to the correct tenant.
         """
         payload: dict[str, Any] = {
             "Amount": amount,
@@ -80,6 +84,8 @@ class CloudPaymentsClient:
             "Email": email,
             "RequireConfirmation": require_confirmation,
         }
+        if account_id:
+            payload["AccountId"] = account_id
         if subscription_plan:
             payload["JsonData"] = json.dumps({"plan": subscription_plan})
 
@@ -135,11 +141,13 @@ class CloudPaymentsClient:
     def verify_webhook(self, body: bytes, signature_header: str | None) -> bool:
         """
         Verify HMAC-SHA256 webhook signature from CloudPayments.
-        Priority: webhook_secret -> api_secret (fallback).
+
+        Uses ONLY CLOUDPAYMENTS_WEBHOOK_SECRET. The API secret must never be used
+        as a fallback (fail closed: no webhook secret -> False).
         """
         if not signature_header:
             return False
-        secret = (self.config.webhook_secret or self.config.api_secret or "").strip()
+        secret = (self.config.webhook_secret or "").strip()
         if not secret:
             return False
         expected = hmac.new(
