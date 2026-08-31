@@ -385,7 +385,7 @@ if CLOUDPAYMENTS_ENABLED:
     _cp_cfg = CloudPaymentsConfig(
         public_id=os.environ["CLOUDPAYMENTS_PUBLIC_ID"],
         api_secret=os.environ["CLOUDPAYMENTS_API_SECRET"],
-        webhook_secret=os.environ.get("CLOUDPAYMENTS_API_SECRET", ""),
+        webhook_secret=os.environ.get("CLOUDPAYMENTS_WEBHOOK_SECRET", ""),
     )
     cloudpayments_client = CloudPaymentsClient(_cp_cfg)
 
@@ -1249,6 +1249,7 @@ async def create_checkout_session(
             description=plan_cfg["description"],
             email=email,
             subscription_plan=plan_name,
+            account_id=tenant_id,
         )
 
         return {
@@ -2546,6 +2547,11 @@ async def cloudpayments_webhook(request: Request):
     if not CLOUDPAYMENTS_ENABLED or cloudpayments_client is None:
         return {"code": 0}
 
+    # Fail closed: the webhook secret is mandatory and is NOT the API secret.
+    if not (cloudpayments_client.config.webhook_secret or "").strip():
+        logger.error("cloudpayments_webhook: webhook secret not configured")
+        raise HTTPException(status_code=500, detail="webhook secret not configured")
+
     if not cloudpayments_client.verify_webhook(raw_body, signature):
         raise HTTPException(status_code=400, detail="Invalid signature")
 
@@ -2555,11 +2561,7 @@ async def cloudpayments_webhook(request: Request):
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
     event_type = payload.get("OperationType") or payload.get("Status") or ""
-    tenant_id = (
-        payload.get("AccountId")
-        or (payload.get("Data") or {}).get("tenant_id")
-        or ""
-    )
+    tenant_id = (payload.get("AccountId") or "").strip()
     invoice_id = payload.get("InvoiceId", "")
     data = payload.get("Data") or {}
     if isinstance(data, str):
@@ -2572,21 +2574,27 @@ async def cloudpayments_webhook(request: Request):
     if not invoice_id:
         return {"code": 0}
 
+    # Idempotency before any tenant resolution/credit.
     if db.is_invoice_processed(invoice_id):
         return {"code": 0}
+
+    # Tenant is resolved ONLY from AccountId and must already exist.
+    if not tenant_id or not db.get_tenant(tenant_id):
+        logger.warning("cloudpayments_webhook: unknown AccountId invoice=%s", invoice_id)
+        raise HTTPException(status_code=422, detail="Unknown AccountId")
 
     status = payload.get("Status", "")
 
     try:
         if event_type in ("Payment", "Pay", "Completed") or status in ("Completed", "Authorized"):
-            if plan in ("pro", "enterprise") and tenant_id:
+            if plan in ("pro", "enterprise"):
                 db.update_tenant_subscription(tenant_id, invoice_id, "", "active", plan, None)
                 db.mark_invoice_processed(invoice_id, event_type, tenant_id)
             else:
                 db.mark_invoice_processed(invoice_id, event_type or "payment_no_plan", tenant_id)
 
         elif event_type == "Recurrent" and status == "Completed":
-            if plan and tenant_id:
+            if plan:
                 db.update_tenant_subscription(tenant_id, invoice_id, "", "active", plan, None)
                 db.mark_invoice_processed(invoice_id, event_type, tenant_id)
             else:
@@ -2604,7 +2612,7 @@ async def cloudpayments_webhook(request: Request):
             db.mark_invoice_processed(invoice_id, event_type or "ignored", tenant_id)
 
     except Exception:
-        logger.exception(f"Failed to process CloudPayments webhook {invoice_id}")
+        logger.exception("Failed to process CloudPayments webhook %s", invoice_id)
         raise HTTPException(status_code=500, detail="Processing error")
 
     return {"code": 0}
