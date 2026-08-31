@@ -312,6 +312,12 @@ def verify_api_key(x_api_key: str = Header(None)) -> dict:
     tenant = db.find_tenant_by_key(x_api_key)
     if not tenant:
         raise HTTPException(status_code=401, detail="Invalid API key")
+    tenant_id = (tenant.get("tenant_id") or "").strip()
+    if not tenant_id:
+        # A key that resolves to an empty/whitespace tenant is treated the same
+        # as an invalid key — never a successful login.
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    tenant["tenant_id"] = tenant_id
     tenant["api_key"] = x_api_key
     
     # Check email verification for API endpoints (skip auth endpoints and admin keys)

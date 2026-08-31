@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from starlette.testclient import TestClient
 from fastapi import HTTPException
+from types import SimpleNamespace
 
 import db_adapter as db
 import main
@@ -306,3 +307,27 @@ def test_worker_token_valid(monkeypatch):
     assert gws._worker_token_valid("sekret-token") is True
     assert gws._worker_token_valid("wrong") is False
     assert gws._worker_token_valid(None) is False
+
+
+def test_empty_tenant_id_rejected_401(monkeypatch):
+    """A key that resolves to an empty tenant_id must be treated as invalid (401)."""
+    key = _uniq("key-empty")
+    db.seed_tenants({key: {"tenant_id": "", "name": "empty"}})
+
+    calls = []
+    fake_client = SimpleNamespace(
+        config=SimpleNamespace(webhook_secret="wh"),
+        create_order=lambda **kwargs: calls.append(kwargs) or {"Url": "https://example.com"},
+    )
+    monkeypatch.setattr(main, "CLOUDPAYMENTS_ENABLED", True)
+    monkeypatch.setattr(main, "cloudpayments_client", fake_client)
+    # is_email_verified is not needed: the empty-tenant_id 401 happens before it.
+
+    client = TestClient(main.app, raise_server_exceptions=False)
+    resp = client.post(
+        "/billing/create-checkout-session",
+        json={"plan": "pro"},
+        headers={"X-API-Key": key},
+    )
+    assert resp.status_code == 401
+    assert calls == []  # create_order must not be called
