@@ -96,3 +96,22 @@ def test_empty_result_fails_fast():
     _, kwargs = db.updates[0]
     assert kwargs["status"] == "failed"
     assert kwargs["backend"] is None  # no silent "local"
+
+
+def test_payload_backend_not_used_when_result_has_no_backend():
+    """CodeRabbit follow-up: only result["backend"] decides success/failure.
+
+    payload.backend is the *requested* backend and must not be persisted as the
+    actual backend, nor keep a failed dispatch alive as "running".
+    """
+    result, db, status_calls = _run(
+        {"status": "failed", "message": "dispatch failed"},
+        payload={"backend": "vastai"},
+    )
+
+    assert result["status"] == "failed"
+    assert status_calls == []  # no 120s poll loop
+    assert len(db.updates) == 1
+    _, kwargs = db.updates[0]
+    assert kwargs["status"] == "failed"
+    assert kwargs["backend"] is None  # payload.backend="vastai" must NOT be used

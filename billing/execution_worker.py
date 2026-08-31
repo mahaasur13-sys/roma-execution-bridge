@@ -74,17 +74,22 @@ async def execute_and_bill(
         result = await _backend_manager["dispatch"](
             job_id=job_id, tenant_id=tenant_id, payload=payload
         )
-        # Honest backend name — never fabricate "local" on an empty chain.
-        backend_name = result.get("backend") or payload.get("backend")
+        # The dispatched backend comes ONLY from the dispatch result. payload.backend
+        # is the *requested* backend (kept in the log below) and must not decide
+        # failed-vs-running nor be persisted as the actual backend.
+        backend_name = result.get("backend")
         price_per_hour = result.get("price_per_hour", 0.0)
         contract_id = result.get("contract_id")
         status = result.get("status")
 
         # Fail fast when there is nothing to execute: dispatch returned failed/error,
-        # or the fallback chain came back empty (no backend to run on). Do not fall
-        # through to "running" + a 120s poll loop and do not substitute backend="local".
+        # or the result carries no backend (empty fallback chain). Do not fall through
+        # to "running" + a 120s poll loop and do not substitute backend="local".
         if status in ("failed", "error") or not backend_name:
-            logger.warning("execute_and_bill.dispatch_failed job=%s: %s", job_id, result.get("message", ""))
+            logger.warning(
+                "execute_and_bill.dispatch_failed job=%s requested_backend=%s: %s",
+                job_id, payload.get("backend"), result.get("message", ""),
+            )
             _db_adapter.update_execution_job(
                 job_id,
                 status="failed",
