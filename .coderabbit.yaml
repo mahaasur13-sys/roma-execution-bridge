@@ -1,46 +1,73 @@
-# CodeRabbit configuration for ROMA Execution Bridge / DecisionOS v1.0.0
-# https://github.com/mahaasur13-sys/roma-execution-bridge
-
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 language: ru-RU
-
 reviews:
   profile: assertive
   request_changes_workflow: false
-
-path_filters:
-  - "!docs/**"
-  - "!*.md"
-  - "!static/**"
-  - "!data/**"
-  - "!*.db"
-
-path_instructions:
-  - path: "plugins/core/**"
-    instructions: |
-      CRITICAL: PluginManager, Sandbox, Trace.
-      Check: thread safety (asyncio.Lock), lifecycle states, dependency resolution.
-
-  - path: "plugins/dashbeam/**"
-    instructions: |
-      CRITICAL: DashBeam P2P Transfer Plugin.
-      Check: no Monero spend keys in code/logs, Pydantic v2 frozen models,
-      IrohAdapter QUIC/TLS handshake, ticket lifecycle, no token logging.
-
-  - path: "billing/**"
-    instructions: |
-      Stripe + CloudPayments.
-      Check: webhook handler idempotency, no CVV/PAN in logs, no hardcoded secrets.
-
-  - path: "auth/**"
-    instructions: |
-      API keys, RBAC, OIDC.
-      Check: timing-safe comparison, no hardcoded keys, JWT claims.
-
-  - path: "main.py"
-    instructions: |
-      Main FastAPI entry point.
-      Check: CORS, startup/shutdown events, middleware, health endpoints.
-
-  - path: "tests/**"
-    instructions: |
-      Check: coverage of PluginInstance states, edge cases, async tests.
+  high_level_summary: true
+  poem: false
+  review_status: true
+  sequence_diagrams: true
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: true
+  path_instructions:
+    - path: "main.py"
+      instructions: >
+        Enforce authn/authz on every mutating route. Compare job.tenant_id to caller.tenant_id
+        (mismatch → 404). Never trust client tenant_id/amount for credits. Do not read secrets
+        from files in the repo; env only. Keep finalize_job_billing as the single debit point.
+        Honor Idempotency-Key on POST /submit.
+    - path: "router_jobs.py"
+      instructions: >
+        Resolve tenant only via db.find_tenant_by_key. complete/worker-ack require a valid key
+        and job ownership. Do not derive tenant_id from the raw API key string.
+    - path: "gpu_worker/**"
+      instructions: >
+        /execute must require X-Roma-Worker-Token (ROMA_GPU_WORKER_TOKEN), fail-closed.
+        No shell=True. Allowlist binaries. Reject arbitrary images and host mounts.
+    - path: "backends/**"
+      instructions: >
+        Control-plane calls to the GPU worker must send X-Roma-Worker-Token.
+        Do not fall back to unauthenticated execute.
+    - path: "billing/**"
+      instructions: >
+        One debit path only. CloudPayments webhook signature must use
+        CLOUDPAYMENTS_WEBHOOK_SECRET, not the API secret. Attribute credits via AccountId.
+    - path: "crypto_payments/**"
+      instructions: >
+        Verify webhook signatures. Do not call missing handler methods. No silent double credit.
+    - path: "db_adapter.py"
+      instructions: >
+        Tenant filter on list/get paths. Do not look up jobs for mutation by id alone without
+        a tenant check in the caller. Keep submit_idempotency_keys unique on (tenant_id, key).
+    - path: "scheduler/**"
+      instructions: >
+        No shell=True on job.command. No f-string interpolation of slurm_job_id into a shell.
+    - path: "compiler/**"
+      instructions: >
+        Do not emit privileged/hostPath pods unless validate() ran and passed.
+    - path: "deploy/**"
+      instructions: >
+        No plaintext jwt-secret or DB passwords. Prefer SealedSecrets/ExternalSecrets.
+    - path: "tests/**"
+      instructions: >
+        Prefer negative tests for authz, isolation, webhook signature, and single-debit.
+  tools:
+    gitleaks:
+      enabled: true
+    ruff:
+      enabled: true
+    semgrep:
+      enabled: true
+    hadolint:
+      enabled: true
+    checkov:
+      enabled: true
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "docs/review/*.md"
+chat:
+  auto_reply: true
