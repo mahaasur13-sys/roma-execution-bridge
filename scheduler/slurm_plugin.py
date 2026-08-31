@@ -17,6 +17,9 @@ SLURM_USER = os.environ.get("SLURM_USER", "root")
 SLURM_SSH_KEY = os.environ.get("SLURM_SSH_KEY", "")
 SLURM_REST_API = os.environ.get("SLURM_REST_API", "")
 
+# Slurm job ids and derived file names must not contain shell metacharacters.
+_SLURM_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
 
 class SlurmPlugin:
     """Execute jobs on a Slurm cluster via SSH."""
@@ -101,7 +104,8 @@ class SlurmPlugin:
                 script_path = f.name
 
             sftp = self._ssh_client.open_sftp()
-            remote_path = f"/tmp/roma-{job.get('job_id', 'tmp')[:8]}.sh"
+            safe_job_id = re.sub(r"[^A-Za-z0-9._-]", "_", str(job.get("job_id", "tmp"))[:8])
+            remote_path = f"/tmp/roma-{safe_job_id}.sh"
             sftp.put(script_path, remote_path)
             sftp.close()
 
@@ -129,6 +133,8 @@ class SlurmPlugin:
         """Query job status from Slurm via sacct or squeue."""
         if not self.enabled:
             return {"slurm_job_id": slurm_job_id, "status": "unknown", "message": "Slurm disabled"}
+        if not _SLURM_ID_RE.match(str(slurm_job_id)):
+            return {"slurm_job_id": slurm_job_id, "status": "error", "message": "invalid slurm_job_id"}
 
         try:
             # Try squeue first (running/pending), then sacct (completed)
@@ -151,6 +157,8 @@ class SlurmPlugin:
         """Cancel a Slurm job via scancel."""
         if not self.enabled:
             return {"slurm_job_id": slurm_job_id, "status": "not_cancelled", "message": "Slurm disabled"}
+        if not _SLURM_ID_RE.match(str(slurm_job_id)):
+            return {"slurm_job_id": slurm_job_id, "status": "error", "message": "invalid slurm_job_id"}
 
         try:
             exit_code, stdout, stderr = self._ssh_exec(f"scancel {slurm_job_id}", timeout=10)
