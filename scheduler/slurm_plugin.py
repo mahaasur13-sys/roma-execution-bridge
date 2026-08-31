@@ -17,8 +17,10 @@ SLURM_USER = os.environ.get("SLURM_USER", "root")
 SLURM_SSH_KEY = os.environ.get("SLURM_SSH_KEY", "")
 SLURM_REST_API = os.environ.get("SLURM_REST_API", "")
 
-# Slurm job ids and derived file names must not contain shell metacharacters.
-_SLURM_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+# Slurm job ids and derived file names must not contain shell metacharacters
+# and must not start with '-' (or any flag-like prefix) so they can never be
+# interpreted as CLI flags by squeue/sacct/scancel.
+_SLURM_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 class SlurmPlugin:
@@ -104,7 +106,7 @@ class SlurmPlugin:
                 script_path = f.name
 
             sftp = self._ssh_client.open_sftp()
-            safe_job_id = re.sub(r"[^A-Za-z0-9._-]", "_", str(job.get("job_id", "tmp"))[:8])
+            safe_job_id = re.sub(r"[^A-Za-z0-9._-]", "_", str(job.get("job_id", "tmp"))[:8]).lstrip("._-") or "job"
             remote_path = f"/tmp/roma-{safe_job_id}.sh"
             sftp.put(script_path, remote_path)
             sftp.close()
