@@ -383,9 +383,11 @@ def test_slurm_id_metachar_rejected():
     p = SlurmPlugin()
     p.enabled = True
 
-    for bad in ["123;rm -rf /", "12 && echo", "a|b", "`id`", "$(whoami)"]:
+    for bad in ["123;rm -rf /", "12 && echo", "a|b", "`id`", "$(whoami)",
+                "-uroot", "--x", "-u root", "-1"]:
         assert p.get_status(bad)["status"] == "error"
         assert p.cancel(bad)["status"] == "error"
 
-    assert _SLURM_ID_RE.match("12345")
-    assert _SLURM_ID_RE.match("job-abc_123.4")
+    # ordinary numeric / string ids are accepted by the validator
+    for good in ["12345", "job.1_2", "job-abc_123.4"]:
+        assert _SLURM_ID_RE.match(good)
