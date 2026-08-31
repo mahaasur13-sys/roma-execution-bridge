@@ -63,10 +63,10 @@ class CloudPaymentsClient:
         amount: float,
         currency: str,
         description: str,
+        account_id: str,
         email: str = "",
         require_confirmation: bool = False,
         subscription_plan: str = "",
-        account_id: str = "",
     ) -> dict[str, Any]:
         """
         Create a one-time order. Returns a dict with:
@@ -74,18 +74,22 @@ class CloudPaymentsClient:
           - Number: order number
           - Url: hosted payment page URL (user is redirected here)
 
-        `account_id` is echoed back as `AccountId` on the webhook so the payment
-        can be attributed to the correct tenant.
+        `account_id` (required) is echoed back as `AccountId` on the webhook so
+        the payment can be attributed to the correct tenant. Empty/whitespace
+        account_id raises ValueError before any HTTP call.
         """
+        account_id = (account_id or "").strip()
+        if not account_id:
+            raise ValueError("account_id is required for create_order")
+
         payload: dict[str, Any] = {
             "Amount": amount,
             "Currency": currency,
             "Description": description,
             "Email": email,
             "RequireConfirmation": require_confirmation,
+            "AccountId": account_id,
         }
-        if account_id:
-            payload["AccountId"] = account_id
         if subscription_plan:
             payload["JsonData"] = json.dumps({"plan": subscription_plan})
 
