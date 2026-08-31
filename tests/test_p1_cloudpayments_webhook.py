@@ -132,3 +132,34 @@ def test_verify_webhook_never_falls_back_to_api_secret():
     # HMAC computed with the API secret must NOT be accepted.
     sig = hmac.new(b"api-secret-xyz", body, hashlib.sha256).hexdigest()
     assert client.verify_webhook(body, sig) is False
+
+
+def test_create_order_requires_nonempty_account_id():
+    from billing.cloudpayments_client import CloudPaymentsConfig, CloudPaymentsClient
+    client = CloudPaymentsClient(
+        CloudPaymentsConfig(public_id="p", api_secret="s", webhook_secret="wh")
+    )
+    calls = []
+    client._post = lambda path, payload: calls.append((path, payload)) or {"Url": "https://example.com"}
+
+    # Empty / whitespace account_id -> ValueError, no HTTP call.
+    with pytest.raises(ValueError):
+        client.create_order(amount=100, currency="RUB", description="d", account_id="")
+    with pytest.raises(ValueError):
+        client.create_order(amount=100, currency="RUB", description="d", account_id="   ")
+    assert calls == []
+
+    # Valid account_id -> single POST with non-empty normalized AccountId.
+    client.create_order(amount=100, currency="RUB", description="d", account_id="  tenant-1  ")
+    assert len(calls) == 1
+    assert calls[0][1]["AccountId"] == "tenant-1"
+
+
+def test_create_order_missing_account_id_is_typeerror():
+    from billing.cloudpayments_client import CloudPaymentsConfig, CloudPaymentsClient
+    client = CloudPaymentsClient(
+        CloudPaymentsConfig(public_id="p", api_secret="s", webhook_secret="wh")
+    )
+    with pytest.raises(TypeError):
+        client.create_order(amount=100, currency="RUB", description="d")
+
