@@ -11,6 +11,10 @@ reviews:
     enabled: true
     drafts: false
     auto_incremental_review: true
+  path_filters:
+    - "!docs/**"
+    - "!*.md"
+    - "!static/**"
   path_instructions:
     - path: "main.py"
       instructions: >
@@ -71,3 +75,5 @@ knowledge_base:
       - "docs/review/*.md"
 chat:
   auto_reply: true
+  art: false
+  allow_non_org_members: false
