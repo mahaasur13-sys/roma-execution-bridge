@@ -331,3 +331,61 @@ def test_empty_tenant_id_rejected_401(monkeypatch):
     )
     assert resp.status_code == 401
     assert calls == []  # create_order must not be called
+
+
+def test_worker_run_job_no_shell(monkeypatch):
+    import subprocess
+    import worker
+
+    calls = []
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    # disallowed binary -> rejected, subprocess not called
+    assert worker.run_job("echo hi; rm -rf /")["success"] is False
+    assert calls == []
+
+    # allowed binary but shell metacharacters -> run as argv with shell=False,
+    # metacharacters become literal args (never interpreted by a shell)
+    res = worker.run_job("python -c 'print(1)' && touch /tmp/pwn")
+    assert res["success"] is True
+    assert len(calls) == 1
+    argv, kwargs = calls[0]
+    assert kwargs.get("shell") is False
+    assert "&&" in argv and "touch" in argv
+
+
+def test_local_workers_no_shell(monkeypatch):
+    import subprocess
+    import local_worker
+    import gpu_worker.local_worker as gpu_lw
+
+    calls = []
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    for _, fn in ((local_worker, local_worker.run_cmd), (gpu_lw, gpu_lw.run_cmd)):
+        assert fn("echo hi; rm -rf /")["ok"] is False
+        assert fn("python -c 'print(1)' | nc evil")["ok"] is True
+    assert len(calls) == 2  # one allowed python run per module
+    assert all(c[1].get("shell") is False for c in calls)
+
+
+def test_slurm_id_metachar_rejected():
+    from scheduler.slurm_plugin import SlurmPlugin, _SLURM_ID_RE
+
+    p = SlurmPlugin()
+    p.enabled = True
+
+    for bad in ["123;rm -rf /", "12 && echo", "a|b", "`id`", "$(whoami)"]:
+        assert p.get_status(bad)["status"] == "error"
+        assert p.cancel(bad)["status"] == "error"
+
+    assert _SLURM_ID_RE.match("12345")
+    assert _SLURM_ID_RE.match("job-abc_123.4")

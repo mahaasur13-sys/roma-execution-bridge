@@ -5,6 +5,7 @@ Routes jobs to GPU workers based on cost/performance policy."""
 import os
 import asyncio
 import logging
+import shlex
 from typing import Optional
 
 from scheduler.gpu_policy_engine_v2 import GPUPolicyEngineV2
@@ -14,6 +15,9 @@ from cost.predictor import CostPredictor
 from queue_manager.queue_manager import QueueManager
 
 logger = logging.getLogger("roma.scheduler")
+
+# Minimal, explicit execution policy for local fallback execution (no shell).
+ALLOWED_BINARIES = {"python", "python3"}
 
 
 class ROMAGPUScheduler:
@@ -102,9 +106,13 @@ class ROMAGPUScheduler:
     def _execute_local(self, job: dict) -> dict:
         import subprocess
         try:
+            command = job.get("command", "")
+            argv = shlex.split(command) if command else []
+            if not argv or os.path.basename(argv[0]) not in ALLOWED_BINARIES:
+                return {"status": "failed", "error": "command not allowed (allowlist: python/python3)",
+                        "execution_target": "local"}
             result = subprocess.run(
-                job.get("command", "echo 'local execution'"),
-                shell=True, capture_output=True, text=True,
+                argv, shell=False, capture_output=True, text=True,
                 timeout=job.get("timeout", 300)
             )
             return {
