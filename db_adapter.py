@@ -546,6 +546,45 @@ def _ensure_submit_idempotency_table(c) -> None:
     """)
 
 
+def _ensure_execution_jobs_table(c) -> None:
+    """Create execution_jobs in SQLite if absent and backfill the execution-billing
+    columns (backend, backend_job_id, ...) on tables created before migration 005.
+
+    Mirrors migrations/002_billing_pg.sql + migrations/005_execution_billing.sql.
+    backend is intentionally nullable (no silent 'local' default on an empty chain).
+    """
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS execution_jobs (
+            id              TEXT PRIMARY KEY,
+            decision_id     TEXT,
+            tenant_id       TEXT NOT NULL,
+            status          TEXT NOT NULL DEFAULT 'pending',
+            payload         TEXT DEFAULT '{}',
+            created_at      TEXT DEFAULT (datetime('now')),
+            updated_at      TEXT DEFAULT (datetime('now')),
+            cost_usd        REAL NOT NULL DEFAULT 0.0,
+            backend         TEXT,
+            backend_job_id  TEXT,
+            duration_seconds REAL DEFAULT 0.0,
+            started_at      TEXT,
+            completed_at    TEXT,
+            error           TEXT
+        )
+    """)
+    existing = {row[1] for row in c.execute("PRAGMA table_info(execution_jobs)").fetchall()}
+    for column, ddl in (
+        ("cost_usd", "REAL NOT NULL DEFAULT 0.0"),
+        ("backend", "TEXT"),
+        ("backend_job_id", "TEXT"),
+        ("duration_seconds", "REAL DEFAULT 0.0"),
+        ("started_at", "TEXT"),
+        ("completed_at", "TEXT"),
+        ("error", "TEXT"),
+    ):
+        if column not in existing:
+            c.execute(f"ALTER TABLE execution_jobs ADD COLUMN {column} {ddl}")
+
+
 def find_job_by_idempotency(tenant_id: str, idempotency_key: str):
     """Return job_id for (tenant_id, idempotency_key), or None if not present."""
     if _pg_enabled():
@@ -799,6 +838,7 @@ async def _insert_job_pg(job_id, tenant_id, status, decision_id, payload_json):
 def _insert_job_sqlite(job_id, tenant_id, status, decision_id, payload_json):
     c = _sqlite_conn()
     try:
+        _ensure_execution_jobs_table(c)
         c.execute(
             "INSERT INTO execution_jobs (id, decision_id, tenant_id, status, payload) VALUES (?,?,?,?,?)",
             (job_id, decision_id, tenant_id, status, payload_json),
@@ -831,6 +871,7 @@ async def _insert_job_raw_pg(job_id, tenant_id, status, payload_json):
 def _insert_job_raw_sqlite(job_id, tenant_id, status, payload_json):
     c = _sqlite_conn()
     try:
+        _ensure_execution_jobs_table(c)
         c.execute("INSERT INTO execution_jobs (id, tenant_id, status, payload) VALUES (?,?,?,?)",
                   (job_id, tenant_id, status, payload_json))
         c.commit()
@@ -864,6 +905,7 @@ async def _get_job_pg(job_id, tenant_id):
 def _get_job_sqlite(job_id, tenant_id):
     c = _sqlite_conn()
     try:
+        _ensure_execution_jobs_table(c)
         row = c.execute("SELECT * FROM execution_jobs WHERE id=? AND tenant_id=?", (job_id, tenant_id)).fetchone()
         return dict(row) if row else None
     finally:
@@ -898,6 +940,7 @@ async def _update_job_status_pg(job_id, status, completed_at, error):
 def _update_job_status_sqlite(job_id, status, completed_at, error):
     c = _sqlite_conn()
     try:
+        _ensure_execution_jobs_table(c)
         sets = "status = ?"
         params = [status]
         if status == "running":
@@ -936,6 +979,7 @@ async def _list_jobs_pg(tenant_id, limit):
 def _list_jobs_sqlite(tenant_id, limit):
     c = _sqlite_conn()
     try:
+        _ensure_execution_jobs_table(c)
         rows = c.execute(
             "SELECT * FROM execution_jobs WHERE tenant_id=? ORDER BY created_at DESC LIMIT ?",
             (tenant_id, limit),
@@ -965,6 +1009,7 @@ async def _count_jobs_by_tenant_pg(tenant_id):
 def _count_jobs_by_tenant_sqlite(tenant_id):
     c = _sqlite_conn()
     try:
+        _ensure_execution_jobs_table(c)
         row = c.execute("SELECT COUNT(*) FROM execution_jobs WHERE tenant_id=?", (tenant_id,)).fetchone()
         return row[0] if row else 0
     finally:
@@ -1254,6 +1299,7 @@ async def _count_jobs_for_tenant_pg(tenant_id):
 def _count_jobs_for_tenant_sqlite(tenant_id):
     c = _sqlite_conn()
     try:
+        _ensure_execution_jobs_table(c)
         row = c.execute("SELECT COUNT(*) FROM execution_jobs WHERE tenant_id=?", (tenant_id,)).fetchone()
         return row[0] if row else 0
     finally:
@@ -1284,6 +1330,7 @@ async def _insert_execution_job_pg(job_id, decision_id, tenant_id, status, paylo
 def _insert_execution_job_sqlite(job_id, decision_id, tenant_id, status, payload_json):
     c = _sqlite_conn()
     try:
+        _ensure_execution_jobs_table(c)
         c.execute(
             "INSERT INTO execution_jobs (id, decision_id, tenant_id, status, payload) VALUES (?,?,?,?,?)",
             (job_id, decision_id, tenant_id, status, payload_json),
@@ -1319,6 +1366,7 @@ async def _get_execution_job_pg(job_id):
 def _get_execution_job_sqlite(job_id):
     c = _sqlite_conn()
     try:
+        _ensure_execution_jobs_table(c)
         row = c.execute("SELECT * FROM execution_jobs WHERE id=?", (job_id,)).fetchone()
         return dict(row) if row else None
     finally:
@@ -1343,11 +1391,12 @@ def get_queued_execution_jobs(limit: int = 10) -> list[dict]:
             _pg_return(conn)
     c = _sqlite_conn()
     try:
+        _ensure_execution_jobs_table(c)
         rows = c.execute(
             "SELECT * FROM execution_jobs WHERE status='queued' ORDER BY created_at ASC LIMIT ?",
             (limit,),
         ).fetchall()
-        return [dict(zip(cols, r)) for r in rows] if rows else []
+        return [dict(r) for r in rows] if rows else []
     finally:
         c.close()
 
@@ -1393,6 +1442,7 @@ async def _update_execution_job_pg(job_id, status, completed_at, error, backend,
 def _update_execution_job_sqlite(job_id, status, completed_at, error, backend, backend_job_id):
     c = _sqlite_conn()
     try:
+        _ensure_execution_jobs_table(c)
         sets = []
         params = []
         if status is not None:
@@ -1441,6 +1491,7 @@ async def _list_tenant_jobs_pg(tenant_id, limit):
 def _list_tenant_jobs_sqlite(tenant_id, limit):
     c = _sqlite_conn()
     try:
+        _ensure_execution_jobs_table(c)
         rows = c.execute(
             "SELECT * FROM execution_jobs WHERE tenant_id=? ORDER BY created_at DESC LIMIT ?",
             (tenant_id, limit),
@@ -1586,6 +1637,7 @@ def count_jobs_for_tenant(tenant_id: str) -> int:
     else:
         c = _sqlite_conn()
         try:
+            _ensure_execution_jobs_table(c)
             row = c.execute(
                 "SELECT COUNT(*) FROM execution_jobs WHERE tenant_id=? AND status IN (?,?,?)",
                 (tenant_id, "queued", "running", "pending"),
