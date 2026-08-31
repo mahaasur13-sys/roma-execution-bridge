@@ -377,16 +377,29 @@ def test_local_workers_no_shell(monkeypatch):
     assert all(c[1].get("shell") is False for c in calls)
 
 
-def test_slurm_id_metachar_rejected():
+def test_slurm_id_metachar_rejected(monkeypatch):
     from scheduler.slurm_plugin import SlurmPlugin, _SLURM_ID_RE
 
     p = SlurmPlugin()
     p.enabled = True
 
+    ssh_calls = []
+    def fake_ssh_exec(cmd, timeout=30):
+        ssh_calls.append(cmd)
+
+    monkeypatch.setattr(p, "_ssh_exec", fake_ssh_exec)
+
     for bad in ["123;rm -rf /", "12 && echo", "a|b", "`id`", "$(whoami)",
                 "-uroot", "--x", "-u root", "-1"]:
-        assert p.get_status(bad)["status"] == "error"
-        assert p.cancel(bad)["status"] == "error"
+        st = p.get_status(bad)
+        assert st["status"] == "error"
+        assert "invalid slurm_job_id" in st["message"]
+        cc = p.cancel(bad)
+        assert cc["status"] == "error"
+        assert "invalid slurm_job_id" in cc["message"]
+
+    # The validator must reject BEFORE any SSH command is issued.
+    assert ssh_calls == []
 
     # ordinary numeric / string ids are accepted by the validator
     for good in ["12345", "job.1_2", "job-abc_123.4"]:
