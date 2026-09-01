@@ -21,6 +21,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from alerts import AlertDispatcher
+from billing.pg_ledger import PGBillingLedger as BillingLedger
 
 # ── Logging ────────────────────────────────────────────────────────────
 logger = logging.getLogger("roma")
@@ -39,6 +40,16 @@ ADMIN_IP_ALLOWLIST = os.environ.get(
     "ADMIN_IP_ALLOWLIST",
     "127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
 )
+
+# ── Billing ─────────────────────────────────────────────────────────────
+billing_ledger = BillingLedger()
+
+PLANS: dict = {
+    "free": {"max_jobs_per_month": 50, "max_gpu_seconds": 300, "spend_cap_usd": 0.50, "overage_rate": 0.0},
+    "start": {"max_jobs_per_month": 50, "max_gpu_seconds": 3600, "spend_cap_usd": 5.00, "overage_rate": 0.000005},
+    "pro": {"max_jobs_per_month": 150, "max_gpu_seconds": 36000, "spend_cap_usd": 50.00, "overage_rate": 0.000003},
+    "enterprise": {"max_jobs_per_month": -1, "max_gpu_seconds": -1, "spend_cap_usd": -1.0, "overage_rate": 0.0},
+}
 
 
 def verify_api_key(x_api_key: str = Header(None)) -> dict:

@@ -42,6 +42,8 @@ from deps import (
     _admin_only,
     alert_dispatcher,
     limiter,
+    billing_ledger,
+    PLANS,
 )
 
 # DecisionOS — Week 1 foundation
@@ -67,10 +69,8 @@ from alerts import Alert, AlertLevel
 
 # === BILLING SINGLETONS (v2.1.0) ===
 from billing.pg_metering import PGMeteringEngine as MeteringEngine
-from billing.pg_ledger import PGBillingLedger as BillingLedger
 
 metering_engine = MeteringEngine()
-billing_ledger = BillingLedger()
 from billing.execution_worker import init_worker, execute_and_bill, bill_job, poll_and_execute
 
 _burn_tracker: dict[str, list[tuple[float, float]]] = {}
@@ -301,13 +301,6 @@ db.seed_tenants(API_KEYS)
 # PLANS & USAGE — DecisionOS PG-backed
 # ============================================
 
-PLANS: dict = {
-    "free": {"max_jobs_per_month": 50, "max_gpu_seconds": 300, "spend_cap_usd": 0.50, "overage_rate": 0.0},
-    "start": {"max_jobs_per_month": 50, "max_gpu_seconds": 3600, "spend_cap_usd": 5.00, "overage_rate": 0.000005},
-    "pro": {"max_jobs_per_month": 150, "max_gpu_seconds": 36000, "spend_cap_usd": 50.00, "overage_rate": 0.000003},
-    "enterprise": {"max_jobs_per_month": -1, "max_gpu_seconds": -1, "spend_cap_usd": -1.0, "overage_rate": 0.0},
-}
-
 # ============================================
 # DECISIONOS — PostgreSQL-backed plans & usage
 # ============================================
@@ -439,6 +432,7 @@ from support_chat.router import router as support_router
 from routers.admin import router as admin_router
 from routers.webhooks import router as webhooks_router
 from routers.auth import router as auth_router
+from routers.billing import router as billing_router
 app.include_router(v1_router)
 app.include_router(decisions_router)
 app.include_router(jobs_router)
@@ -448,6 +442,7 @@ app.include_router(support_router)
 app.include_router(admin_router)
 app.include_router(webhooks_router)
 app.include_router(auth_router)
+app.include_router(billing_router)
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 if JAEGER_ENABLED:
@@ -1080,205 +1075,6 @@ async def get_usage(key_info: dict = Depends(verify_api_key)):
             "max_jobs_per_month_display": "unlimited" if max_jobs == -1 else str(max_jobs),
         },
     }
-
-
-@limiter.limit("10/minute")
-
-@app.post("/billing/top-up")
-async def top_up_balance(request: Request, payload: dict):
-    """Admin-only manual balance credit. Requires admin API key + IP allowlist.
-
-    Non-admin callers get 403; the credited tenant is an EXPLICIT admin-supplied
-    target (never derived from the caller), and the action is audited.
-    """
-    admin = _admin_only(request)
-    target_tenant_id = (payload.get("tenant_id") or "").strip()
-    if not target_tenant_id:
-        raise HTTPException(status_code=400, detail="tenant_id is required for admin top-up")
-    try:
-        amount = float(payload.get("amount", 0))
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Amount must be a number")
-    if amount <= 0:
-        raise HTTPException(status_code=400, detail="Amount must be positive")
-    entry_id = billing_ledger.credit(
-        target_tenant_id, amount, note=f"Admin top-up by {admin['tenant_id']}"
-    )
-    try:
-        write_event(admin["tenant_id"], "billing.topup", "tenant", target_tenant_id, {"amount": amount})
-    except Exception as exc:
-        logger.warning("audit.topup_failed admin=%s target=%s: %s", admin["tenant_id"], target_tenant_id, exc)
-    return {"status": "ok", "tenant_id": target_tenant_id, "amount": amount, "entry_id": entry_id}
-
-@app.post("/billing/create-checkout-session")
-async def create_checkout_session(
-    request: Request,
-    body: CheckoutRequest,
-    key_info: dict = Depends(verify_api_key),
-):
-    """
-    Создаёт платёжную ссылку CloudPayments (hosted page).
-    Возвращает {"url": "https://..."}.
-    """
-    tenant_id = key_info.get("tenant_id", "")
-    plan_name = body.plan
-
-    # Free plan — activate immediately
-    if plan_name == "free":
-        db.update_tenant_subscription(tenant_id, "", "", "active", "free", None)
-        return {"url": "", "plan": "free", "tenant_id": tenant_id, "message": "Free plan activated"}
-
-    if not CLOUDPAYMENTS_ENABLED or cloudpayments_client is None:
-        plan_example = CLOUDPAYMENTS_PLANS.get(plan_name, {})
-        return {
-            "url": f"https://example.com/billing/success?plan={plan_name}&dry_run=1",
-            "session_id": f"dry_run_{uuid.uuid4().hex[:12]}",
-            "plan": plan_name,
-            "tenant_id": tenant_id,
-            "dry_run": True,
-            "message": (
-                "CloudPayments is not configured. To enable:\n"
-                "1. Add CLOUDPAYMENTS_PUBLIC_ID to .env\n"
-                "2. Add CLOUDPAYMENTS_API_SECRET to .env\n"
-                "3. Restart the ROMA service\n\n"
-                f"Selected plan: {plan_name} ({plan_example.get('amount', 0)} RUB/session)"
-            ),
-        }
-
-    plan_cfg = CLOUDPAYMENTS_PLANS.get(plan_name)
-    if not plan_cfg:
-        raise HTTPException(status_code=400, detail="Invalid plan")
-
-    email = key_info.get("email", "")
-
-    try:
-        result = cloudpayments_client.create_order(
-            amount=plan_cfg["amount"],
-            currency=plan_cfg["currency"],
-            description=plan_cfg["description"],
-            email=email,
-            subscription_plan=plan_name,
-            account_id=tenant_id,
-        )
-
-        return {
-            "url": result.get("Url", ""),
-            "session_id": result.get("Id") or result.get("Model", {}).get("Id"),
-            "plan": plan_name,
-            "tenant_id": tenant_id,
-            "dry_run": False,
-        }
-    except Exception as e:
-        logger.error(f"CloudPayments create_order failed for {tenant_id}: {e}")
-        raise HTTPException(status_code=502, detail=f"Payment provider error: {str(e)}")
-
-# ============================================
-# BILLING — Ledger & Spend-Cap (v2.1.0)
-# ============================================
-
-@limiter.limit("30/minute")
-@app.get("/billing/ledger")
-async def get_billing_ledger(
-    request: Request,
-    limit: int = 20,
-    key_info: dict = Depends(verify_api_key),
-):
-    """История списаний (дебет/кредит) для текущего tenant."""
-    tenant_id = key_info["tenant_id"]
-    entries = billing_ledger.get_tenant_entries(tenant_id)
-    entries = entries[-limit:] if limit > 0 else entries
-    balance = billing_ledger.get_balance(tenant_id)
-    plan_name = key_info.get("plan", "free")
-    plan = PLANS.get(plan_name, PLANS.get("free", {}))
-    return {
-        "tenant_id": tenant_id,
-        "plan": plan_name,
-        "balance_usd": round(balance, 6),
-        "spend_cap_usd": plan.get("spend_cap_usd", 0),
-        "entries": [
-            {
-                "type": e["type"],
-                "amount": e["amount"],
-                "timestamp": e.get("timestamp", 0),
-                "description": e.get("description", ""),
-                "metadata": e.get("metadata", {}),
-            }
-            for e in entries
-        ],
-        "total_entries": len(entries),
-    }
-
-
-@limiter.limit("30/minute")
-@app.get("/billing/spend-cap")
-async def check_spend_cap_endpoint(
-    request: Request,
-    estimated_cost_usd: float = 0.0,
-    key_info: dict = Depends(verify_api_key),
-):
-    """Проверить, хватит ли бюджета на задачу с указанной стоимостью."""
-    tenant_id = key_info["tenant_id"]
-    plan_name = key_info.get("plan", "free")
-    plan = PLANS.get(plan_name, PLANS.get("free", {}))
-    cap = plan.get("spend_cap_usd", 0)
-    if cap <= 0:
-        return {
-            "tenant_id": tenant_id,
-            "plan": plan_name,
-            "spend_cap_usd": cap,
-            "current_balance": 0.0,
-            "estimated_cost": estimated_cost_usd,
-            "allowed": True,
-            "reason": "No spend-cap (enterprise/unlimited)",
-            "remaining": "unlimited",
-        }
-    balance = billing_ledger.get_balance(tenant_id)
-    projected = balance + estimated_cost_usd
-    allowed = projected <= cap
-    pct = round(balance / cap * 100, 1) if cap > 0 else 0
-    return {
-        "tenant_id": tenant_id,
-        "plan": plan_name,
-        "spend_cap_usd": cap,
-        "current_balance": round(balance, 6),
-        "estimated_cost": estimated_cost_usd,
-        "allowed": allowed,
-        "remaining": round(max(0, cap - balance), 6),
-        "usage_pct": pct,
-        "reason": "" if allowed else f"Spend cap exceeded: ${balance:.4f}/${cap:.2f} ({pct}%). Job ${estimated_cost_usd:.6f} exceeds cap.",
-    }
-
-
-
-
-# ============================================
-
-@limiter.limit("30/minute")
-@app.get("/billing/balance")
-async def get_balance_endpoint(
-    request: Request,
-    key_info: dict = Depends(verify_api_key),
-):
-    """Текущий баланс, план и spend-cap тенанта (короткий ответ для AI)."""
-    tenant_id = key_info["tenant_id"]
-    plan_name = key_info.get("plan", "free")
-    plan = PLANS.get(plan_name, PLANS.get("free", {}))
-    cap = plan.get("spend_cap_usd", 0)
-    balance = billing_ledger.get_balance(tenant_id)
-    pct = round(balance / cap * 100, 1) if cap > 0 else 0
-    return {
-        "tenant_id": tenant_id,
-        "plan": plan_name,
-        "balance_usd": round(balance, 6),
-        "spend_cap_usd": cap,
-        "usage_pct": pct,
-        "remaining": round(max(0, cap - balance), 6) if cap > 0 else "unlimited",
-        "limits": {
-            "max_jobs_per_month": plan.get("max_jobs_per_month", 50),
-            "max_gpu_seconds": plan.get("max_gpu_seconds", 0),
-        },
-    }
-
 
 
 # DEMOS — ready-to-run tasks

@@ -161,6 +161,19 @@ def test_auth_routes_mounted_on_same_paths():
     assert auth_routes <= actual
 
 
+def test_billing_routes_mounted_on_same_paths():
+    """The 5 billing paths moved to routers/billing.py but stay on the same paths."""
+    actual = _route_surface(main.app)
+    billing_routes = {
+        ("POST", "/billing/top-up"),
+        ("POST", "/billing/create-checkout-session"),
+        ("GET", "/billing/ledger"),
+        ("GET", "/billing/spend-cap"),
+        ("GET", "/billing/balance"),
+    }
+    assert billing_routes <= actual
+
+
 def test_extracted_webhooks_router_is_mounted():
     """The webhook routes moved to routers/webhooks.py but stay on the same paths."""
     actual = _route_surface(main.app)
