@@ -99,6 +99,22 @@ async def execute_and_bill(
             )
             return {"status": "failed", "job_id": job_id, "error": result.get("message", "")}
 
+        # Only mark "running" and poll when dispatch actually accepted the job.
+        # queued/timeout/unknown are not ready — don't burn 120s polling them.
+        if status not in ("running", "provisioning"):
+            logger.warning(
+                "execute_and_bill.dispatch_not_ready job=%s backend=%s status=%s",
+                job_id, backend_name, status,
+            )
+            _db_adapter.update_execution_job(
+                job_id,
+                status="failed",
+                backend=backend_name,
+                completed_at=datetime.now(timezone.utc).isoformat(),
+                error=f"dispatch not ready (status={status})",
+            )
+            return {"status": "failed", "job_id": job_id, "error": f"dispatch not ready (status={status})"}
+
         # Overwrite the client-requested backend with the actually-dispatched one so
         # downstream (poll loop / _execute_command) never sees payload["backend"].
         payload["backend"] = backend_name
@@ -123,7 +139,7 @@ async def execute_and_bill(
 
     while waited < max_wait:
         try:
-            status_info = await _backend_manager["status"](job_id, str(contract_id) if contract_id else None)
+            status_info = await _backend_manager["status"](job_id, backend_job_id)
             status = status_info.get("status", "unknown")
 
             if status in ("completed", "failed", "error", "stopped", "cancelled", "destroyed"):
