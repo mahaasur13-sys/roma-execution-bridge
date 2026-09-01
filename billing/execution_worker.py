@@ -99,8 +99,17 @@ async def execute_and_bill(
             )
             return {"status": "failed", "job_id": job_id, "error": result.get("message", "")}
 
+        # Overwrite the client-requested backend with the actually-dispatched one so
+        # downstream (poll loop / _execute_command) never sees payload["backend"].
+        payload["backend"] = backend_name
+        backend_job_id = result.get("backend_job_id")
+        if backend_job_id is None and contract_id is not None:
+            backend_job_id = str(contract_id)
+        if backend_job_id is not None:
+            payload["backend_job_id"] = backend_job_id
+
         _db_adapter.update_execution_job(job_id, status="running", backend=backend_name,
-                                          backend_job_id=str(contract_id) if contract_id else None)
+                                          backend_job_id=backend_job_id)
     except Exception as exc:
         logger.error("execute_and_bill.dispatch_failed job=%s: %s", job_id, exc)
         _db_adapter.update_execution_job(job_id, status="failed", completed_at=datetime.now(timezone.utc).isoformat(), error=str(exc)[:500])

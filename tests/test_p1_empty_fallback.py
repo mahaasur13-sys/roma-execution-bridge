@@ -28,6 +28,9 @@ class _FakeDB:
     def update_execution_job(self, job_id, **kwargs):
         self.updates.append((job_id, kwargs))
 
+    def record_usage_event(self, *args, **kwargs):
+        pass
+
 
 async def _fake_cancel(job_id, tenant_id=""):
     return {"status": "cancelled", "job_id": job_id}
@@ -115,3 +118,48 @@ def test_payload_backend_not_used_when_result_has_no_backend():
     _, kwargs = db.updates[0]
     assert kwargs["status"] == "failed"
     assert kwargs["backend"] is None  # payload.backend="vastai" must NOT be used
+
+
+def test_queued_without_backend_fails_fast():
+    result, db, status_calls = _run({"status": "queued"})
+
+    assert result["status"] == "failed"
+    assert status_calls == []  # no poll loop
+    assert len(db.updates) == 1
+    _, kwargs = db.updates[0]
+    assert kwargs["status"] == "failed"
+    assert kwargs["backend"] is None
+
+
+def test_result_backend_overwrites_payload_backend(monkeypatch):
+    """After successful dispatch, payload["backend"] must reflect the actually
+    dispatched backend, so the poll loop / _execute_command sees gpu_worker,
+    not the client-requested vastai."""
+    import main as main_module
+
+    db = _FakeDB()
+    status_calls = []
+
+    async def fake_dispatch(job_id, tenant_id, payload):
+        return {"status": "running", "backend": "gpu_worker", "worker_id": "w1"}
+
+    async def fake_status(job_id, instance_id=None):
+        status_calls.append((job_id, instance_id))
+        # Terminal status → poll loop exits on the first iteration.
+        return {"status": "completed", "job_id": job_id}
+
+    ew._db_adapter = db
+    ew._backend_manager = {
+        "dispatch": fake_dispatch,
+        "cancel": _fake_cancel,
+        "status": fake_status,
+    }
+    monkeypatch.setattr(main_module, "finalize_job_billing", lambda *a, **k: True)
+
+    payload = {"backend": "vastai", "task": "echo hi"}
+    result = asyncio.run(ew.execute_and_bill("job-gw", "tenant-1", payload))
+
+    # The client-requested backend was overwritten with the dispatched backend.
+    assert payload["backend"] == "gpu_worker"
+    assert result["backend"] == "gpu_worker"
+    assert status_calls  # dispatch succeeded, so the poll loop did run
