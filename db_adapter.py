@@ -9,6 +9,7 @@ import asyncio
 import logging
 import os
 import threading
+import concurrent.futures
 
 try:
     import psycopg2
@@ -42,16 +43,22 @@ def _pg_enabled() -> bool:
 
 # ── Async runner (handles nested event loops) ──────────
 
+# One process-wide executor for bridging sync→async PG calls. Reused across
+# calls instead of creating a fresh ThreadPoolExecutor per _run_async().
+_ASYNC_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4,
+    thread_name_prefix="roma-db",
+)
+
+
 def _run_async(coro):
     """Run async coroutine from sync context — safe inside asyncio.run()."""
-    import concurrent.futures
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro)
-    # Running loop exists — delegate to a fresh thread
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
+    # Running loop exists — run the coroutine in the shared executor thread.
+    return _ASYNC_EXECUTOR.submit(asyncio.run, coro).result()
 
 def _sqlite_conn():
     import sqlite3
