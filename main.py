@@ -1044,10 +1044,6 @@ async def submit_task(payload: RomaTaskInput, request: Request, key_info: dict =
     ten_jobs = db.list_tenant_jobs(tenant_id, limit=100)
     roma_jobs_active.labels(tenant_id=tenant_id).set(len(ten_jobs))
 
-    roma_jobs_total.labels(tenant_id=tenant_id).inc()
-    ten_jobs = db.list_tenant_jobs(tenant_id, limit=100)
-    roma_jobs_active.labels(tenant_id=tenant_id).set(len(ten_jobs))
-
     return _submit_response(job_id, tenant_id, payload.gpu_required)
 
 
