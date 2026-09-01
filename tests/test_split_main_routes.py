@@ -174,6 +174,19 @@ def test_billing_routes_mounted_on_same_paths():
     assert billing_routes <= actual
 
 
+def test_beta_routes_mounted_on_same_paths():
+    """The 5 beta paths moved to routers/beta.py but stay on the same paths."""
+    actual = _route_surface(main.app)
+    beta_routes = {
+        ("GET", "/beta"),
+        ("POST", "/beta/apply"),
+        ("GET", "/beta/leads"),
+        ("GET", "/api/beta/status"),
+        ("GET", "/api/beta/validate-invite"),
+    }
+    assert beta_routes <= actual
+
+
 def test_extracted_webhooks_router_is_mounted():
     """The webhook routes moved to routers/webhooks.py but stay on the same paths."""
     actual = _route_surface(main.app)
