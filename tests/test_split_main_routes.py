@@ -25,7 +25,8 @@ def _route_surface(app) -> set[tuple[str, str]]:
 
 
 # Snapshot captured before the A1 extraction (models -> models/app.py,
-# webhooks -> routers/webhooks.py). Identical surface verified after the split.
+# webhooks -> routers/webhooks.py, deps -> deps.py, admin -> routers/admin.py).
+# Identical surface verified after the split.
 EXPECTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/"),
     ("GET", "/admin"),
@@ -121,6 +122,27 @@ def test_route_surface_unchanged_after_split():
         f"  missing: {sorted(EXPECTED_ROUTES - actual)}\n"
         f"  extra:   {sorted(actual - EXPECTED_ROUTES)}"
     )
+
+
+def test_admin_routes_mounted_on_same_paths():
+    """The 13 admin routes moved to routers/admin.py but stay on the same paths."""
+    actual = _route_surface(main.app)
+    admin_routes = {
+        ("GET", "/admin"),
+        ("GET", "/admin/analytics"),
+        ("GET", "/admin/analytics/events"),
+        ("GET", "/admin/analytics/users"),
+        ("GET", "/admin/backends"),
+        ("GET", "/admin/email-stats"),
+        ("GET", "/admin/feedback"),
+        ("GET", "/admin/invites"),
+        ("GET", "/admin/verification-stats"),
+        ("POST", "/admin/invite"),
+        ("POST", "/admin/invites/create"),
+        ("POST", "/admin/invites/deactivate"),
+        ("POST", "/admin/test-alert"),
+    }
+    assert admin_routes <= actual
 
 
 def test_extracted_webhooks_router_is_mounted():

@@ -32,6 +32,18 @@ from typing import Any, Optional
 
 import db_adapter as db
 
+# A1 — shared singletons/helpers (re-exported so main.* names stay intact)
+from deps import (
+    API_KEYS,
+    ADMIN_IP_ALLOWLIST,
+    verify_api_key,
+    _get_client_ip,
+    _ip_allowed,
+    _admin_only,
+    alert_dispatcher,
+    limiter,
+)
+
 # DecisionOS — Week 1 foundation
 from models.decision import DecisionRequest
 from cost.gate import EnterpriseDecisionGate
@@ -51,7 +63,7 @@ from monitoring.metrics import (
     track_spend_cap,
     track_spend_cap_blocked,
 )
-from alerts import AlertDispatcher, Alert, AlertLevel
+from alerts import Alert, AlertLevel
 
 # === BILLING SINGLETONS (v2.1.0) ===
 from billing.pg_metering import PGMeteringEngine as MeteringEngine
@@ -60,7 +72,6 @@ from billing.pg_ledger import PGBillingLedger as BillingLedger
 metering_engine = MeteringEngine()
 billing_ledger = BillingLedger()
 from billing.execution_worker import init_worker, execute_and_bill, bill_job, poll_and_execute
-alert_dispatcher = AlertDispatcher()
 
 from saas.email.service import EmailService, EmailProvider as _EmailProvider
 email_service = EmailService(
@@ -233,11 +244,8 @@ from pydantic import BaseModel, Field, ConfigDict
 from starlette.requests import Request
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse, Response, StreamingResponse
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-
-limiter = Limiter(key_func=get_remote_address)
 
 
 # ============================================
@@ -297,36 +305,8 @@ def _save_json(filename: str, data: dict) -> None:
 # API KEY AUTH + MULTI-TENANCY
 # ============================================
 
-API_KEYS: dict[str, dict] = {}
-
 db.init_db()
 db.seed_tenants(API_KEYS)
-
-def verify_api_key(x_api_key: str = Header(None)) -> dict:
-    """Validate API key and return tenant info: {tenant_id, name, tier, api_key}."""
-    if not x_api_key:
-        raise HTTPException(
-            status_code=401,
-            detail="Missing X-API-Key header. Request a key at https://roma-execution-bridge-asurdev.zocomputer.io",
-        )
-    tenant = db.find_tenant_by_key(x_api_key)
-    if not tenant:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    tenant_id = (tenant.get("tenant_id") or "").strip()
-    if not tenant_id:
-        # A key that resolves to an empty/whitespace tenant is treated the same
-        # as an invalid key — never a successful login.
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    tenant["tenant_id"] = tenant_id
-    tenant["api_key"] = x_api_key
-    
-    # Check email verification for API endpoints (skip auth endpoints and admin keys)
-    _ADMIN_KEYS = {'admin-key-beta-2026', 'admin-super-key-xyz'}
-    if x_api_key not in _ADMIN_KEYS:
-        verif_status = is_email_verified(x_api_key)
-        if not verif_status:
-            raise HTTPException(status_code=403, detail="Email not verified. Please verify your email first.")
-    return tenant
 
 # ============================================
 # PLANS & USAGE — DecisionOS PG-backed
@@ -359,8 +339,6 @@ def _get_gate() -> EnterpriseDecisionGate:
 # ============================================
 # CLOUDPAYMENTS BILLING INTEGRATION
 # ============================================
-
-ADMIN_IP_ALLOWLIST = os.environ.get("ADMIN_IP_ALLOWLIST", "127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16")
 
 CLOUDPAYMENTS_ENABLED = bool(
     os.environ.get("CLOUDPAYMENTS_PUBLIC_ID") and
@@ -485,6 +463,7 @@ from router_jobs import router as jobs_router
 from crypto_payments.router import router as crypto_router
 from crypto_payments.wallets.router import router as wallets_router
 from support_chat.router import router as support_router
+from routers.admin import router as admin_router
 from routers.webhooks import router as webhooks_router
 app.include_router(v1_router)
 app.include_router(decisions_router)
@@ -492,6 +471,7 @@ app.include_router(jobs_router)
 app.include_router(crypto_router)
 app.include_router(wallets_router)
 app.include_router(support_router)
+app.include_router(admin_router)
 app.include_router(webhooks_router)
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -1326,31 +1306,6 @@ async def get_balance_endpoint(
 
 
 
-# ============================================
-# ADMIN — Test Alerts (internal)
-# ============================================
-
-@limiter.limit("5/minute")
-@app.post("/admin/test-alert")
-async def test_alert(
-    request: Request,
-    body: TestAlertRequest = TestAlertRequest(),
-    key_info: dict = Depends(verify_api_key),
-):
-    """Отправить тестовый алерт через заданный канал (или все)."""
-    alert = Alert(
-        level=AlertLevel.INFO,
-        title="Тестовый алерт ROMA",
-        body=body.message,
-    )
-    alert_dispatcher.send(alert)
-    return {
-        "sent": True,
-        "channel": body.channel or "all",
-        "preview": alert.format_markdown().split(chr(10))[0],
-    }
-
-
 # DEMOS — ready-to-run tasks
 # ============================================
 
@@ -1934,39 +1889,9 @@ async def resend_verification(payload: dict):
 
 from auth.invites import (
     BETA_MODE, BETA_REQUIRE_INVITE, BETA_DEFAULT_SPEND_CAP,
-    create_invite, validate_invite, use_invite, list_invites, deactivate_invite,
+    validate_invite, use_invite,
     check_beta_capacity, is_beta_enabled,
 )
-
-
-@app.post("/admin/invites/create")
-async def admin_create_invite(payload: dict):
-    """Create a new invite code (admin only)."""
-    max_uses = int(payload.get("max_uses", 1))
-    note = payload.get("note", "")
-    expires_hours = int(payload.get("expires_hours", 0))
-    result = create_invite(max_uses=max_uses, note=note, expires_hours=expires_hours)
-    if "error" in result:
-        raise HTTPException(status_code=400, detail=result["error"])
-    return result
-
-
-@app.get("/admin/invites")
-async def admin_list_invites():
-    """List all invite codes with usage status."""
-    return {"invites": list_invites(), "beta": check_beta_capacity()}
-
-
-@app.post("/admin/invites/deactivate")
-async def admin_deactivate_invite(payload: dict):
-    """Deactivate an invite code."""
-    code = payload.get("code", "")
-    if not code:
-        raise HTTPException(status_code=400, detail="Code is required")
-    success = deactivate_invite(code)
-    if not success:
-        raise HTTPException(status_code=404, detail="Code not found")
-    return {"status": "deactivated", "code": code}
 
 
 @app.get("/api/beta/status")
@@ -2476,368 +2401,6 @@ async def submit_feedback(request: Request):
     except Exception as e:
         logger.error(f"Failed to save feedback: {e}")
         raise HTTPException(status_code=500, detail="Failed to save feedback")
-
-
-# ============================================
-# ENDPOINTS — Admin (API-key protected)
-# ============================================
-
-def _get_client_ip(request: Request) -> str:
-    """Get real client IP, respecting proxy headers (X-Forwarded-For, X-Real-IP)."""
-    xff = request.headers.get("X-Forwarded-For", "")
-    if xff:
-        return xff.split(",")[0].strip()
-    xri = request.headers.get("X-Real-IP", "")
-    if xri:
-        return xri.strip()
-    return request.client.host if request.client else "unknown"
-
-
-def _ip_allowed(client_ip: str) -> bool:
-    """Check if client IP is in the ADMIN_IP_ALLOWLIST (supports CIDR, comma-separated, * for any)."""
-    allowlist = ADMIN_IP_ALLOWLIST.strip()
-    if allowlist == "*":
-        return True
-    if not allowlist:
-        return False
-    try:
-        client = ipaddress.ip_address(client_ip)
-    except ValueError:
-        logger.warning(f"Admin IP check: invalid client IP \'{client_ip}\'")
-        return False
-    for entry in allowlist.split(","):
-        entry = entry.strip()
-        if not entry:
-            continue
-        try:
-            if entry == "::1" and client_ip in ("::1", "127.0.0.1"):
-                return True
-            network = ipaddress.ip_network(entry, strict=False)
-            if client in network:
-                return True
-        except ValueError:
-            logger.warning(f"Admin IP allowlist: invalid entry \'{entry}\'")
-            continue
-    return False
-
-
-def _admin_only(request: Request) -> dict:
-    """Verify admin access — IP allowlist + valid API key + tenant-demo."""
-
-    client_ip = _get_client_ip(request)
-    if not _ip_allowed(client_ip):
-        logger.warning(f"Admin access denied — IP not in allowlist: {client_ip}")
-        raise HTTPException(status_code=403, detail=f"Access denied from {client_ip}")
-
-    api_key_raw = request.headers.get("X-API-Key")
-    if not api_key_raw:
-        api_key_raw = request.query_params.get("api_key", "")
-
-    if not api_key_raw:
-        raise HTTPException(status_code=401, detail="Admin API key required")
-
-    info = API_KEYS.get(api_key_raw)
-    if not info:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-
-    if info.get("tenant_id") != "tenant-demo":
-        raise HTTPException(status_code=403, detail="Admin access requires tenant-demo API key")
-
-    return info
-
-
-@app.get("/admin")
-async def admin_page(request: Request):
-    """Admin dashboard HTML page."""
-    info = _admin_only(request)
-    return Response(content=_render_admin_dashboard(info["tenant_id"]), media_type="text/html")
-
-
-
-@app.get("/admin/verification-stats")
-
-def get_verification_stats():
-    """Return verification statistics for the last 24h."""
-    try:
-        from db_adapter import _pg_conn, _pg_return
-        conn = _pg_conn()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT
-                COUNT(*) AS total_users,
-                COUNT(*) FILTER (WHERE email_verified = true) AS verified,
-                COUNT(*) FILTER (WHERE email_verified = false) AS pending
-            FROM users
-            WHERE created_at >= now() - interval '24 hours'
-        """)
-        row = cur.fetchone()
-        _pg_return(conn)
-        total, verified, pending = row if row else (0, 0, 0)
-        return {
-            "period": "24h",
-            "users_total": total,
-            "users_verified": verified,
-            "users_pending": pending,
-            "verification_rate_pct": round(verified / max(total, 1) * 100, 1),
-        }
-    except Exception as e:
-        logger.warning("verification_stats_failed", extra={"error": str(e)})
-        return {"error": str(e), "period": "24h"}
-async def admin_verification_stats():
-    """Return email verification statistics for the last 24 hours."""
-    return get_verification_stats()
-@app.get("/admin/backends", dependencies=[Depends(verify_api_key)])
-async def admin_backends(key_info: dict = Depends(verify_api_key)):
-    """List available execution backends and their status."""
-    from backends.dispatcher import list_backends
-    return {
-        "active_backend": os.getenv("ROMA_EXECUTION_BACKEND", "local"),
-        "backends": list_backends(),
-    }
-
-
-@app.get("/admin/analytics")
-async def admin_analytics(request: Request):
-    """Get analytics overview (JSON)."""
-    _admin_only(request)
-    days = int(request.query_params.get("days", "30"))
-    try:
-        data = db.get_analytics_overview(days=days)
-        return {"status": "ok", "data": data}
-    except Exception as e:
-        logger.error(f"Admin analytics error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/admin/analytics/users")
-async def admin_analytics_users(request: Request):
-    """Get user list for analytics."""
-    _admin_only(request)
-    start_date = request.query_params.get("start_date", "")
-    end_date = request.query_params.get("end_date", "")
-    sort_by = request.query_params.get("sort_by", "last_seen")
-    try:
-        users = db.get_analytics_users(start_date=start_date, end_date=end_date, sort_by=sort_by)
-        return {"status": "ok", "users": users}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/admin/analytics/events")
-async def admin_analytics_events(request: Request):
-    """Get paginated event list."""
-    _admin_only(request)
-    limit = int(request.query_params.get("limit", "100"))
-    offset = int(request.query_params.get("offset", "0"))
-    event_type = request.query_params.get("event_type", "")
-    tenant_id = request.query_params.get("tenant_id", "")
-    from_date = request.query_params.get("from_date", "")
-    to_date = request.query_params.get("to_date", "")
-    try:
-        items, total = db.get_analytics_events(
-            limit=limit, offset=offset, event_type=event_type,
-            tenant_id=tenant_id, from_date=from_date, to_date=to_date
-        )
-        return {"status": "ok", "items": items, "total": total, "limit": limit, "offset": offset}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/admin/feedback")
-async def admin_feedback(request: Request):
-    """Get feedback list (JSON)."""
-    _admin_only(request)
-    limit = int(request.query_params.get("limit", "50"))
-    offset = int(request.query_params.get("offset", "0"))
-    from_date = request.query_params.get("from_date", "")
-    to_date = request.query_params.get("to_date", "")
-    rating = int(request.query_params.get("rating", "0"))
-    try:
-        items, total = db.get_feedback(
-            limit=limit, offset=offset, from_date=from_date,
-            to_date=to_date, rating=rating
-        )
-        return {"status": "ok", "items": items, "total": total, "limit": limit, "offset": offset}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@limiter.limit("20/minute")
-@app.get("/admin/email-stats")
-async def admin_email_stats(request: Request):
-    """Get email sending statistics."""
-    _admin_only(request)
-    try:
-        stats = db.get_email_stats()
-        return {"status": "ok", "data": stats}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@limiter.limit("20/minute")
-@app.post("/admin/invite")
-async def admin_invite(request: Request):
-    """Send beta invitations. Dry-run if no SendGrid API key."""
-    _admin_only(request)
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-
-    sendgrid_key = os.environ.get("SENDGRID_API_KEY", "")
-    dry_run = body.get("dry_run", not bool(sendgrid_key))
-
-    leads = db.list_leads(status="new")
-    if not leads:
-        return {"status": "ok", "sent": 0, "dry_run": dry_run, "message": "No new leads to invite"}
-
-    sent = 0
-    failed = 0
-    for lead in leads:
-        email = lead.get("email", "")
-        name = lead.get("company", lead.get("email", ""))
-        if not email:
-            continue
-
-        invitation_link = "https://roma-execution-bridge-asurdev.zocomputer.io/dashboard?api_key=roma-demo-key-2026"
-
-        try:
-            if dry_run:
-                db.log_email_sent(email, name, "tenant-demo", invitation_link)
-            else:
-                # Real SendGrid send would go here
-                db.log_email_sent(email, name, "tenant-demo", invitation_link)
-            sent += 1
-        except Exception as e:
-            logger.warning(f"Failed to invite {email}: {e}")
-            failed += 1
-            try:
-                db.log_email_failed(email, str(e))
-            except Exception:
-                pass
-
-    # Mark leads as invited
-    for lead in leads:
-        try:
-            db.update_lead_status(lead["id"], "invited")
-        except Exception:
-            pass
-
-    logger.info(f"Admin invite: {sent} sent, {failed} failed (dry_run={dry_run})")
-    return {"status": "ok", "sent": sent, "failed": failed, "dry_run": dry_run, "total_leads": len(leads)}
-
-
-def _render_admin_dashboard(tenant_id: str) -> str:
-    """Render admin dashboard HTML."""
-    try:
-        overview = db.get_analytics_overview(days=30)
-    except Exception:
-        overview = {}
-
-    try:
-        email_stats = db.get_email_stats()
-    except Exception:
-        email_stats = {}
-
-    total_requests = overview.get("total_requests", 0)
-    unique_tenants = overview.get("unique_tenants", 0)
-    active_users = overview.get("active_users", 0)
-    daily_avg = overview.get("daily_avg", 0)
-
-    emails_sent = email_stats.get("sent", 0)
-    emails_delivered = email_stats.get("delivered", 0)
-    emails_opened = email_stats.get("opened", 0)
-
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ROMA — Admin Dashboard</title>
-<style>
-* {{ box-sizing: border-box; margin: 0; padding: 0 }}
-body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e5e7eb; min-height: 100vh }}
-.header {{ background: #161b22; border-bottom: 1px solid #30363d; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center }}
-.header h1 {{ font-size: 20px; color: #58a6ff }}
-.grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; padding: 24px }}
-.card {{ background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px }}
-.card h3 {{ font-size: 12px; text-transform: uppercase; color: #8b949e; margin-bottom: 8px }}
-.card .value {{ font-size: 32px; font-weight: 700; color: #58a6ff }}
-.card .sub {{ font-size: 13px; color: #6e7681; margin-top: 4px }}
-.section {{ padding: 0 24px 24px }}
-.section h2 {{ font-size: 16px; color: #e5e7eb; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #30363d }}
-.endpoints {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 8px }}
-.endpoint-card {{ background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 12px 16px }}
-.endpoint-card .method {{ display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; margin-right: 8px }}
-.method-get {{ background: #1f6feb33; color: #58a6ff }}
-.method-post {{ background: #23863633; color: #3fb950 }}
-.endpoint-card code {{ font-size: 13px; color: #e5e7eb }}
-.endpoint-card .desc {{ font-size: 12px; color: #8b949e; margin-top: 4px }}
-</style>
-</head>
-<body>
-<div class="header">
-    <h1>⚡ ROMA Admin Dashboard</h1>
-    <span style="color:#8b949e;font-size:13px">tenant: {tenant_id}</span>
-</div>
-
-<div class="grid">
-    <div class="card">
-        <h3>Total Requests (30d)</h3>
-        <div class="value">{total_requests:,}</div>
-        <div class="sub">avg {daily_avg}/day</div>
-    </div>
-    <div class="card">
-        <h3>Active Tenants</h3>
-        <div class="value">{unique_tenants}</div>
-    </div>
-    <div class="card">
-        <h3>Active Users</h3>
-        <div class="value">{active_users}</div>
-    </div>
-    <div class="card">
-        <h3>Emails Sent</h3>
-        <div class="value">{emails_sent}</div>
-        <div class="sub">{emails_opened} opened · {emails_delivered} delivered</div>
-    </div>
-</div>
-
-<div class="section">
-    <h2>📡 Admin API Endpoints</h2>
-    <div class="endpoints">
-        <div class="endpoint-card">
-            <span class="method method-get">GET</span><code>/admin</code>
-            <div class="desc">Admin dashboard (this page)</div>
-        </div>
-        <div class="endpoint-card">
-            <span class="method method-get">GET</span><code>/admin/analytics</code>
-            <div class="desc">Analytics overview JSON</div>
-        </div>
-        <div class="endpoint-card">
-            <span class="method method-get">GET</span><code>/admin/analytics/users</code>
-            <div class="desc">User list with activity</div>
-        </div>
-        <div class="endpoint-card">
-            <span class="method method-get">GET</span><code>/admin/analytics/events</code>
-            <div class="desc">Raw event log (paginated)</div>
-        </div>
-        <div class="endpoint-card">
-            <span class="method method-get">GET</span><code>/admin/feedback</code>
-            <div class="desc">Feedback list (filterable)</div>
-        </div>
-        <div class="endpoint-card">
-            <span class="method method-get">GET</span><code>/admin/email-stats</code>
-            <div class="desc">Email delivery statistics</div>
-        </div>
-        <div class="endpoint-card">
-            <span class="method method-post">POST</span><code>/admin/invite</code>
-            <div class="desc">Send beta invitations</div>
-        </div>
-    </div>
-</div>
-</body>
-</html>"""
-
 
 
 def _error_page(message: str) -> str:
