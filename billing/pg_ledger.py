@@ -46,6 +46,14 @@ class PGBillingLedger:
         entry_type = entry_type.upper()
         meta_json = json.dumps(metadata or {})
         ledger_id = f"led-{int(time.time() * 1000)}-{hash(tenant_id + entry_type + str(amount)) & 0xFFFFF:05x}"
+        # Always mirror into the in-memory ledger (used as a PG-down fallback and
+        # for tests); the PG write is best-effort and never drops the entry on failure.
+        self._entries.append({
+            "ledger_id": ledger_id, "timestamp": time.time(),
+            "tenant_id": tenant_id, "type": entry_type,
+            "amount": amount, "currency": currency,
+            "metadata": metadata or {},
+        })
         try:
             self._pg_execute(
                 "ledger_append",
@@ -53,17 +61,8 @@ class PGBillingLedger:
                    VALUES (%s, %s, %s, %s, %s, %s::jsonb)""",
                 (ledger_id, tenant_id, entry_type, amount, currency, meta_json),
             )
-            return
         except PGUnavailableError:
             pass
-
-        # In-memory fallback
-        self._entries.append({
-            "ledger_id": ledger_id, "timestamp": time.time(),
-            "tenant_id": tenant_id, "type": entry_type,
-            "amount": amount, "currency": currency,
-            "metadata": metadata or {},
-        })
 
     def credit(self, tenant_id: str, amount: float, currency: str = "USD", **meta) -> None:
         self.append(tenant_id, "CREDIT", amount, currency, meta)

@@ -27,6 +27,7 @@ class Alert:
     title: str
     body: str
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    tags: dict | None = None
 
     def format_markdown(self) -> str:
         emoji = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}.get(self.level.value, "📢")
