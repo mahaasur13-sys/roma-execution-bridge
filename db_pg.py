@@ -1,5 +1,6 @@
 """PostgreSQL database adapter for ROMA Execution Bridge.
 
+Internal backend — import via db_adapter, not directly.
 Replaces SQLite-based db.py when PG_DSN environment variable is set.
 Falls back to SQLite db.py for zero-downtime migration.
 

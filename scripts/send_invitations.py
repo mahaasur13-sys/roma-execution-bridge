@@ -139,7 +139,7 @@ def generate_email_content(recipient_name: str, email: str, invitation_link: str
 
 
 def load_leads_from_db(limit: int = 0):
-    import db
+    import db_adapter as db
     db.init_db()
     leads = db.list_leads(status="new")
     if limit and len(leads) > limit:
@@ -216,7 +216,7 @@ def main():
     parser.add_argument("--csv", type=str, default="", help="Load leads from CSV instead of DB")
     args = parser.parse_args()
 
-    import db
+    import db_adapter as db
     db.init_db()
 
     # Determine mode

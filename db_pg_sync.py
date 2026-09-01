@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Sync PostgreSQL adapter using psycopg2 — for db_adapter.py."""
+"""Sync PostgreSQL adapter using psycopg2 — for db_adapter.py.
+
+Internal backend — import via db_adapter, not directly.
+"""
 import logging
 import json
 

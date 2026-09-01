@@ -1,4 +1,7 @@
-"""SQLite database for tenant subscriptions, Stripe data, and webhook events."""
+"""SQLite database for tenant subscriptions, Stripe data, and webhook events.
+
+Internal backend — import via db_adapter, not directly.
+"""
 
 import json
 import sqlite3
