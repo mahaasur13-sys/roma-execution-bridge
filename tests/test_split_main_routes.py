@@ -1,13 +1,13 @@
-"""Route-contract guard for the main.py split (A1 — deps + admin).
+"""Route-contract guard for the main.py split (A1).
 
 Freezes the complete (method, path) surface of the ROMA app — including routes
-mounted via ``app.include_router`` — so any refactor of ``main.py`` into
+mounted via ``app.include_router`` — so any future refactor of ``main.py`` into
 ``APIRouter`` modules can never silently change a URL path, HTTP method, or drop
 a route.
 
 If this test fails after a refactor, the route surface diverged from the
-snapshot captured before the split. Update the snapshot ONLY when the change is
-intentional and backward-compatible (never rename/remove public paths).
+snapshot captured at the start of the split. Update the snapshot ONLY when the
+change is intentional and backward-compatible (never rename/remove public paths).
 """
 
 from __future__ import annotations
@@ -24,8 +24,9 @@ def _route_surface(app) -> set[tuple[str, str]]:
     return surface
 
 
-# Snapshot captured before the A1 extraction. Identical surface verified after
-# the deps + admin-router split.
+# Snapshot captured before the A1 extraction (models -> models/app.py,
+# webhooks -> routers/webhooks.py, deps -> deps.py, admin -> routers/admin.py).
+# Identical surface verified after the split.
 EXPECTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/"),
     ("GET", "/admin"),
@@ -142,3 +143,21 @@ def test_admin_routes_mounted_on_same_paths():
         ("POST", "/admin/test-alert"),
     }
     assert admin_routes <= actual
+
+
+def test_extracted_webhooks_router_is_mounted():
+    """The webhook routes moved to routers/webhooks.py but stay on the same paths."""
+    actual = _route_surface(main.app)
+    assert ("POST", "/webhooks/cloudpayments") in actual
+    assert ("POST", "/webhooks/email") in actual
+
+
+def test_models_importable_from_models_app():
+    """Models were extracted to models/app.py without changing validation."""
+    from models.app import ChatMessage, RomaTaskInput
+
+    task = RomaTaskInput(task="hello")
+    assert task.priority == 5
+
+    msg = ChatMessage(role="user", content="hi")
+    assert msg.role == "user"

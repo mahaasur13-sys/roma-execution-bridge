@@ -427,70 +427,20 @@ else:
 
 
 # ============================================
-# MODELS
+# MODELS (extracted to models/app.py — A1)
 # ============================================
 
-class RomaTaskInput(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        validate_default=True,
-    )
-    task: str = Field(..., min_length=1)
-    image: Optional[str] = Field(default=None, max_length=300)
-    gpu_required: bool = Field(default=False)
-    priority: int = Field(default=5, ge=1, le=10)
-    execution_mode: str = Field(default="k8s_job")
-    backend: Optional[str] = Field(default=None, pattern="^(local|slurm|ray|tensordock|vastai|runpod|gpu_worker|aws_ec2)$")
-    instance_type: str = Field(default="any", description="GPU type: any, RTX 3060, A100, H100")
-
-
-class RomaTaskResponse(BaseModel):
-    status: str
-    job_id: str
-    roma_dispatch: dict
-    dag: list
-    estimated_resources: dict
-    gpu_required: bool
-    tenant_id: str
-
-
-class RomaStatusResponse(BaseModel):
-    job_id: str
-    status: str
-    created_at: str
-    started_at: Optional[str] = None
-    completed_at: Optional[str] = None
-    error: Optional[str] = None
-    backend: Optional[str] = None
-    backend_job_id: Optional[str] = None
-
-
-class CheckoutRequest(BaseModel):
-    plan: str = Field(default="pro", pattern="^(free|pro|enterprise)$")
-
-
-class CheckoutResponse(BaseModel):
-    url: str
-    plan: str
-    mode: str
-
-
-class UsageResponse(BaseModel):
-    tenant_id: str
-    plan: str
-    usage: dict
-    limits: dict
-
-
-class ChatMessage(BaseModel):
-    role: str = Field(..., pattern="^(user|assistant)$")
-    content: str = Field(..., min_length=1, max_length=4000)
-
-
-class ChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=2000)
-    history: list[ChatMessage] = Field(default_factory=list, max_length=10)
-    name: Optional[str] = Field(default=None, max_length=80)
+from models.app import (
+    RomaTaskInput,
+    RomaTaskResponse,
+    RomaStatusResponse,
+    CheckoutRequest,
+    CheckoutResponse,
+    UsageResponse,
+    ChatMessage,
+    ChatRequest,
+    TestAlertRequest,
+)
 
 # ============================================
 # APP
@@ -514,6 +464,7 @@ from crypto_payments.router import router as crypto_router
 from crypto_payments.wallets.router import router as wallets_router
 from support_chat.router import router as support_router
 from routers.admin import router as admin_router
+from routers.webhooks import router as webhooks_router
 app.include_router(v1_router)
 app.include_router(decisions_router)
 app.include_router(jobs_router)
@@ -521,6 +472,7 @@ app.include_router(crypto_router)
 app.include_router(wallets_router)
 app.include_router(support_router)
 app.include_router(admin_router)
+app.include_router(webhooks_router)
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 if JAEGER_ENABLED:
@@ -2449,128 +2401,6 @@ async def submit_feedback(request: Request):
     except Exception as e:
         logger.error(f"Failed to save feedback: {e}")
         raise HTTPException(status_code=500, detail="Failed to save feedback")
-
-
-# ============================================
-# ENDPOINTS — CloudPayments Webhook
-# ============================================
-
-@limiter.limit("20/minute")
-@app.post("/webhooks/cloudpayments")
-async def cloudpayments_webhook(request: Request):
-    raw_body = await request.body()
-    signature = (
-        request.headers.get("Content-HMAC")
-        or request.headers.get("Content-Hmac")
-        or request.headers.get("X-Content-HMAC")
-        or ""
-    )
-
-    if not CLOUDPAYMENTS_ENABLED or cloudpayments_client is None:
-        return {"code": 0}
-
-    # Fail closed: the webhook secret is mandatory and is NOT the API secret.
-    if not (cloudpayments_client.config.webhook_secret or "").strip():
-        logger.error("cloudpayments_webhook: webhook secret not configured")
-        raise HTTPException(status_code=500, detail="webhook secret not configured")
-
-    if not cloudpayments_client.verify_webhook(raw_body, signature):
-        raise HTTPException(status_code=400, detail="Invalid signature")
-
-    try:
-        payload = json.loads(raw_body)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
-
-    event_type = payload.get("OperationType") or payload.get("Status") or ""
-    tenant_id = (payload.get("AccountId") or "").strip()
-    invoice_id = payload.get("InvoiceId", "")
-    data = payload.get("Data") or {}
-    if isinstance(data, str):
-        try:
-            data = json.loads(data)
-        except Exception:
-            data = {}
-    plan = data.get("plan", "")
-
-    if not invoice_id:
-        return {"code": 0}
-
-    # Idempotency before any tenant resolution/credit.
-    if db.is_invoice_processed(invoice_id):
-        return {"code": 0}
-
-    # Tenant is resolved ONLY from AccountId and must already exist.
-    if not tenant_id or not db.get_tenant(tenant_id):
-        logger.warning("cloudpayments_webhook: unknown AccountId invoice=%s", invoice_id)
-        raise HTTPException(status_code=422, detail="Unknown AccountId")
-
-    status = payload.get("Status", "")
-
-    try:
-        if event_type in ("Payment", "Pay", "Completed") or status in ("Completed", "Authorized"):
-            if plan in ("pro", "enterprise"):
-                db.update_tenant_subscription(tenant_id, invoice_id, "", "active", plan, None)
-                db.mark_invoice_processed(invoice_id, event_type, tenant_id)
-            else:
-                db.mark_invoice_processed(invoice_id, event_type or "payment_no_plan", tenant_id)
-
-        elif event_type == "Recurrent" and status == "Completed":
-            if plan:
-                db.update_tenant_subscription(tenant_id, invoice_id, "", "active", plan, None)
-                db.mark_invoice_processed(invoice_id, event_type, tenant_id)
-            else:
-                db.mark_invoice_processed(invoice_id, event_type or "recurrent_no_plan", tenant_id)
-
-        elif event_type in ("Fail", "Declined") or status in ("Declined", "Cancelled"):
-            db.set_tenant_inactive(tenant_id)
-            db.mark_invoice_processed(invoice_id, event_type, tenant_id)
-
-        elif event_type in ("Cancel", "Unsubscribe"):
-            db.update_tenant_subscription(tenant_id, "", "", "canceled", "free", None)
-            db.mark_invoice_processed(invoice_id, event_type, tenant_id)
-
-        else:
-            db.mark_invoice_processed(invoice_id, event_type or "ignored", tenant_id)
-
-    except Exception:
-        logger.exception("Failed to process CloudPayments webhook %s", invoice_id)
-        raise HTTPException(status_code=500, detail="Processing error")
-
-    return {"code": 0}
-
-# ENDPOINTS — SendGrid Webhook# ENDPOINTS — SendGrid Webhook
-# ============================================
-
-@limiter.limit("20/minute")
-@app.post("/webhooks/email")
-async def sendgrid_webhook(request: Request):
-    """Receive SendGrid event notifications.
-    Events: delivered, open, click, bounce, dropped, spamreport.
-    See: https://docs.sendgrid.com/for-developers/tracking-events/event
-    """
-    try:
-        events = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
-
-    if not isinstance(events, list):
-        events = [events]
-
-    processed = 0
-    for evt in events:
-        try:
-            event_type = evt.get("event", "")
-            email = evt.get("email", "")
-            if not email or not event_type:
-                continue
-            db.update_email_event(email, event_type)
-            processed += 1
-        except Exception as e:
-            logger.warning(f"SendGrid webhook event skipped: {e}")
-
-    logger.info(f"SendGrid webhook: processed {processed}/{len(events)} events")
-    return {"status": "ok", "processed": processed}
 
 
 def _error_page(message: str) -> str:
