@@ -163,3 +163,52 @@ def test_result_backend_overwrites_payload_backend(monkeypatch):
     assert payload["backend"] == "gpu_worker"
     assert result["backend"] == "gpu_worker"
     assert status_calls  # dispatch succeeded, so the poll loop did run
+
+
+def test_queued_with_backend_not_ready_fails_fast():
+    """dispatch returned a backend name but status=queued is not "accepted" —
+    don't mark running and don't burn 120s polling."""
+    result, db, status_calls = _run({"status": "queued", "backend": "local"})
+
+    assert result["status"] == "failed"
+    assert status_calls == []  # no poll loop
+    assert len(db.updates) == 1
+    _, kwargs = db.updates[0]
+    assert kwargs["status"] == "failed"
+    assert kwargs["backend"] == "local"  # honest backend name, but still failed
+
+
+def test_poll_uses_normalized_backend_job_id(monkeypatch):
+    """poll must receive the normalized backend_job_id, not the raw contract_id."""
+    import main as main_module
+
+    db = _FakeDB()
+    status_calls = []
+
+    async def fake_dispatch(job_id, tenant_id, payload):
+        return {
+            "status": "running",
+            "backend": "gpu_worker",
+            "contract_id": 123,
+            "backend_job_id": "worker-contract-xyz",
+        }
+
+    async def fake_status(job_id, instance_id=None):
+        status_calls.append((job_id, instance_id))
+        return {"status": "completed", "job_id": job_id}
+
+    ew._db_adapter = db
+    ew._backend_manager = {
+        "dispatch": fake_dispatch,
+        "cancel": _fake_cancel,
+        "status": fake_status,
+    }
+    monkeypatch.setattr(main_module, "finalize_job_billing", lambda *a, **k: True)
+
+    payload = {"backend": "vastai", "task": "echo hi"}
+    asyncio.run(ew.execute_and_bill("job-gw", "tenant-1", payload))
+
+    # payload carried the normalized backend_job_id, not str(contract_id).
+    assert payload["backend_job_id"] == "worker-contract-xyz"
+    # The poll loop used the normalized backend_job_id as instance_id.
+    assert status_calls and status_calls[0][1] == "worker-contract-xyz"
