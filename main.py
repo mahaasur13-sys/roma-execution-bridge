@@ -3,17 +3,9 @@ ROMA Execution Bridge – FastAPI + Pydantic v2
 Multi-tenant execution platform with API-Key auth, tenant isolation, and billing.
 """
 # ── Load .env BEFORE all imports ─────────────────────────────────
-import os as _os
-from pathlib import Path as _Path
-_env_path = _Path(__file__).parent / ".env"
-if _env_path.exists():
-    with open(_env_path, "r") as _f:
-        for _line in _f:
-            _line = _line.strip()
-            if _line and not _line.startswith("#") and "=" in _line:
-                _key, _, _val = _line.partition("=")
-                _os.environ.setdefault(_key.strip(), _val.strip().strip('"').strip("'"))
-    print(f"✅ Loaded {_env_path}", flush=True)
+from env_loader import load_env
+
+load_env()
 
 
 import asyncio
@@ -824,21 +816,6 @@ async def metrics():
 # ============================================
 # ENDPOINTS — DecisionOS: /submit via Gate + PG
 # ============================================
-
-# ── Load .env at startup ─────────────────────────────────────────
-import os as _os
-from pathlib import Path as _Path
-_env_path = _Path(__file__).parent / ".env"
-if _env_path.exists():
-    with open(_env_path) as _f:
-        for _line in _f:
-            _line = _line.strip()
-            if _line and not _line.startswith('#') and '=' in _line:
-                _key, _val = _line.split('=', 1)
-                _key = _key.strip()
-                _val = _val.strip().strip('"').strip("'")
-                if _key not in _os.environ:
-                    _os.environ[_key] = _val
 
 def _parse_idempotency_key(request: Request) -> Optional[str]:
     """Read and validate the Idempotency-Key header. Returns None if absent."""

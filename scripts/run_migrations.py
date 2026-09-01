@@ -18,6 +18,11 @@ import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from env_loader import load_env
+load_env()
+
 
 def _dsn() -> str | None:
     return os.environ.get("PG_DSN") or os.environ.get("DATABASE_URL")
