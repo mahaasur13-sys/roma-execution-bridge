@@ -61,6 +61,7 @@ email_service = EmailService(
 
 VERIFICATION_TOKEN_EXPIRY_HOURS = int(os.environ.get("VERIFICATION_TOKEN_EXPIRY_HOURS", "24"))
 VERIFICATION_BASE_URL = os.environ.get("VERIFICATION_BASE_URL", "https://roma-execution-bridge-asurdev.zocomputer.io")
+DEMO_API_KEY = os.environ.get("ROMA_DEMO_API_KEY", "YOUR_API_KEY")
 
 LOGIN_PAGE = """<!DOCTYPE html>
 <html lang="en">
@@ -88,7 +89,7 @@ button:hover { background:#2ea043 }
     <h1>⚡ ROMA Execution Bridge</h1>
     <p>Enter your API key to access the dashboard.</p>
     <form method="POST" action="/auth/login">
-        <input type="text" name="api_key" placeholder="roma-demo-key-2026" autofocus required>
+        <input type="text" name="api_key" placeholder="{{ demo_key }}" autofocus required>
         <button type="submit">Sign In</button>
     </form>
     <p style="margin-top:24px; color:#8b949e; text-align:center">— or sign in with —</p>
@@ -97,7 +98,7 @@ button:hover { background:#2ea043 }
         <a href="/auth/oauth/login/github" style="flex:1; text-align:center; padding:10px; background:#1a1f2e; border:1px solid #30363d; border-radius:8px; color:#e5e7eb; text-decoration:none; font-size:14px">🐙 GitHub</a>
     </div>
 
-    <div class="hint">Test key: <code>roma-demo-key-2026</code></div>
+    <div class="hint">Test key: <code>{{ demo_key }}</code></div>
 </div>
 </body>
 </html>"""
@@ -113,7 +114,7 @@ async def login_page(request: Request):
     session_id = request.cookies.get("session_id")
     if session_id and get_session(session_id):
         return RedirectResponse(url="/dashboard", status_code=302)
-    return Response(content=LOGIN_PAGE, media_type="text/html")
+    return Response(content=LOGIN_PAGE.replace("{{ demo_key }}", DEMO_API_KEY), media_type="text/html")
 
 
 @limiter.limit("15/minute")
@@ -124,7 +125,11 @@ async def login(request: Request):
     api_key = form.get("api_key", "")
     if api_key not in API_KEYS:
         # Show login page with error
-        error_html = LOGIN_PAGE.replace("</form>", '<div class="error">Invalid API key. Try <code>roma-demo-key-2026</code></div></form>')
+        error_html = (
+            LOGIN_PAGE
+            .replace("</form>", '<div class="error">Invalid API key. Try <code>{{ demo_key }}</code></div></form>')
+            .replace("{{ demo_key }}", DEMO_API_KEY)
+        )
         return Response(content=error_html, media_type="text/html", status_code=401)
 
     info = API_KEYS[api_key]

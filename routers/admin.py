@@ -232,7 +232,8 @@ async def admin_invite(request: Request):
         if not email:
             continue
 
-        invitation_link = "https://roma-execution-bridge-asurdev.zocomputer.io/dashboard?api_key=roma-demo-key-2026"
+        demo_api_key = os.environ.get("ROMA_DEMO_API_KEY", "")
+        invitation_link = f"https://roma-execution-bridge-asurdev.zocomputer.io/dashboard?api_key={demo_api_key}"
 
         try:
             if dry_run:

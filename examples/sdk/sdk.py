@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """ROMA Execution Bridge v2.1.0 — Python SDK with billing (GPU-sec + tokens + spend-caps)."""
 
+import os
 import requests
 import time
 import sys
@@ -90,7 +91,7 @@ class SpendCapExceeded(Exception):
 # ═══════════════════════════════════════════════════════════════════════
 
 def demo_full_lifecycle():
-    client = ROMAClient(api_key="roma-demo-key-2026")
+    client = ROMAClient(api_key=os.environ.get("ROMA_API_KEY", "YOUR_API_KEY"))
 
     # 1. Check balance before submitting
     usage = client.get_usage()
