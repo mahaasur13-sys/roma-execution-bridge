@@ -1,12 +1,23 @@
 #!/usr/bin/env python3
-"""ROMA Billing Ledger — append-only ledger of all billing state changes."""
+"""DEPRECATED in-memory billing ledger.
+
+Use ``billing.pg_ledger.PGBillingLedger`` instead (the active, PG-first ledger).
+This module is kept only for legacy consumers and revenue-share extension
+attributes; do not add new call sites.
+"""
 from typing import Optional
 import time
 import json
+import warnings
 
 class BillingLedger:
-    """Append-only ledger — every billing event is recorded, never mutated."""
+    """DEPRECATED append-only in-memory ledger — use PGBillingLedger."""
     def __init__(self):
+        warnings.warn(
+            "BillingLedger is deprecated; use billing.pg_ledger.PGBillingLedger",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._entries: list[dict] = []
 
     def append(self, tenant_id: str, entry_type: str, amount: float, currency: str = "USD", metadata: dict = None) -> None:
