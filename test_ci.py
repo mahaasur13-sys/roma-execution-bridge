@@ -52,7 +52,7 @@ def t_billing():
 def t_ledger():
     from billing.pg_ledger import PGBillingLedger as BillingLedger
     l = BillingLedger()
-    l.append(tenant_id='tp', entry_type='usage', amount=1.0, metadata={})
+    l.append(tenant_id='tp', entry_type='CREDIT', amount=1.0, metadata={})
     bal = l.get_tenant_balance('tp')
     assert bal >= 0, "ledger failed"
 

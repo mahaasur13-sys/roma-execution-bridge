@@ -6,12 +6,15 @@ import hmac
 import hashlib
 import time
 import json
+import logging
 import os
 
 router = APIRouter(prefix="/webhook", tags=["webhooks"])
 
 STRIPE_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+logger = logging.getLogger("roma.saas.stripe_webhook")
 
 _redis = None
 try:
@@ -69,50 +72,10 @@ async def stripe_webhook(
     if _dup(eid):
         return Response(received=True, event_id=eid, processed=False)
 
-    ok = False
-    try:
-        obj = event.get("data", {}).get("object", {})
-        tid = obj.get("metadata", {}).get("tenant_id", "")
-
-        if etype in ("checkout.session.completed", "customer.subscription.created"):
-            from billing.pg_ledger import PGBillingLedger as BillingLedger
-            ledger = BillingLedger()
-            amount = obj.get("amount_total", 0) or obj.get("amount_paid", 0)
-            currency = obj.get("currency", "usd")
-            period_end = obj.get("period_end", 0)
-            invoice_id = obj.get("id", "")
-            ledger.record_usage(tid, amount, currency, f"Subscription {invoice_id}", period_end)
-            ok = True
-
-        elif etype == "invoice.paid":
-            from billing.pg_ledger import PGBillingLedger as BillingLedger
-            from saas.webhooks.revenue_share import RevenueShareCalculator
-            ledger = BillingLedger()
-            calc = RevenueShareCalculator(ledger)
-            amount = obj.get("amount_paid", 0)
-            ledger.record_usage(tid, amount, obj.get("currency", "usd"),
-                               f"Invoice {obj.get('id')}", obj.get("period_end", 0))
-            share = calc.calculate(tid, amount)
-            if share["revenue_share_cents"] > 0:
-                ledger.record_revenue_share(
-                    tid, share["revenue_share_cents"],
-                    obj.get("id"), share["revenue_share_percent"]
-                )
-            ok = True
-
-        elif etype == "customer.subscription.updated":
-            ok = True
-
-        elif etype == "customer.subscription.deleted":
-            ok = True
-
-        elif etype == "invoice.payment_failed":
-            ok = True
-
-    except Exception as e:
-        return Response(received=True, event_id=eid, processed=False, error=str(e))
-
-    if ok:
-        _mark(eid)
-
-    return Response(received=True, event_id=eid, processed=ok)
+    # Legacy in-process handler is disabled. The live Stripe webhook is
+    # deploy/stripe-webhook/app/main.py. The ledger methods this module used
+    # to call (record_usage / record_revenue_share) do not exist on
+    # PGBillingLedger, so we never credit here and never report the event as
+    # processed.
+    logger.warning("legacy stripe_webhook handler disabled; live handler is deploy/stripe-webhook/app/main.py")
+    return Response(received=True, event_id=eid, processed=False)
