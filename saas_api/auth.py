@@ -4,7 +4,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from auth.api_keys import APIKeyManager
 from tenancy.manager import TenantManager
-from billing.ledger import BillingLedger
+from billing.pg_ledger import PGBillingLedger as BillingLedger
 from billing.pricing_engine import PricingEngine
 import time
 
