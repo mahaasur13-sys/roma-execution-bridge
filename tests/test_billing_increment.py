@@ -28,9 +28,9 @@ def test_increment_usage_gpu_seconds():
     assert len(metering_engine.events) == 1
     assert len(billing_ledger._entries) == 1
     entry = billing_ledger._entries[0]
-    assert entry["type"] == "debit"
+    assert entry["type"] == "DEBIT"
     assert entry["amount"] == pytest.approx(0.001)
-    assert "GPU 100" in entry.get("description", "")
+    assert entry.get("metadata", {}).get("gpu_sec") == 100.0
 
 
 def test_increment_usage_tokens():
