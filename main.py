@@ -302,6 +302,20 @@ API_KEYS: dict[str, dict] = {}
 db.init_db()
 db.seed_tenants(API_KEYS)
 
+
+def _admin_api_keys() -> set[str]:
+    """Admin API keys that bypass email verification — sourced ONLY from the
+    ADMIN_API_KEYS env var (comma-separated). Empty by default: fail-closed,
+    never trust hardcoded keys in source."""
+    raw = os.environ.get("ADMIN_API_KEYS", "")
+    return {k.strip() for k in raw.split(",") if k.strip()}
+
+
+def _demo_api_key() -> str:
+    """Demo API key surfaced in login/invite UI. Only from ROMA_DEMO_API_KEY."""
+    return os.environ.get("ROMA_DEMO_API_KEY", "")
+
+
 def verify_api_key(x_api_key: str = Header(None)) -> dict:
     """Validate API key and return tenant info: {tenant_id, name, tier, api_key}."""
     if not x_api_key:
@@ -320,9 +334,9 @@ def verify_api_key(x_api_key: str = Header(None)) -> dict:
     tenant["tenant_id"] = tenant_id
     tenant["api_key"] = x_api_key
     
-    # Check email verification for API endpoints (skip auth endpoints and admin keys)
-    _ADMIN_KEYS = {'admin-key-beta-2026', 'admin-super-key-xyz'}
-    if x_api_key not in _ADMIN_KEYS:
+    # Check email verification for API endpoints (skip auth endpoints and admin keys).
+    # Admin keys come from ADMIN_API_KEYS env (fail-closed: empty by default).
+    if x_api_key not in _admin_api_keys():
         verif_status = is_email_verified(x_api_key)
         if not verif_status:
             raise HTTPException(status_code=403, detail="Email not verified. Please verify your email first.")
@@ -1776,7 +1790,7 @@ button:hover { background:#2ea043 }
     <h1>⚡ ROMA Execution Bridge</h1>
     <p>Enter your API key to access the dashboard.</p>
     <form method="POST" action="/auth/login">
-        <input type="text" name="api_key" placeholder="roma-demo-key-2026" autofocus required>
+        <input type="text" name="api_key" placeholder="YOUR_API_KEY" autofocus required>
         <button type="submit">Sign In</button>
     </form>
     <p style="margin-top:24px; color:#8b949e; text-align:center">— or sign in with —</p>
@@ -1785,7 +1799,7 @@ button:hover { background:#2ea043 }
         <a href="/auth/oauth/login/github" style="flex:1; text-align:center; padding:10px; background:#1a1f2e; border:1px solid #30363d; border-radius:8px; color:#e5e7eb; text-decoration:none; font-size:14px">🐙 GitHub</a>
     </div>
 
-    <div class="hint">Test key: <code>roma-demo-key-2026</code></div>
+    <div class="hint">Test key: <code>YOUR_API_KEY</code></div>
 </div>
 </body>
 </html>"""
@@ -1809,7 +1823,7 @@ async def login(request: Request):
     api_key = form.get("api_key", "")
     if api_key not in API_KEYS:
         # Show login page with error
-        error_html = LOGIN_PAGE.replace("</form>", '<div class="error">Invalid API key. Try <code>roma-demo-key-2026</code></div></form>')
+        error_html = LOGIN_PAGE.replace("</form>", '<div class="error">Invalid API key. Try <code>YOUR_API_KEY</code></div></form>')
         return Response(content=error_html, media_type="text/html", status_code=401)
 
     info = API_KEYS[api_key]
@@ -2878,7 +2892,10 @@ async def admin_invite(request: Request):
         if not email:
             continue
 
-        invitation_link = "https://roma-execution-bridge-asurdev.zocomputer.io/dashboard?api_key=roma-demo-key-2026"
+        demo_key = _demo_api_key()
+        invitation_link = "https://roma-execution-bridge-asurdev.zocomputer.io/dashboard"
+        if demo_key:
+            invitation_link += f"?api_key={demo_key}"
 
         try:
             if dry_run:
