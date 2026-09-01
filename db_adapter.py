@@ -550,7 +550,7 @@ def _ensure_execution_jobs_table(c) -> None:
     """Create execution_jobs in SQLite if absent and backfill the execution-billing
     columns (backend, backend_job_id, ...) on tables created before migration 005.
 
-    Mirrors migrations/002_billing_pg.sql + migrations/005_execution_billing.sql.
+    Mirrors migrations/002_billing_pg.sql + migrations/007_execution_billing.sql.
     backend is intentionally nullable (no silent 'local' default on an empty chain).
     """
     c.execute("""
