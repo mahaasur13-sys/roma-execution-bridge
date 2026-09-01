@@ -128,7 +128,7 @@ if __name__ == "__main__":
     print(f"  [Stripe] Invoice: {inv}")
 
     # Webhook handler
-    from billing.ledger import BillingLedger; ledger = BillingLedger()
+    from billing.pg_ledger import PGBillingLedger as BillingLedger; ledger = BillingLedger()
     wh = StripeWebhookHandler(stripe, ledger)
 
     import json

@@ -75,7 +75,7 @@ async def stripe_webhook(
         tid = obj.get("metadata", {}).get("tenant_id", "")
 
         if etype in ("checkout.session.completed", "customer.subscription.created"):
-            from billing.ledger import BillingLedger
+            from billing.pg_ledger import PGBillingLedger as BillingLedger
             ledger = BillingLedger()
             amount = obj.get("amount_total", 0) or obj.get("amount_paid", 0)
             currency = obj.get("currency", "usd")
@@ -85,7 +85,7 @@ async def stripe_webhook(
             ok = True
 
         elif etype == "invoice.paid":
-            from billing.ledger import BillingLedger
+            from billing.pg_ledger import PGBillingLedger as BillingLedger
             from saas.webhooks.revenue_share import RevenueShareCalculator
             ledger = BillingLedger()
             calc = RevenueShareCalculator(ledger)

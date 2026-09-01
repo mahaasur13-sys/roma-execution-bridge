@@ -63,7 +63,7 @@ Economic feedback loop → next planning cycle
 | Operator SDK | ✅ | `operator_sdk/operator_base.py`, `operator_sdk/converter.py` |
 | Multi-Tenant | ✅ | `tenancy/manager.py` |
 | Auth + API Gateway | ✅ | `auth/engine.py`, `auth/api_gateway.py` |
-| Billing (Metering + Ledger + Stripe) | ✅ | `billing/metering.py`, `billing/ledger.py`, `billing/stripe_client.py` |
+| Billing (Metering + Ledger + Stripe) | ✅ | `billing/metering.py`, `billing/pg_ledger.py`, `billing/stripe_client.py` |
 | Cost Prediction + Decision Gate | ✅ | `cost/predictor.py`, `cost/gate.py` |
 
 ---

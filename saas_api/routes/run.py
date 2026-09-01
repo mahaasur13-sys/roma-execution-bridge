@@ -9,7 +9,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from control_plane.registry import WorkerRegistry
 from control_plane.job_store import JobStore
-from billing.ledger import BillingLedger
+from billing.pg_ledger import PGBillingLedger as BillingLedger
 from billing.pricing_engine import PricingEngine
 
 router = APIRouter()

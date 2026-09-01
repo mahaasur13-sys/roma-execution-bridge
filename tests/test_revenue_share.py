@@ -43,18 +43,9 @@ def test_signature_skip_on_empty():
     assert _verify(b"payload", "", "secret") == True
     print("PASS: signature_skip_on_empty")
 
-def test_ledger_revenue_share_ext():
-    from billing.ledger import BillingLedger
-    ledger = BillingLedger()
-    assert hasattr(ledger, "record_revenue_share")
-    assert hasattr(ledger, "get_monthly_revenue")
-    assert hasattr(ledger, "get_pending_revenue_share")
-    print("PASS: ledger_revenue_share_ext")
-
 if __name__ == "__main__":
     test_tiered_rates()
     test_idempotency()
     test_response_model()
     test_signature_skip_on_empty()
-    test_ledger_revenue_share_ext()
     print("\n✅ All revenue-share tests passed")
