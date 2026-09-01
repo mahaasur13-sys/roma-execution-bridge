@@ -431,12 +431,17 @@ def _cors_allowed_origins() -> list[str]:
     return ["http://127.0.0.1:3080", "http://localhost:3080"]
 
 
+def _cors_allow_credentials(origins: list[str]) -> bool:
+    """Credentials are allowed only when the origin list has no wildcard."""
+    return "*" not in origins
+
+
 _cors_origins = _cors_allowed_origins()
-_cors_allow_credentials = "*" not in _cors_origins
+_cors_credentials_enabled = _cors_allow_credentials(_cors_origins)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_credentials=_cors_allow_credentials,
+    allow_credentials=_cors_credentials_enabled,
     allow_methods=["*"],
     allow_headers=["*"],
 )
