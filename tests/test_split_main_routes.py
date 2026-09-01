@@ -145,6 +145,22 @@ def test_admin_routes_mounted_on_same_paths():
     assert admin_routes <= actual
 
 
+def test_auth_routes_mounted_on_same_paths():
+    """The 7 auth paths moved to routers/auth.py but stay on the same paths."""
+    actual = _route_surface(main.app)
+    auth_routes = {
+        ("GET", "/auth/login"),
+        ("POST", "/auth/login"),
+        ("GET", "/auth/logout"),
+        ("POST", "/auth/signup"),
+        ("GET", "/auth/verify-email"),
+        ("POST", "/auth/resend-verification"),
+        ("GET", "/auth/oauth/login/{provider}"),
+        ("GET", "/auth/oauth/callback/{provider}"),
+    }
+    assert auth_routes <= actual
+
+
 def test_extracted_webhooks_router_is_mounted():
     """The webhook routes moved to routers/webhooks.py but stay on the same paths."""
     actual = _route_surface(main.app)
