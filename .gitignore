@@ -19,6 +19,7 @@ ENV/
 usage.json
 api_keys.json
 .env.bak
+*.bak
 .backup_dir/
 .pids/
 
