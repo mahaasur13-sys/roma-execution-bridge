@@ -1,0 +1,22 @@
+title = "ROMA gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "obvious demo/test fixtures and placeholders (not real secrets)"
+regexTarget = "match"
+regexes = [
+  '''roma-demo-key-[0-9]+''',
+  '''roma-admin-key''',
+  '''admin-key-beta-2026''',
+  '''admin-super-key-xyz''',
+  '''YOUR_API_KEY''',
+  '''<your_api_key>''',
+  '''<ключ>''',
+  '''test-key-[a-zA-Z0-9-]+''',
+  '''wrong-key''',
+  '''sk_test_placeholder''',
+  '''whsec_placeholder''',
+  '''VASTAI_API_KEY=\s*VASTAI_DEFAULT_GPU=''',
+]

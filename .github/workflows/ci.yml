@@ -65,3 +65,28 @@ jobs:
         run: |
           grep -c "kind: PodDisruptionBudget" /tmp/roma-template.yaml
           echo "PDB count OK"
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_REDACT: "true"
+
+  pip-audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: pip-audit (non-blocking)
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements-worker.txt || echo "pip-audit findings (non-blocking)"
