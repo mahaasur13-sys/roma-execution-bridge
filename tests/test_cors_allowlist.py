@@ -68,7 +68,7 @@ def test_foreign_origin_not_reflected(monkeypatch):
 
     client = TestClient(app)
     resp = client.get("/health", headers={"Origin": "http://evil.example"})
-    assert resp.headers.get("access-control-allow-origin") != "http://evil.example"
+    assert resp.headers.get("access-control-allow-origin") is None
 
 
 def test_production_empty_fail_closed(monkeypatch):
