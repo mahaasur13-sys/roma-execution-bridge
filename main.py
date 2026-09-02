@@ -410,9 +410,41 @@ app = FastAPI(
 )
 app.state.limiter = limiter
 
-# CORS (P2-1)
-CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
-app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+# CORS (C5) — allowlist from CORS_ALLOW_ORIGINS
+def _cors_allowed_origins() -> list[str]:
+    """Resolve CORS origins from CORS_ALLOW_ORIGINS (comma-separated).
+
+    - explicit list -> used as-is (trimmed, empty entries dropped)
+    - production (ENV/ROMA_ENV=production) + empty -> fail-closed []
+    - non-prod + empty -> localhost only
+    """
+    raw = os.environ.get("CORS_ALLOW_ORIGINS", "")
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    if origins:
+        return origins
+    production = (
+        os.environ.get("ENV", "").strip().lower() == "production"
+        or os.environ.get("ROMA_ENV", "").strip().lower() == "production"
+    )
+    if production:
+        return []  # fail-closed
+    return ["http://127.0.0.1:3080", "http://localhost:3080"]
+
+
+def _cors_allow_credentials(origins: list[str]) -> bool:
+    """Credentials are allowed only when the origin list has no wildcard."""
+    return "*" not in origins
+
+
+_cors_origins = _cors_allowed_origins()
+_cors_credentials_enabled = _cors_allow_credentials(_cors_origins)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_credentials_enabled,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # DecisionOS Week 2 — v1 API routes
 from routes.v1_router import router as v1_router
