@@ -1803,6 +1803,11 @@ def list_jobs(tenant_id: str, limit: int = 100) -> list[dict]:
     return list_tenant_jobs(tenant_id, limit)
 
 
+
+def _hash_api_key(api_key: str) -> str:
+    import hashlib
+    return hashlib.sha256((api_key or "").encode("utf-8")).hexdigest()
+
 def find_tenant_by_key(api_key: str) -> dict | None:
     """Look up tenant by raw API key. Matches against api_key_hash."""
 
@@ -1810,19 +1815,39 @@ def find_tenant_by_key(api_key: str) -> dict | None:
         return _find_tenant_by_key_pg(api_key)
     return _find_tenant_by_key_sqlite(api_key)
 
-def _find_tenant_by_key_pg(api_key_hash: str) -> dict | None:
+def _find_tenant_by_key_pg(api_key: str) -> dict | None:
     conn = _pg_conn()
     try:
         cur = conn.cursor()
-        cur.execute(
-            "SELECT id, name, plan, api_key FROM tenants WHERE api_key = %s",
-            (api_key_hash,),
-        )
-        row = cur.fetchone()
+        digest = _hash_api_key(api_key)
+        row = None
+        try:
+            cur.execute(
+                "SELECT id, name, plan FROM tenants WHERE api_key_hash = %s",
+                (digest,),
+            )
+            row = cur.fetchone()
+        except Exception:
+            conn.rollback()
+        if not row:
+            cur.execute(
+                "SELECT id, name, plan FROM tenants WHERE api_key = %s",
+                (api_key,),
+            )
+            row = cur.fetchone()
+            if row:
+                try:
+                    cur.execute(
+                        "UPDATE tenants SET api_key_hash = %s WHERE id = %s AND (api_key_hash IS NULL OR api_key_hash = '')",
+                        (digest, row[0]),
+                    )
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
         cur.close()
         if not row:
             return None
-        return {"tenant_id": row[0], "name": row[1], "tier": row[2], "api_key_hash": row[3]}
+        return {"tenant_id": row[0], "name": row[1], "tier": row[2]}
     finally:
         _pg_return(conn)
 
