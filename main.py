@@ -289,6 +289,26 @@ def _save_json(filename: str, data: dict) -> None:
 db.init_db()
 db.seed_tenants(API_KEYS)
 
+def verify_api_key(x_api_key: str = Header(None)) -> dict:
+    """Validate API key and return tenant info: {tenant_id, name, tier, api_key}."""
+    if not x_api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing X-API-Key header. Request a key at https://roma-execution-bridge-asurdev.zocomputer.io",
+        )
+    tenant = db.find_tenant_by_key(x_api_key)
+    if not tenant:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    tenant["api_key"] = x_api_key
+    
+    # Check email verification for API endpoints (skip auth endpoints and admin keys)
+    _ADMIN_KEYS = {k.strip() for k in os.getenv("ROMA_ADMIN_KEYS", "").split(",") if k.strip()}
+    if x_api_key not in _ADMIN_KEYS:
+        verif_status = is_email_verified(x_api_key)
+        if not verif_status:
+            raise HTTPException(status_code=403, detail="Email not verified. Please verify your email first.")
+    return tenant
+
 # ============================================
 # PLANS & USAGE — DecisionOS PG-backed
 # ============================================
