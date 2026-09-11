@@ -974,7 +974,7 @@ def _update_job_status_sqlite(job_id, status, completed_at, error, tenant_id=Non
         if error is not None:
             sets += ", error = ?"
             params.append(error)
-        if tenant_id:
+        if tenant_id is not None:
             params.extend([job_id, tenant_id])
             c.execute(f"UPDATE execution_jobs SET {sets} WHERE id = ? AND tenant_id = ?", params)
         else:
