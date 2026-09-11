@@ -10,6 +10,7 @@ import logging
 import os
 import threading
 import concurrent.futures
+from urllib.parse import urlsplit, urlunsplit
 
 try:
     import psycopg2
@@ -27,12 +28,24 @@ _PG_POOL_LOCK = threading.Lock()
 _PG_POOL_CONFIG = {"minconn": 2, "maxconn": 20, "connect_timeout": 10}
 
 
+def _redact_dsn(dsn: str) -> str:
+    if not dsn:
+        return dsn
+    p = urlsplit(dsn)
+    if not p.password:
+        return dsn
+    hostport = p.hostname or ""
+    if p.port:
+        hostport = f"{hostport}:{p.port}"
+    userinfo = f"{p.username}:***@" if p.username else ""
+    return urlunsplit((p.scheme, f"{userinfo}{hostport}", p.path, p.query, p.fragment))
+
 def _pg_enabled() -> bool:
     global _USE_PG
     if _USE_PG is None:
         _USE_PG = bool(os.environ.get("PG_DSN"))
         if _USE_PG:
-            logger.info("Using PostgreSQL (PG_DSN=%s)", os.environ["PG_DSN"])
+            logger.info("Using PostgreSQL (PG_DSN=%s)", _redact_dsn(os.environ["PG_DSN"]))
         else:
             logger.info("Using SQLite (PG_DSN not set)")
     return _USE_PG
@@ -94,10 +107,9 @@ def _pg_conn():
                 _PG_POOL = psycopg2.pool.ThreadedConnectionPool(
                     _PG_POOL_CONFIG["minconn"], _PG_POOL_CONFIG["maxconn"], _dsn
                 )
-                import re as _re; _masked = _re.sub(r":[^:@]\+@", r":***@", pg_dsn)
                 logger.info("PG pool created: min=%d max=%d, dsn=%s",
                            _PG_POOL_CONFIG["minconn"], _PG_POOL_CONFIG["maxconn"],
-                           _masked)
+                           _redact_dsn(pg_dsn))
     try:
         return _PG_POOL.getconn()
     except psycopg2.pool.PoolError:
@@ -1411,12 +1423,13 @@ def get_queued_execution_jobs(limit: int = 10) -> list[dict]:
 
 def update_execution_job(job_id: str, status: str | None = None,
                          backend: str | None = None, backend_job_id: str | None = None,
-                         completed_at: str | None = None, error: str | None = None):
+                         completed_at: str | None = None, error: str | None = None,
+                         cost_usd: float | None = None, duration_seconds: float | None = None):
     if _pg_enabled():
-        return _run_async(_update_execution_job_pg(job_id, status, completed_at, error, backend, backend_job_id))
-    return _update_execution_job_sqlite(job_id, status, completed_at, error, backend, backend_job_id)
+        return _run_async(_update_execution_job_pg(job_id, status, completed_at, error, backend, backend_job_id, cost_usd, duration_seconds))
+    return _update_execution_job_sqlite(job_id, status, completed_at, error, backend, backend_job_id, cost_usd, duration_seconds)
 
-async def _update_execution_job_pg(job_id, status, completed_at, error, backend, backend_job_id):
+async def _update_execution_job_pg(job_id, status, completed_at, error, backend, backend_job_id, cost_usd, duration_seconds):
     conn = _pg_conn()
     try:
         with conn.cursor() as cur:
@@ -1439,6 +1452,12 @@ async def _update_execution_job_pg(job_id, status, completed_at, error, backend,
             if backend_job_id is not None:
                 sets.append("backend_job_id = %s")
                 params.append(backend_job_id)
+            if cost_usd is not None:
+                sets.append("cost_usd = %s")
+                params.append(cost_usd)
+            if duration_seconds is not None:
+                sets.append("duration_seconds = %s")
+                params.append(duration_seconds)
             if sets:
                 params.append(job_id)
                 cur.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = %s", params)
@@ -1446,7 +1465,7 @@ async def _update_execution_job_pg(job_id, status, completed_at, error, backend,
     finally:
         _pg_return(conn)
 
-def _update_execution_job_sqlite(job_id, status, completed_at, error, backend, backend_job_id):
+def _update_execution_job_sqlite(job_id, status, completed_at, error, backend, backend_job_id, cost_usd, duration_seconds):
     c = _sqlite_conn()
     try:
         _ensure_execution_jobs_table(c)
@@ -1469,6 +1488,12 @@ def _update_execution_job_sqlite(job_id, status, completed_at, error, backend, b
         if backend_job_id is not None:
             sets.append("backend_job_id = ?")
             params.append(backend_job_id)
+        if cost_usd is not None:
+            sets.append("cost_usd = ?")
+            params.append(cost_usd)
+        if duration_seconds is not None:
+            sets.append("duration_seconds = ?")
+            params.append(duration_seconds)
         if sets:
             params.append(job_id)
             c.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = ?", params)
@@ -2032,12 +2057,13 @@ def count_verified_users() -> int:
 
 
 def record_usage_event(tenant_id: str, event_type: str, value: float,
-                       cost_usd: float, job_id: str = "", metadata: dict = None) -> int:
+                       cost_usd: float, job_id: str = "", metadata: dict = None,
+                       billed: bool = False) -> int:
     if _pg_enabled():
         from db_pg_sync import record_usage_event as pg_fn
         conn = _pg_conn()
         try:
-            eid = pg_fn(conn, tenant_id, event_type, value, cost_usd, job_id, metadata)
+            eid = pg_fn(conn, tenant_id, event_type, value, cost_usd, job_id, metadata, billed)
             conn.commit()
             return eid
         finally:

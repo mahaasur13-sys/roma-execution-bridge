@@ -18,6 +18,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlsplit, urlunsplit
 
 import asyncpg
 
@@ -29,6 +30,19 @@ DEFAULT_DSN = "postgresql://postgres:postgres@localhost:5432/roma"
 
 
 def _dsn() -> str:
+
+def _redact_dsn(dsn: str) -> str:
+    if not dsn:
+        return dsn
+    p = urlsplit(dsn)
+    if not p.password:
+        return dsn
+    hostport = p.hostname or ""
+    if p.port:
+        hostport = f"{hostport}:{p.port}"
+    userinfo = f"{p.username}:***@" if p.username else ""
+    return urlunsplit((p.scheme, f"{userinfo}{hostport}", p.path, p.query, p.fragment))
+
     return os.environ.get("PG_DSN", DEFAULT_DSN)
 
 
@@ -41,7 +55,7 @@ async def get_pool() -> asyncpg.Pool:
             max_size=10,
             command_timeout=30,
         )
-        logger.info("PostgreSQL pool created: %s", _dsn())
+        logger.info("PostgreSQL pool created: %s", _redact_dsn(_dsn()))
     return POOL
 
 

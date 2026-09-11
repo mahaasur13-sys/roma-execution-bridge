@@ -27,3 +27,19 @@ api_keys.json
 config/deepseek_key.txt
 config/api_keys.json
 data/*.db
+# P1 hygiene extra
+deploy/k8s/secrets/
+gpu_worker/.pids/
+backups/
+*.bak
+
+# P0 key rotation (2026-09-09)
+.env.local
+.env.production
+*.key
+id_rsa*
+secrets.json
+*.p12
+*.pfx
+.netrc
+.pgpass

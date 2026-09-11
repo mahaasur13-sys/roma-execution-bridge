@@ -168,30 +168,33 @@ async def execute_and_bill(
     # main.finalize_job_billing() (идемпотентно). gpu_sec = фактическое время.
     elapsed = time.monotonic() - start_time
     now_iso = datetime.now(timezone.utc).isoformat()
-    cost_usd = round(elapsed * 0.00001, 8)  # single rate: $0.00001 / GPU-sec (mirrors _increment_usage)
+    cost_usd = round(elapsed * 0.00001, 8)
     billing_ok = False
     try:
-        # Lazy import to avoid a circular import with main.
         from main import finalize_job_billing
         billing_ok = finalize_job_billing(tenant_id, job_id, gpu_sec=elapsed, plan_name="free")
         logger.info("execute_and_bill.finalized tenant=%s job=%s gpu_sec=%.1f", tenant_id, job_id, elapsed)
     except Exception as exc:
         logger.error("execute_and_bill.billing_error job=%s: %s", job_id, exc)
 
-    # Шаг 5: Запись usage_event (observability — НЕ списание денег)
     try:
+        event_type = "gpu_execution" if backend_name == "vastai" else "cpu_execution"
         _db_adapter.record_usage_event(
-            tenant_id, "gpu_execution", elapsed, cost_usd, job_id,
-            {"backend": backend_name}
+            tenant_id, event_type, elapsed, cost_usd, job_id,
+            {"backend": backend_name},
+            billed=billing_ok,
         )
         logger.info("execute_and_bill.usage_recorded tenant=%s job=%s", tenant_id, job_id)
     except Exception as exc:
         logger.warning("execute_and_bill.usage_record_failed job=%s: %s", job_id, exc)
 
-    # Обновляем статус job в БД
-    _db_adapter.update_execution_job(job_id, status=status,
-                                      completed_at=now_iso,
-                                      error="" if billing_ok else "Billing error")
+    _db_adapter.update_execution_job(
+        job_id, status=status,
+        completed_at=now_iso,
+        cost_usd=cost_usd if billing_ok else 0.0,
+        duration_seconds=round(elapsed, 2),
+        error="" if billing_ok else "Billing error",
+    )
 
     # Шаг 6: Уничтожить инстанс (только для vastai)
     if backend_name == "vastai" and contract_id:
