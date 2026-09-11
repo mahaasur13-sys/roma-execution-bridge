@@ -46,7 +46,7 @@ async def retry_job(job_id: str, payload: dict = {}, x_api_key: str = Header(Non
                           {"from": job.get("status"), "to": "queued", "reason": tr["reason"]})
         raise HTTPException(409, tr["reason"])
 
-    db.update_execution_job(job_id, status="queued")
+    db.update_execution_job(job_id, status="queued", tenant_id=tenant_id)
     write_audit_event(tenant_id, "job.retry", "job", job_id, {"previous_status": job.get("status")})
     return {"job_id": job_id, "status": "queued"}
 
@@ -69,7 +69,7 @@ async def cancel_job(job_id: str, x_api_key: str = Header(None)):
                           {"from": current, "to": "cancelled"})
         raise HTTPException(409, tr["reason"])
 
-    db.update_execution_job(job_id, status="cancelled", completed_at=datetime.now(timezone.utc).isoformat())
+    db.update_execution_job(job_id, status="cancelled", completed_at=datetime.now(timezone.utc).isoformat(), tenant_id=tenant_id)
     write_audit_event(tenant_id, "job.cancel", "job", job_id, {"previous_status": current})
     return {"job_id": job_id, "status": "cancelled"}
 
@@ -86,7 +86,7 @@ async def complete_job(job_id: str, payload: dict = {}, x_api_key: str = Header(
         write_audit_event(tenant_id, "transition.denied", "job", job_id,
                           {"from": current, "to": "completed"})
         raise HTTPException(409, tr["reason"])
-    db.update_execution_job(job_id, status="completed", completed_at=datetime.now(timezone.utc).isoformat())
+    db.update_execution_job(job_id, status="completed", completed_at=datetime.now(timezone.utc).isoformat(), tenant_id=tenant_id)
     return {"job_id": job_id, "status": "completed"}
 
 
@@ -111,7 +111,7 @@ async def worker_ack(job_id: str, payload: dict, x_api_key: str = Header(None)):
 
     error = payload.get("error") if action == "fail" else None
     completed_at = datetime.now(timezone.utc).isoformat() if action in ("complete", "fail") else None
-    db.update_execution_job(job_id, status=new_status, completed_at=completed_at, error=error)
+    db.update_execution_job(job_id, status=new_status, completed_at=completed_at, error=error, tenant_id=tenant_id)
 
     write_audit_event(tenant_id, f"job.{action}", "job", job_id,
                       {"worker_id": payload.get("worker_id")})

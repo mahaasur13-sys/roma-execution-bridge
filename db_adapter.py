@@ -931,12 +931,12 @@ def _get_job_sqlite(job_id, tenant_id):
         c.close()
 
 
-def update_job_status(job_id: str, status: str, completed_at: str | None = None, error: str | None = None):
+def update_job_status(job_id: str, status: str, completed_at: str | None = None, error: str | None = None, tenant_id: str | None = None):
     if _pg_enabled():
-        return _run_async(_update_job_status_pg(job_id, status, completed_at, error))
-    return _update_job_status_sqlite(job_id, status, completed_at, error)
+        return _run_async(_update_job_status_pg(job_id, status, completed_at, error, tenant_id))
+    return _update_job_status_sqlite(job_id, status, completed_at, error, tenant_id)
 
-async def _update_job_status_pg(job_id, status, completed_at, error):
+async def _update_job_status_pg(job_id, status, completed_at, error, tenant_id=None):
     conn = _pg_conn()
     try:
         with conn.cursor() as cur:
@@ -950,13 +950,17 @@ async def _update_job_status_pg(job_id, status, completed_at, error):
             if error is not None:
                 sets.append("error = %s")
                 params.append(error)
-            params.append(job_id)
-            cur.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = %s", params)
+            if tenant_id:
+                params.extend([job_id, tenant_id])
+                cur.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = %s AND tenant_id = %s", params)
+            else:
+                params.append(job_id)
+                cur.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = %s", params)
         conn.commit()
     finally:
         _pg_return(conn)
 
-def _update_job_status_sqlite(job_id, status, completed_at, error):
+def _update_job_status_sqlite(job_id, status, completed_at, error, tenant_id=None):
     c = _sqlite_conn()
     try:
         _ensure_execution_jobs_table(c)
@@ -970,8 +974,12 @@ def _update_job_status_sqlite(job_id, status, completed_at, error):
         if error is not None:
             sets += ", error = ?"
             params.append(error)
-        params.append(job_id)
-        c.execute(f"UPDATE execution_jobs SET {sets} WHERE id = ?", params)
+        if tenant_id:
+            params.extend([job_id, tenant_id])
+            c.execute(f"UPDATE execution_jobs SET {sets} WHERE id = ? AND tenant_id = ?", params)
+        else:
+            params.append(job_id)
+            c.execute(f"UPDATE execution_jobs SET {sets} WHERE id = ?", params)
         c.commit()
     finally:
         c.close()
