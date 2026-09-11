@@ -1816,6 +1816,7 @@ def find_tenant_by_key(api_key: str) -> dict | None:
     return _find_tenant_by_key_sqlite(api_key)
 
 def _find_tenant_by_key_pg(api_key: str) -> dict | None:
+    import psycopg2
     conn = _pg_conn()
     try:
         cur = conn.cursor()
@@ -1827,22 +1828,32 @@ def _find_tenant_by_key_pg(api_key: str) -> dict | None:
                 (digest,),
             )
             row = cur.fetchone()
-        except Exception:
+        except psycopg2.errors.UndefinedColumn:
             conn.rollback()
         if not row:
-            cur.execute(
-                "SELECT id, name, plan FROM tenants WHERE api_key = %s",
-                (api_key,),
-            )
-            row = cur.fetchone()
+            try:
+                cur.execute(
+                    "SELECT id, name, plan FROM tenants "
+                    "WHERE api_key = %s AND (api_key_hash IS NULL OR api_key_hash = '')",
+                    (api_key,),
+                )
+                row = cur.fetchone()
+            except psycopg2.errors.UndefinedColumn:
+                conn.rollback()
+                cur.execute(
+                    "SELECT id, name, plan FROM tenants WHERE api_key = %s",
+                    (api_key,),
+                )
+                row = cur.fetchone()
             if row:
                 try:
                     cur.execute(
-                        "UPDATE tenants SET api_key_hash = %s WHERE id = %s AND (api_key_hash IS NULL OR api_key_hash = '')",
+                        "UPDATE tenants SET api_key_hash = %s "
+                        "WHERE id = %s AND (api_key_hash IS NULL OR api_key_hash = '')",
                         (digest, row[0]),
                     )
                     conn.commit()
-                except Exception:
+                except psycopg2.errors.UndefinedColumn:
                     conn.rollback()
         cur.close()
         if not row:
