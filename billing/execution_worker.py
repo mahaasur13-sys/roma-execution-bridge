@@ -43,7 +43,7 @@ async def poll_and_execute():
                 tid = job["tenant_id"]
                 payload = job.get("payload", {})
                 # Переводим из queued в running и запускаем
-                _db_adapter.update_execution_job(jid, status="running")
+                _db_adapter.update_execution_job(jid, status="running", tenant_id=tid)
                 asyncio.ensure_future(execute_and_bill(jid, tid, payload))
                 logger.info("poll_and_execute.started job=%s tenant=%s", jid, tid)
         except Exception as e:
@@ -96,6 +96,7 @@ async def execute_and_bill(
                 backend=backend_name,
                 completed_at=datetime.now(timezone.utc).isoformat(),
                 error=str(result.get("message", "dispatch failed"))[:500],
+                tenant_id=tenant_id,
             )
             return {"status": "failed", "job_id": job_id, "error": result.get("message", "")}
 
@@ -112,6 +113,7 @@ async def execute_and_bill(
                 backend=backend_name,
                 completed_at=datetime.now(timezone.utc).isoformat(),
                 error=f"dispatch not ready (status={status})",
+                tenant_id=tenant_id,
             )
             return {"status": "failed", "job_id": job_id, "error": f"dispatch not ready (status={status})"}
 
@@ -125,10 +127,10 @@ async def execute_and_bill(
             payload["backend_job_id"] = backend_job_id
 
         _db_adapter.update_execution_job(job_id, status="running", backend=backend_name,
-                                          backend_job_id=backend_job_id)
+                                          backend_job_id=backend_job_id, tenant_id=tenant_id)
     except Exception as exc:
         logger.error("execute_and_bill.dispatch_failed job=%s: %s", job_id, exc)
-        _db_adapter.update_execution_job(job_id, status="failed", completed_at=datetime.now(timezone.utc).isoformat(), error=str(exc)[:500])
+        _db_adapter.update_execution_job(job_id, status="failed", completed_at=datetime.now(timezone.utc).isoformat(), error=str(exc)[:500], tenant_id=tenant_id)
         return {"status": "failed", "error": str(exc)}
 
     # Шаг 2: Poll до завершения (макс 10 мин для GPU, 2 мин для local)
@@ -194,6 +196,7 @@ async def execute_and_bill(
         cost_usd=cost_usd if billing_ok else 0.0,
         duration_seconds=round(elapsed, 2),
         error="" if billing_ok else "Billing error",
+        tenant_id=tenant_id,
     )
 
     # Шаг 6: Уничтожить инстанс (только для vastai)

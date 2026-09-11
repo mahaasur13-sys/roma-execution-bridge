@@ -957,7 +957,7 @@ async def submit_task(payload: RomaTaskInput, request: Request, key_info: dict =
         status="queued",
         payload=payload.model_dump(),
     )
-    db.update_execution_job(job_id, backend=payload.backend)
+    db.update_execution_job(job_id, backend=payload.backend, tenant_id=tenant_id)
 
     # Dispatch — ТОЛЬКО фоновый poll_and_execute (одна точка). Не рентим здесь,
     # иначе Vast создаётся дважды (submit + worker) → утечка инстанса.
@@ -1006,7 +1006,7 @@ async def cancel_job(job_id: str, key_info: dict = Depends(verify_api_key)):
     job = db.get_execution_job(job_id)
     if not job or job.get("tenant_id") != tenant_id:
         raise HTTPException(status_code=404, detail="Job not found")
-    db.update_execution_job(job_id, status="cancelled", completed_at=datetime.now(timezone.utc).isoformat())
+    db.update_execution_job(job_id, status="cancelled", completed_at=datetime.now(timezone.utc).isoformat(), tenant_id=tenant_id)
     # Гасим backend-инстанс (Vast.ai destroy и т.п.)
     try:
         await backend_cancel_job(tenant_id=tenant_id, job_id=job_id)
@@ -1048,7 +1048,7 @@ async def complete_job(job_id: str, key_info: dict = Depends(verify_api_key)):
     except Exception as exc:
         logger.warning("backend.cleanup.failed tenant=%s job=%s: %s", tenant_id, job_id, exc)
 
-    db.update_execution_job(job_id, status="completed", completed_at=datetime.utcnow().isoformat())
+    db.update_execution_job(job_id, status="completed", completed_at=datetime.utcnow().isoformat(), tenant_id=tenant_id)
     return {"status": "completed", "job_id": job_id}
 
 
