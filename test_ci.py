@@ -73,6 +73,14 @@ def t_plugin():
     caps = [c.name for c in PluginCapability]
     assert any('ML' in c or 'GPU' in c for c in caps), f"plugin caps: {caps}"
 
+
+def t_dispatch_ready():
+    from billing.execution_worker import dispatch_is_ready
+    assert dispatch_is_ready("local", "queued") is True
+    assert dispatch_is_ready("vastai", "queued") is False
+    assert dispatch_is_ready("vastai", "running") is True
+    assert dispatch_is_ready("vastai", "provisioning") is True
+
 print("=== ROMA CI Tests ===")
 test("Auth (API Key Gen)", t_auth_keys)
 test("RBAC (Permissions)", t_rbac)
@@ -83,6 +91,7 @@ test("Ledger (Balance)", t_ledger)
 test("GPU Scheduler", t_gpu_scheduler)
 test("Raft Consensus", t_raft)
 test("Plugin API", t_plugin)
+test("Dispatch ready (local queued)", t_dispatch_ready)
 
 print()
 print(f"RESULTS: {passed} passed, {failed} failed")
