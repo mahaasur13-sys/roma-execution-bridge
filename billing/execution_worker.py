@@ -51,6 +51,12 @@ async def poll_and_execute():
         await asyncio.sleep(5)
 
 
+def dispatch_is_ready(backend_name: str | None, status: str | None) -> bool:
+    return status in ("running", "provisioning") or (
+        backend_name == "local" and status == "queued"
+    )
+
+
 async def execute_and_bill(
     job_id: str,
     tenant_id: str,
@@ -102,9 +108,7 @@ async def execute_and_bill(
 
         # Only mark "running" and poll when dispatch actually accepted the job.
         # queued/timeout/unknown are not ready — don't burn 120s polling them.
-        ready = status in ("running", "provisioning") or (
-            backend_name == "local" and status == "queued"
-        )
+        ready = dispatch_is_ready(backend_name, status)
         if not ready:
             logger.warning(
                 "execute_and_bill.dispatch_not_ready job=%s backend=%s status=%s",
