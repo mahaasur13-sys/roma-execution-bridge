@@ -102,7 +102,10 @@ async def execute_and_bill(
 
         # Only mark "running" and poll when dispatch actually accepted the job.
         # queued/timeout/unknown are not ready — don't burn 120s polling them.
-        if status not in ("running", "provisioning"):
+        ready = status in ("running", "provisioning") or (
+            backend_name == "local" and status == "queued"
+        )
+        if not ready:
             logger.warning(
                 "execute_and_bill.dispatch_not_ready job=%s backend=%s status=%s",
                 job_id, backend_name, status,
