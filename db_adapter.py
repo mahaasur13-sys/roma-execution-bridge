@@ -9,11 +9,8 @@ import asyncio
 import logging
 import os
 import threading
-<<<<<<< HEAD
 import concurrent.futures
-=======
 from urllib.parse import urlsplit, urlunsplit
->>>>>>> 5f36a9e (fix: redact PG DSN in db logs)
 
 try:
     import psycopg2

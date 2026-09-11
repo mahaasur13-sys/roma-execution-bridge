@@ -69,21 +69,21 @@ def test_ledger_append_only_trigger():
     if not os.environ.get("PG_DSN"):
         pytest.skip("PG_DSN не задан — триггер проверяется вручную (psql)")
 
-    from billing.pg_connection import get_pg_manager
+    from billing.pg_connection import get_pg_manager, PGUnavailableError
     mgr = get_pg_manager()
-    conn = mgr.get_connection("test_append_only")
     try:
+        ctx = mgr.get_connection("test_append_only")
+    except PGUnavailableError:
+        pytest.skip("PG unavailable in this pytest process")
+    with ctx as conn:
         cur = conn.cursor()
         cur.execute("SELECT ledger_id FROM ledger_entries LIMIT 1")
         row = cur.fetchone()
-        if row is None:
+        if not row:
             pytest.skip("ledger_entries пуста — нет строки для триггера")
         lid = row[0]
-        cur.execute("BEGIN")
-        try:
-            with pytest.raises(Exception):
-                cur.execute("UPDATE ledger_entries SET amount = amount WHERE ledger_id = %s", (lid,))
-        finally:
-            cur.execute("ROLLBACK")
-    finally:
-        conn.close()
+        with pytest.raises(Exception):
+            cur.execute(
+                "UPDATE ledger_entries SET amount = amount WHERE ledger_id = %s",
+                (lid,),
+            )
