@@ -950,7 +950,7 @@ async def _update_job_status_pg(job_id, status, completed_at, error, tenant_id=N
             if error is not None:
                 sets.append("error = %s")
                 params.append(error)
-            if tenant_id:
+            if tenant_id is not None:
                 params.extend([job_id, tenant_id])
                 cur.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = %s AND tenant_id = %s", params)
             else:
@@ -1468,7 +1468,7 @@ async def _update_execution_job_pg(job_id, status, completed_at, error, backend,
                 sets.append("duration_seconds = %s")
                 params.append(duration_seconds)
             if sets:
-                if tenant_id:
+                if tenant_id is not None:
                     params.extend([job_id, tenant_id])
                     cur.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = %s AND tenant_id = %s", params)
                 else:
@@ -1508,7 +1508,7 @@ def _update_execution_job_sqlite(job_id, status, completed_at, error, backend, b
             sets.append("duration_seconds = ?")
             params.append(duration_seconds)
         if sets:
-            if tenant_id:
+            if tenant_id is not None:
                 params.extend([job_id, tenant_id])
                 c.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = ? AND tenant_id = ?", params)
             else:
