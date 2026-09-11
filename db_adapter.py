@@ -110,10 +110,9 @@ def _pg_conn():
                 _PG_POOL = psycopg2.pool.ThreadedConnectionPool(
                     _PG_POOL_CONFIG["minconn"], _PG_POOL_CONFIG["maxconn"], _dsn
                 )
-                import re as _re; _masked = _re.sub(r":[^:@]\+@", r":***@", pg_dsn)
                 logger.info("PG pool created: min=%d max=%d, dsn=%s",
                            _PG_POOL_CONFIG["minconn"], _PG_POOL_CONFIG["maxconn"],
-                           _masked)
+                           _redact_dsn(pg_dsn))
     try:
         return _PG_POOL.getconn()
     except psycopg2.pool.PoolError:
