@@ -9,7 +9,11 @@ import asyncio
 import logging
 import os
 import threading
+<<<<<<< HEAD
 import concurrent.futures
+=======
+from urllib.parse import urlsplit, urlunsplit
+>>>>>>> 5f36a9e (fix: redact PG DSN in db logs)
 
 try:
     import psycopg2
@@ -27,12 +31,24 @@ _PG_POOL_LOCK = threading.Lock()
 _PG_POOL_CONFIG = {"minconn": 2, "maxconn": 20, "connect_timeout": 10}
 
 
+def _redact_dsn(dsn: str) -> str:
+    if not dsn:
+        return dsn
+    p = urlsplit(dsn)
+    if not p.password:
+        return dsn
+    hostport = p.hostname or ""
+    if p.port:
+        hostport = f"{hostport}:{p.port}"
+    userinfo = f"{p.username}:***@" if p.username else ""
+    return urlunsplit((p.scheme, f"{userinfo}{hostport}", p.path, p.query, p.fragment))
+
 def _pg_enabled() -> bool:
     global _USE_PG
     if _USE_PG is None:
         _USE_PG = bool(os.environ.get("PG_DSN"))
         if _USE_PG:
-            logger.info("Using PostgreSQL (PG_DSN=%s)", os.environ["PG_DSN"])
+            logger.info("Using PostgreSQL (PG_DSN=%s)", _redact_dsn(os.environ["PG_DSN"]))
         else:
             logger.info("Using SQLite (PG_DSN not set)")
     return _USE_PG
