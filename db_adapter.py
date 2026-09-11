@@ -1818,6 +1818,7 @@ def find_tenant_by_key(api_key: str) -> dict | None:
 def _find_tenant_by_key_pg(api_key: str) -> dict | None:
     import psycopg2
     conn = _pg_conn()
+    result = None
     try:
         cur = conn.cursor()
         digest = _hash_api_key(api_key)
@@ -1855,12 +1856,16 @@ def _find_tenant_by_key_pg(api_key: str) -> dict | None:
                     conn.commit()
                 except psycopg2.errors.UndefinedColumn:
                     conn.rollback()
+        conn.commit()
         cur.close()
-        if not row:
-            return None
-        return {"tenant_id": row[0], "name": row[1], "tier": row[2]}
-    finally:
-        _pg_return(conn)
+        if row:
+            result = {"tenant_id": row[0], "name": row[1], "tier": row[2]}
+    except Exception:
+        conn.rollback()
+        _pg_return(conn, close_on_error=True)
+        raise
+    _pg_return(conn)
+    return result
 
 def _find_tenant_by_key_sqlite(api_key_hash: str) -> dict | None:
     with _sqlite_conn() as conn:
