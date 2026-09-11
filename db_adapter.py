@@ -1424,12 +1424,13 @@ def get_queued_execution_jobs(limit: int = 10) -> list[dict]:
 def update_execution_job(job_id: str, status: str | None = None,
                          backend: str | None = None, backend_job_id: str | None = None,
                          completed_at: str | None = None, error: str | None = None,
-                         cost_usd: float | None = None, duration_seconds: float | None = None):
+                         cost_usd: float | None = None, duration_seconds: float | None = None,
+                         tenant_id: str | None = None):
     if _pg_enabled():
-        return _run_async(_update_execution_job_pg(job_id, status, completed_at, error, backend, backend_job_id, cost_usd, duration_seconds))
-    return _update_execution_job_sqlite(job_id, status, completed_at, error, backend, backend_job_id, cost_usd, duration_seconds)
+        return _run_async(_update_execution_job_pg(job_id, status, completed_at, error, backend, backend_job_id, cost_usd, duration_seconds, tenant_id))
+    return _update_execution_job_sqlite(job_id, status, completed_at, error, backend, backend_job_id, cost_usd, duration_seconds, tenant_id)
 
-async def _update_execution_job_pg(job_id, status, completed_at, error, backend, backend_job_id, cost_usd, duration_seconds):
+async def _update_execution_job_pg(job_id, status, completed_at, error, backend, backend_job_id, cost_usd, duration_seconds, tenant_id=None):
     conn = _pg_conn()
     try:
         with conn.cursor() as cur:
@@ -1459,13 +1460,17 @@ async def _update_execution_job_pg(job_id, status, completed_at, error, backend,
                 sets.append("duration_seconds = %s")
                 params.append(duration_seconds)
             if sets:
-                params.append(job_id)
-                cur.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = %s", params)
+                if tenant_id:
+                    params.extend([job_id, tenant_id])
+                    cur.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = %s AND tenant_id = %s", params)
+                else:
+                    params.append(job_id)
+                    cur.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = %s", params)
         conn.commit()
     finally:
         _pg_return(conn)
 
-def _update_execution_job_sqlite(job_id, status, completed_at, error, backend, backend_job_id, cost_usd, duration_seconds):
+def _update_execution_job_sqlite(job_id, status, completed_at, error, backend, backend_job_id, cost_usd, duration_seconds, tenant_id=None):
     c = _sqlite_conn()
     try:
         _ensure_execution_jobs_table(c)
@@ -1495,8 +1500,12 @@ def _update_execution_job_sqlite(job_id, status, completed_at, error, backend, b
             sets.append("duration_seconds = ?")
             params.append(duration_seconds)
         if sets:
-            params.append(job_id)
-            c.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = ?", params)
+            if tenant_id:
+                params.extend([job_id, tenant_id])
+                c.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = ? AND tenant_id = ?", params)
+            else:
+                params.append(job_id)
+                c.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = ?", params)
         c.commit()
     finally:
         c.close()
