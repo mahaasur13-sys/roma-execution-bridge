@@ -11,3 +11,8 @@ def test_vastai_queued_is_not_ready():
 
 def test_running_is_ready():
     assert dispatch_is_ready("vastai", "running") is True
+
+
+def test_provisioning_is_ready():
+    assert dispatch_is_ready("vastai", "provisioning") is True
+
