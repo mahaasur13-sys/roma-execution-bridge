@@ -5,6 +5,7 @@ import time
 import json
 import logging
 from typing import Optional
+from uuid import uuid4
 
 from billing.pg_connection import get_pg_manager, PGUnavailableError
 
@@ -69,6 +70,32 @@ class PGBillingLedger:
 
     def debit(self, tenant_id: str, amount: float, currency: str = "USD", **meta) -> None:
         self.append(tenant_id, "DEBIT", amount, currency, meta)
+
+    def debit_if_funds(self, tenant_id: str, amount: float, currency: str = "USD", **meta) -> str | None:
+        """Атомарно списать DEBIT, только если баланс >= amount.
+
+        Возвращает ledger_id при успехе, None — нехватка средств или PG недоступен
+        (fail-closed: минус НЕ пишется). Те же колонки INSERT, что credit()/debit().
+        """
+        ledger_id = f"led-{int(time.time() * 1000)}-{uuid4().hex[:12]}"
+        meta_json = json.dumps(meta or {})
+        try:
+            rows = self._pg_execute(
+                "ledger_debit_if_funds",
+                """WITH bal AS (
+                       SELECT COALESCE(SUM(CASE WHEN entry_type='CREDIT' THEN amount ELSE -amount END), 0) AS b
+                       FROM ledger_entries WHERE tenant_id = %s
+                   )
+                   INSERT INTO ledger_entries (ledger_id, tenant_id, entry_type, amount, currency, metadata)
+                   SELECT %s, %s, 'DEBIT', %s, %s, %s::jsonb
+                   FROM bal WHERE bal.b >= %s
+                   RETURNING ledger_id""",
+                (tenant_id, ledger_id, tenant_id, amount, currency, meta_json, amount),
+                fetch=True,
+            )
+            return rows[0][0] if rows else None
+        except PGUnavailableError:
+            return None
 
     def get_tenant_balance(self, tenant_id: str) -> float:
         try:
