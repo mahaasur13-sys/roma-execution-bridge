@@ -11,6 +11,8 @@ import logging
 import time
 from datetime import datetime, timezone
 
+from billing.pg_ledger import PGUnavailableError
+
 logger = logging.getLogger("roma.execution_worker")
 
 # Lazy refs — устанавливаются при init_worker()
@@ -173,36 +175,38 @@ async def execute_and_bill(
         status = "timeout"
         logger.warning("execute_and_bill.timeout job=%s waited=%.0fs", job_id, waited)
 
-    # Шаг 3-4: единая точка списания. Деньги списываются ровно один раз через
-    # main.finalize_job_billing() (идемпотентно). gpu_sec = фактическое время.
     elapsed = time.monotonic() - start_time
     now_iso = datetime.now(timezone.utc).isoformat()
     cost_usd = round(elapsed * 0.00001, 8)
-    billing_ok = False
+
+    billing_status = "skip"
     try:
         from main import finalize_job_billing
-        billing_ok = finalize_job_billing(tenant_id, job_id, gpu_sec=elapsed, plan_name="free")
-        logger.info("execute_and_bill.finalized tenant=%s job=%s gpu_sec=%.1f", tenant_id, job_id, elapsed)
+        billing_status = finalize_job_billing(
+            tenant_id, job_id, gpu_sec=elapsed,
+            plan_name="free", backend=backend_name,
+        )
+        logger.info("execute_and_bill.finalized tenant=%s job=%s gpu_sec=%.1f status=%s",
+                    tenant_id, job_id, elapsed, billing_status)
+    except PGUnavailableError as exc:
+        # fail-closed: деньги НЕ сохранились — не помечаем billed, не зануляем молча.
+        logger.error("execute_and_bill.billing_pg_error job=%s: %s", job_id, exc)
+        billing_status = "pg_error"
     except Exception as exc:
         logger.error("execute_and_bill.billing_error job=%s: %s", job_id, exc)
+        billing_status = "error"
 
-    try:
-        event_type = "gpu_execution" if backend_name == "vastai" else "cpu_execution"
-        _db_adapter.record_usage_event(
-            tenant_id, event_type, elapsed, cost_usd, job_id,
-            {"backend": backend_name},
-            billed=billing_ok,
-        )
-        logger.info("execute_and_bill.usage_recorded tenant=%s job=%s", tenant_id, job_id)
-    except Exception as exc:
-        logger.warning("execute_and_bill.usage_record_failed job=%s: %s", job_id, exc)
+    billed_ok = billing_status == "ok"
+
+    # NOTE (F1): строка usage_events теперь пишется ВНУТРИ _increment_usage
+    # (metering_engine.record). Отдельный вызов _db_adapter.record_usage_event(...)
+    # здесь УДАЛЁН — иначе снова получим две строки.
 
     _db_adapter.update_execution_job(
-        job_id, status=status,
-        completed_at=now_iso,
-        cost_usd=cost_usd if billing_ok else 0.0,
+        job_id, status=status, completed_at=now_iso,
+        cost_usd=cost_usd if billed_ok else 0.0,
         duration_seconds=round(elapsed, 2),
-        error="" if billing_ok else "Billing error",
+        error="" if billed_ok else f"billing:{billing_status}",
         tenant_id=tenant_id,
     )
 
