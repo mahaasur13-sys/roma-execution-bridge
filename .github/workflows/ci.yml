@@ -73,10 +73,9 @@ jobs:
         with:
           fetch-depth: 0
       - name: Secret scan (gitleaks)
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_ENABLE_REDACT: "true"
+        uses: docker://zricethezav/gitleaks:latest
+        with:
+          args: detect --source=/github/workspace --redact --config=/github/workspace/.gitleaks.toml --exit-code=1
 
   pip-audit:
     runs-on: ubuntu-latest
