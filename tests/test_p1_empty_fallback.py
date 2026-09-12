@@ -154,7 +154,7 @@ def test_result_backend_overwrites_payload_backend(monkeypatch):
         "cancel": _fake_cancel,
         "status": fake_status,
     }
-    monkeypatch.setattr(main_module, "finalize_job_billing", lambda *a, **k: True)
+    monkeypatch.setattr(main_module, "finalize_job_billing", lambda *a, **k: "ok")
 
     payload = {"backend": "vastai", "task": "echo hi"}
     result = asyncio.run(ew.execute_and_bill("job-gw", "tenant-1", payload))
@@ -203,7 +203,7 @@ def test_poll_uses_normalized_backend_job_id(monkeypatch):
         "cancel": _fake_cancel,
         "status": fake_status,
     }
-    monkeypatch.setattr(main_module, "finalize_job_billing", lambda *a, **k: True)
+    monkeypatch.setattr(main_module, "finalize_job_billing", lambda *a, **k: "ok")
 
     payload = {"backend": "vastai", "task": "echo hi"}
     asyncio.run(ew.execute_and_bill("job-gw", "tenant-1", payload))

@@ -91,7 +91,7 @@ def test_submit_status_and_fake_dispatch(tenant, monkeypatch):
         "cancel": _fake_cancel,
         "status": _fake_status,
     }
-    monkeypatch.setattr(main, "finalize_job_billing", lambda *a, **k: True)
+    monkeypatch.setattr(main, "finalize_job_billing", lambda *a, **k: "ok")
 
     result = asyncio.run(ew.execute_and_bill(job_id, tenant["tenant_id"], {"task": "echo hello"}))
     assert result["status"] == "completed"

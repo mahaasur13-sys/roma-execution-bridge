@@ -63,18 +63,21 @@ class PGMeteringEngine:
             logger.error("MeteringEngine.%s PG error: %s", operation, e)
             raise PGUnavailableError(str(e)) from e
 
-    def record(self, event_type: str, tenant: str, job_id: str = "manual",
-               gpu_seconds: float = 0, cpu_seconds: float = 0,
-               gb_seconds: float = 0, plugin_count: int = 0) -> UsageEvent:
-        val = gpu_seconds or cpu_seconds or gb_seconds or float(plugin_count)
+    def record(self, event_type, tenant, job_id="manual", gpu_seconds=0,
+               cpu_seconds=0, gb_seconds=0, plugin_count=0,
+               billed=False, cost_usd=None, value=None) -> UsageEvent:
+        val = value if value is not None else (gpu_seconds or cpu_seconds or gb_seconds or float(plugin_count))
         ev = UsageEvent(tenant_id=tenant, event_type=event_type, value=val, job_id=job_id)
+        # F1: пишем авторитетную (уже округлённую) цену, чтобы usage_events.cost_usd
+        # совпадал с DEBIT в лэджере (никаких 0.0012003365080902586…).
+        ev.cost_usd = round(float(cost_usd), 8) if cost_usd is not None else round(ev.cost_usd, 8)
 
         try:
             self._pg_execute(
                 "usage_insert",
-                """INSERT INTO usage_events (tenant_id, event_type, value, cost_usd, job_id, metadata)
-                   VALUES (%s, %s, %s, %s, %s, %s::jsonb)""",
-                (tenant, event_type, val, ev.cost_usd, job_id, json.dumps({})),
+                """INSERT INTO usage_events (tenant_id, event_type, value, cost_usd, job_id, metadata, billed)
+                   VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s)""",
+                (tenant, event_type, val, ev.cost_usd, job_id, json.dumps({}), bool(billed)),
             )
             self._pg_execute(
                 "usage_totals_upsert",

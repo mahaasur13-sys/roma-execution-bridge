@@ -44,6 +44,7 @@ def tenant(monkeypatch):
     tenant_id = _uniq("t-bill")
     key = _uniq("key-bill")
     db.seed_tenants({key: {"tenant_id": tenant_id, "name": "A"}})
+    main.billing_ledger.credit(tenant_id, 1.0)
     monkeypatch.setattr(main, "is_email_verified", lambda api_key: True)
     return {"tenant_id": tenant_id, "key": key}
 

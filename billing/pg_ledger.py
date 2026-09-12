@@ -4,12 +4,29 @@ from __future__ import annotations
 import time
 import json
 import logging
+import hashlib
+import zlib
 from typing import Optional
 from uuid import uuid4
 
 from billing.pg_connection import get_pg_manager, PGUnavailableError
 
 logger = logging.getLogger("roma.billing.ledger")
+
+_DEBIT_IF_FUNDS_INSERT_SQL = """
+    WITH bal AS (
+        SELECT COALESCE(SUM(CASE WHEN entry_type = 'CREDIT' THEN amount
+                                 ELSE -amount END), 0) AS b
+          FROM ledger_entries
+         WHERE tenant_id = %s
+    )
+    INSERT INTO ledger_entries (ledger_id, tenant_id, entry_type, amount, currency, metadata)
+    SELECT %s, %s, 'DEBIT', %s, %s, %s::jsonb
+      FROM bal
+     WHERE bal.b >= %s
+    ON CONFLICT (ledger_id) DO NOTHING
+    RETURNING ledger_id
+"""
 
 
 class PGBillingLedger:
@@ -71,31 +88,72 @@ class PGBillingLedger:
     def debit(self, tenant_id: str, amount: float, currency: str = "USD", **meta) -> None:
         self.append(tenant_id, "DEBIT", amount, currency, meta)
 
-    def debit_if_funds(self, tenant_id: str, amount: float, currency: str = "USD", **meta) -> str | None:
-        """Атомарно списать DEBIT, только если баланс >= amount.
-
-        Возвращает ledger_id при успехе, None — нехватка средств или PG недоступен
-        (fail-closed: минус НЕ пишется). Те же колонки INSERT, что credit()/debit().
-        """
-        ledger_id = f"led-{int(time.time() * 1000)}-{uuid4().hex[:12]}"
-        meta_json = json.dumps(meta or {})
+    def _txn(self, operation, statements, fetch_last=True):
+        """Path A: lock+INSERT в одной транзакции. Без autocommit.
+        ping уже открыл INTRANS → BEGIN no-op; COMMIT/ROLLBACK явные;
+        __exit__ CM коммитит вхолостую (no-op на IDLE)."""
+        if not self._pg._ensure_pool():
+            raise PGUnavailableError("PG not configured or unavailable")
         try:
-            rows = self._pg_execute(
-                "ledger_debit_if_funds",
-                """WITH bal AS (
-                       SELECT COALESCE(SUM(CASE WHEN entry_type='CREDIT' THEN amount ELSE -amount END), 0) AS b
-                       FROM ledger_entries WHERE tenant_id = %s
-                   )
-                   INSERT INTO ledger_entries (ledger_id, tenant_id, entry_type, amount, currency, metadata)
-                   SELECT %s, %s, 'DEBIT', %s, %s, %s::jsonb
-                   FROM bal WHERE bal.b >= %s
-                   RETURNING ledger_id""",
-                (tenant_id, ledger_id, tenant_id, amount, currency, meta_json, amount),
-                fetch=True,
-            )
-            return rows[0][0] if rows else None
+            with self._pg.get_connection(operation) as conn:
+                cur = conn.cursor()
+                try:
+                    cur.execute("BEGIN")
+                    rows = None
+                    for idx, (sql, params) in enumerate(statements):
+                        cur.execute(sql, params)
+                        if fetch_last and idx == len(statements) - 1:
+                            rows = cur.fetchall()
+                    cur.execute("COMMIT")
+                    return rows
+                except Exception:
+                    try:
+                        cur.execute("ROLLBACK")
+                    except Exception:
+                        pass
+                    raise
+                finally:
+                    cur.close()
         except PGUnavailableError:
-            return None
+            raise
+        except Exception as e:
+            logger.error("BillingLedger.%s PG error: %s", operation, e)
+            raise PGUnavailableError(str(e)) from e
+
+    def debit_if_funds(self, tenant_id, amount, currency="USD",
+                       idempotency_key=None, **meta) -> str | None:
+        if amount < 0:
+            raise ValueError("debit amount must be >= 0")
+        if idempotency_key:
+            digest = hashlib.sha256(f"{tenant_id}:{idempotency_key}".encode()).hexdigest()
+            ledger_id = f"led-{digest[:24]}"
+        else:
+            ledger_id = f"led-{int(time.time()*1000)}-{uuid4().hex[:12]}"
+        meta = dict(meta or {})
+        if idempotency_key:
+            meta["idempotency_key"] = idempotency_key
+        meta_json = json.dumps(meta)
+        lock_key = zlib.crc32(tenant_id.encode()) & 0x7FFFFFFF
+
+        rows = self._txn("ledger_debit_if_funds", [
+            ("SELECT pg_advisory_xact_lock(%s)", (lock_key,)),
+            (_DEBIT_IF_FUNDS_INSERT_SQL,
+             (tenant_id, ledger_id, tenant_id, amount, currency, meta_json, amount)),
+        ], fetch_last=True)
+
+        if rows:
+            rid = rows[0][0]
+            self._entries.append({"ledger_id": rid, "timestamp": time.time(),
+                "tenant_id": tenant_id, "type": "DEBIT",
+                "amount": amount, "currency": currency, "metadata": meta})
+            return rid
+        if idempotency_key:
+            existing = self._pg_execute("ledger_idem_lookup",
+                "SELECT ledger_id FROM ledger_entries WHERE ledger_id = %s AND tenant_id = %s",
+                (ledger_id, tenant_id), fetch=True)
+            if existing:
+                return existing[0][0]
+        return None
 
     def get_tenant_balance(self, tenant_id: str) -> float:
         try:
