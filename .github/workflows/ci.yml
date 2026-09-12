@@ -65,3 +65,40 @@ jobs:
         run: |
           grep -c "kind: PodDisruptionBudget" /tmp/roma-template.yaml
           echo "PDB count OK"
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Secret scan (gitleaks)
+        uses: docker://zricethezav/gitleaks:latest
+        with:
+          args: detect --source=/github/workspace --redact --config=/github/workspace/.gitleaks.toml --exit-code=1
+
+  pip-audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: pip-audit (non-blocking)
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements-worker.txt || echo "pip-audit findings (non-blocking)"
+
+  bandit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: bandit (non-blocking)
+        run: |
+          pip install bandit
+          bandit -q -r . -x .venv,tests || echo "bandit findings (non-blocking)"
