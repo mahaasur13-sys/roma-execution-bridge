@@ -165,17 +165,12 @@ def test_result_backend_overwrites_payload_backend(monkeypatch):
     assert status_calls  # dispatch succeeded, so the poll loop did run
 
 
-def test_queued_with_backend_not_ready_fails_fast():
-    """dispatch returned a backend name but status=queued is not "accepted" —
-    don't mark running and don't burn 120s polling."""
-    result, db, status_calls = _run({"status": "queued", "backend": "local"})
+def test_local_queued_is_ready():
+    assert ew.dispatch_is_ready("local", "queued") is True
 
-    assert result["status"] == "failed"
-    assert status_calls == []  # no poll loop
-    assert len(db.updates) == 1
-    _, kwargs = db.updates[0]
-    assert kwargs["status"] == "failed"
-    assert kwargs["backend"] == "local"  # honest backend name, but still failed
+
+def test_vastai_queued_is_not_ready():
+    assert ew.dispatch_is_ready("vastai", "queued") is False
 
 
 def test_poll_uses_normalized_backend_job_id(monkeypatch):

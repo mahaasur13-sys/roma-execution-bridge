@@ -114,3 +114,19 @@ def test_worker_db_functions_exist(tenant):
     db.register_worker("w-bill-1", tenant["tenant_id"], {"gpu": 1})
     db.update_worker_heartbeat("w-bill-1")
     db.release_worker("w-bill-1")
+
+
+def test_complete_without_funds_returns_402(monkeypatch):
+    """fail-closed: no CREDIT → /complete 402, no debit, status unchanged."""
+    tenant_id = _uniq("t-bill")
+    key = _uniq("key-bill")
+    db.seed_tenants({key: {"tenant_id": tenant_id, "name": "A"}})
+    monkeypatch.setattr(main, "is_email_verified", lambda api_key: True)
+    job_id = _seed_running_job(tenant_id)
+    client = TestClient(main.app, raise_server_exceptions=False)
+    r1 = client.post(f"/complete/{job_id}", headers={"X-API-Key": key})
+    assert r1.status_code == 402
+    assert _count_debits(tenant_id, job_id) == 0
+    job = db.get_execution_job(job_id)
+    assert job["status"] == "running"
+
