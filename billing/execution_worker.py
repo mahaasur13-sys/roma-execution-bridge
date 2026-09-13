@@ -197,13 +197,12 @@ async def execute_and_bill(
         billing_status = "error"
 
     billed_ok = billing_status == "ok"
-
-    # NOTE (F1): строка usage_events теперь пишется ВНУТРИ _increment_usage
-    # (metering_engine.record). Отдельный вызов _db_adapter.record_usage_event(...)
-    # здесь УДАЛЁН — иначе снова получим две строки.
+    write_status = status
+    if not billed_ok and status == "completed":
+        write_status = "billing_pending"
 
     _db_adapter.update_execution_job(
-        job_id, status=status, completed_at=now_iso,
+        job_id, status=write_status, completed_at=now_iso,
         cost_usd=cost_usd if billed_ok else 0.0,
         duration_seconds=round(elapsed, 2),
         error="" if billed_ok else f"billing:{billing_status}",
