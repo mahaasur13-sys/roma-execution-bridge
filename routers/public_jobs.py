@@ -95,7 +95,7 @@ async def complete_job(job_id: str, key_info: dict = Depends(verify_api_key)):
 
     n = db.update_execution_job(
         job_id, status="completed",
-        completed_at=datetime.utcnow().isoformat(),
+        completed_at=datetime.now(timezone.utc).isoformat(),
         tenant_id=tenant_id,
         if_status_not_in=("completed", "timeout", "failed", "cancelled"),
     )
