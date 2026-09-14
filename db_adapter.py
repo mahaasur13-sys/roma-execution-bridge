@@ -1433,12 +1433,13 @@ def update_execution_job(job_id: str, status: str | None = None,
                          backend: str | None = None, backend_job_id: str | None = None,
                          completed_at: str | None = None, error: str | None = None,
                          cost_usd: float | None = None, duration_seconds: float | None = None,
-                         tenant_id: str | None = None):
+                         tenant_id: str | None = None,
+                         if_status_not_in=None):
     if _pg_enabled():
-        return _run_async(_update_execution_job_pg(job_id, status, completed_at, error, backend, backend_job_id, cost_usd, duration_seconds, tenant_id))
-    return _update_execution_job_sqlite(job_id, status, completed_at, error, backend, backend_job_id, cost_usd, duration_seconds, tenant_id)
+        return _run_async(_update_execution_job_pg(job_id, status, completed_at, error, backend, backend_job_id, cost_usd, duration_seconds, tenant_id, if_status_not_in))
+    return _update_execution_job_sqlite(job_id, status, completed_at, error, backend, backend_job_id, cost_usd, duration_seconds, tenant_id, if_status_not_in)
 
-async def _update_execution_job_pg(job_id, status, completed_at, error, backend, backend_job_id, cost_usd, duration_seconds, tenant_id=None):
+async def _update_execution_job_pg(job_id, status, completed_at, error, backend, backend_job_id, cost_usd, duration_seconds, tenant_id=None, if_status_not_in=None):
     conn = _pg_conn()
     try:
         with conn.cursor() as cur:
@@ -1468,17 +1469,21 @@ async def _update_execution_job_pg(job_id, status, completed_at, error, backend,
                 sets.append("duration_seconds = %s")
                 params.append(duration_seconds)
             if sets:
+                where = "id = %s"
+                extra = [job_id]
                 if tenant_id is not None:
-                    params.extend([job_id, tenant_id])
-                    cur.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = %s AND tenant_id = %s", params)
-                else:
-                    params.append(job_id)
-                    cur.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = %s", params)
+                    where += " AND tenant_id = %s"
+                    extra.append(tenant_id)
+                if if_status_not_in:
+                    where += " AND status NOT IN (" + ",".join(["%s"] * len(if_status_not_in)) + ")"
+                    extra.extend(list(if_status_not_in))
+                params.extend(extra)
+                cur.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE {where}", params)
         conn.commit()
     finally:
         _pg_return(conn)
 
-def _update_execution_job_sqlite(job_id, status, completed_at, error, backend, backend_job_id, cost_usd, duration_seconds, tenant_id=None):
+def _update_execution_job_sqlite(job_id, status, completed_at, error, backend, backend_job_id, cost_usd, duration_seconds, tenant_id=None, if_status_not_in=None):
     c = _sqlite_conn()
     try:
         _ensure_execution_jobs_table(c)
@@ -1508,12 +1513,16 @@ def _update_execution_job_sqlite(job_id, status, completed_at, error, backend, b
             sets.append("duration_seconds = ?")
             params.append(duration_seconds)
         if sets:
+            where = "id = ?"
+            extra = [job_id]
             if tenant_id is not None:
-                params.extend([job_id, tenant_id])
-                c.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = ? AND tenant_id = ?", params)
-            else:
-                params.append(job_id)
-                c.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = ?", params)
+                where += " AND tenant_id = ?"
+                extra.append(tenant_id)
+            if if_status_not_in:
+                where += " AND status NOT IN (" + ",".join(["?"] * len(if_status_not_in)) + ")"
+                extra.extend(list(if_status_not_in))
+            params.extend(extra)
+            c.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE {where}", params)
         c.commit()
     finally:
         c.close()
