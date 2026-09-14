@@ -93,7 +93,12 @@ async def complete_job(job_id: str, key_info: dict = Depends(verify_api_key)):
     except Exception as exc:
         logger.warning("backend.cleanup.failed tenant=%s job=%s: %s", tenant_id, job_id, exc)
 
-    db.update_execution_job(job_id, status="completed", completed_at=datetime.utcnow().isoformat(), tenant_id=tenant_id)
+    db.update_execution_job(
+        job_id, status="completed",
+        completed_at=datetime.utcnow().isoformat(),
+        tenant_id=tenant_id,
+        if_status_not_in=("completed", "timeout", "failed", "cancelled"),
+    )
     return {"status": "completed", "job_id": job_id}
 
 
