@@ -26,10 +26,11 @@ logger = logging.getLogger("roma.db_pg")
 
 POOL: Optional[asyncpg.Pool] = None
 
-DEFAULT_DSN = "postgresql://postgres:postgres@localhost:5432/roma"
+DEFAULT_DSN = ""
 
 
 def _dsn() -> str:
+    return os.environ.get("PG_DSN", DEFAULT_DSN)
 
 def _redact_dsn(dsn: str) -> str:
     if not dsn:
