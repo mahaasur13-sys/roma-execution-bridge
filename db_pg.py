@@ -30,7 +30,7 @@ DEFAULT_DSN = ""
 
 
 def _dsn() -> str:
-    return os.environ.get("PG_DSN", DEFAULT_DSN)
+    return (os.environ.get("PG_DSN") or DEFAULT_DSN or "").strip()
 
 def _redact_dsn(dsn: str) -> str:
     if not dsn:
@@ -50,8 +50,11 @@ def _redact_dsn(dsn: str) -> str:
 async def get_pool() -> asyncpg.Pool:
     global POOL
     if POOL is None:
+        dsn = _dsn()
+        if not dsn:
+            raise RuntimeError("PG_DSN is required for db_pg pool")
         POOL = await asyncpg.create_pool(
-            dsn=_dsn(),
+            dsn=dsn,
             min_size=2,
             max_size=10,
             command_timeout=30,
