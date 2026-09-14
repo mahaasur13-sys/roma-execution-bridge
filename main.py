@@ -141,7 +141,7 @@ from slowapi.errors import RateLimitExceeded
 class JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         log_entry = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "level": record.levelname,
             "logger": record.name,
         }
@@ -993,7 +993,7 @@ async def submit_job(payload: RomaTaskInput, key_info: dict) -> RomaTaskResponse
             "job_id": job_id,
             "tenant_id": tenant_id,
             "rom": f"rom://local/{job_id}",
-            "submitted_at": datetime.utcnow().isoformat(),
+            "submitted_at": datetime.now(timezone.utc).isoformat(),
             "payload": payload.model_dump(),
         }
         jobs[job_id] = job
