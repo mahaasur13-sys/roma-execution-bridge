@@ -1468,6 +1468,7 @@ async def _update_execution_job_pg(job_id, status, completed_at, error, backend,
             if duration_seconds is not None:
                 sets.append("duration_seconds = %s")
                 params.append(duration_seconds)
+            n = 0
             if sets:
                 where = "id = %s"
                 extra = [job_id]
@@ -1479,7 +1480,9 @@ async def _update_execution_job_pg(job_id, status, completed_at, error, backend,
                     extra.extend(list(if_status_not_in))
                 params.extend(extra)
                 cur.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE {where}", params)
+                n = cur.rowcount
         conn.commit()
+        return n
     finally:
         _pg_return(conn)
 
@@ -1512,6 +1515,7 @@ def _update_execution_job_sqlite(job_id, status, completed_at, error, backend, b
         if duration_seconds is not None:
             sets.append("duration_seconds = ?")
             params.append(duration_seconds)
+        n = 0
         if sets:
             where = "id = ?"
             extra = [job_id]
@@ -1523,7 +1527,9 @@ def _update_execution_job_sqlite(job_id, status, completed_at, error, backend, b
                 extra.extend(list(if_status_not_in))
             params.extend(extra)
             c.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE {where}", params)
+            n = c.rowcount
         c.commit()
+        return n
     finally:
         c.close()
 
