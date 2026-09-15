@@ -15,4 +15,3 @@ echo "[$(date -Is)] Starting backup: ${DB_HOST}:${DB_PORT}/${DB_NAME} -> ${BACKU
 PGPASSWORD="${DB_PASSWORD}" pg_dump -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -d "${DB_NAME}" --no-owner --no-acl | gzip > "${BACKUP_FILE}"
 echo "[$(date -Is)] Backup OK: ${BACKUP_FILE} ($(du -h ${BACKUP_FILE} | cut -f1))" | tee -a "${LOG_FILE}"
 find "${BACKUP_DIR}" -name "roma_*.sql.gz" -type f -mtime +${RETENTION_DAYS} -delete
-echo "[$(date -Is)] Cleanup old >${RETENTION_DAYS}d done" | tee -a "${LOG_FILE}"

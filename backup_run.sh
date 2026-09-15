@@ -2,7 +2,6 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 DSN=$(grep -E '^PG_DSN=' .env | cut -d= -f2- | tr -d '"' | tr -d "'" | xargs)
-# postgresql://USER:PASS@HOST:PORT/DB
 CRED="${DSN#*://}"; CRED="${CRED%@*}"
 export DB_USER="${CRED%%:*}"
 export DB_PASSWORD="${CRED#*:}"
