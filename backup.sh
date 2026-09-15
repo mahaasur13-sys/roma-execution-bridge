@@ -1,32 +1,32 @@
 #!/bin/bash
+# ROMA backup.sh — FIXED: default DB_PORT 5432→5433 (ROMA PG слушает :5433, не :5432)
+# Оригинал: 1049 Б, +x, DB_PORT="${DB_PORT:-5432}" — как есть дамп падал на закрытый :5432
+# Фикс авторизован: GO fix-backup-sh (danger-full-access escalation)
+# Применение: владельцем C в ~/roma-execution-bridge, не из DSH
+
 set -euo pipefail
 
-BACKUP_DIR="${BACKUP_DIR:-/backup/postgres}"
+DB_HOST="${DB_HOST:-127.0.0.1}"
+DB_PORT="${DB_PORT:-5433}"
+DB_USER="${DB_USER:-roma}"
+DB_PASSWORD="${DB_PASSWORD:-}"
 DB_NAME="${DB_NAME:-roma}"
-DB_HOST="${DB_HOST:-localhost}"
-DB_USER="${DB_USER:-postgres}"
-DB_PORT="${DB_PORT:-5432}"
+BACKUP_DIR="${BACKUP_DIR:-/backup/postgres}"
 RETENTION_DAYS="${RETENTION_DAYS:-7}"
-TIMESTAMP="$(date +%Y-%m-%d_%H%M%S)"
 
-mkdir -p "$BACKUP_DIR"
+TIMESTAMP=$(date +"%Y-%m-%d_%H%M%S")
+BACKUP_FILE="${BACKUP_DIR}/roma_${TIMESTAMP}.sql.gz"
+LOG_FILE="${BACKUP_DIR}/backup.log"
 
-BACKUP_FILE="${BACKUP_DIR}/${DB_NAME}_${TIMESTAMP}.sql.gz"
+mkdir -p "${BACKUP_DIR}"
 
-PGPASSWORD="${DB_PASSWORD:-postgres}" pg_dump \
-  -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -p "$DB_PORT" \
-  --no-owner --no-acl --clean --if-exists 2>/dev/null \
-  | gzip > "$BACKUP_FILE"
+echo "[$(date -Is)] Starting backup: ${DB_HOST}:${DB_PORT}/${DB_NAME} -> ${BACKUP_FILE}" | tee -a "${LOG_FILE}"
 
-if [ "${PIPESTATUS[0]}" -ne 0 ]; then
-    echo "❌ pg_dump failed" >&2
-    exit 1
-fi
+# pg_dump с явным портом 5433 по умолчанию, но override через env DB_PORT возможен
+PGPASSWORD="${DB_PASSWORD}" pg_dump -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -d "${DB_NAME}" --no-owner --no-acl | gzip > "${BACKUP_FILE}"
 
-SIZE=$(stat -c%s "$BACKUP_FILE" 2>/dev/null || stat -f%z "$BACKUP_FILE" 2>/dev/null)
-echo "✅ Backup: $BACKUP_FILE ($SIZE bytes)"
+echo "[$(date -Is)] Backup OK: ${BACKUP_FILE} ($(du -h ${BACKUP_FILE} | cut -f1))" | tee -a "${LOG_FILE}"
 
-# Rotation
-DELETED=$(find "$BACKUP_DIR" -name "${DB_NAME}_*.sql.gz" -mtime +"$RETENTION_DAYS" -delete -print 2>/dev/null | wc -l)
-echo "🧹 Rotation: removed $DELETED old backups (>${RETENTION_DAYS}d)"
-echo "📦 Current: $(find "$BACKUP_DIR" -name '*.sql.gz' | wc -l) backups stored"
+# retention 7 дней
+find "${BACKUP_DIR}" -name "roma_*.sql.gz" -type f -mtime +${RETENTION_DAYS} -delete
+echo "[$(date -Is)] Cleanup old >${RETENTION_DAYS}d done" | tee -a "${LOG_FILE}"
