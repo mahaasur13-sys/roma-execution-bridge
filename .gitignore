@@ -50,3 +50,8 @@ secrets.json
 *.age
 age/keys.txt
 .sops/
+
+# secrets
+.env.enc
+gitleaks
+gitleaks*.json
