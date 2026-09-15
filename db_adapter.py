@@ -1823,6 +1823,14 @@ def _hash_api_key(api_key: str) -> str:
     import hashlib
     return hashlib.sha256((api_key or "").encode("utf-8")).hexdigest()
 
+
+def _bump_tenant_lookup(method: str) -> None:
+    try:
+        from monitoring.metrics import roma_tenant_lookup_total
+        roma_tenant_lookup_total.labels(method=method).inc()
+    except Exception:
+        pass
+
 def find_tenant_by_key(api_key: str) -> dict | None:
     """Look up tenant by raw API key. Matches against api_key_hash."""
 
@@ -1846,7 +1854,11 @@ def _find_tenant_by_key_pg(api_key: str) -> dict | None:
             row = cur.fetchone()
         except psycopg2.errors.UndefinedColumn:
             conn.rollback()
-        if not row:
+        if row:
+            _bump_tenant_lookup("hash")
+        else:
+            _bump_tenant_lookup("plaintext")
+            logger.warning("tenant.lookup.fallback: plaintext path hit (unhashed tenant)")
             try:
                 cur.execute(
                     "SELECT id, name, plan FROM tenants "
