@@ -130,7 +130,7 @@ async def get_billing_ledger(
     """История списаний (дебет/кредит) для текущего tenant."""
     tenant_id = key_info["tenant_id"]
     entries = billing_ledger.get_tenant_entries(tenant_id)
-    entries = entries[-limit:] if limit > 0 else entries
+    entries = entries[:limit] if limit > 0 else entries
     balance = billing_ledger.get_balance(tenant_id)
     plan_name = key_info.get("plan", "free")
     plan = PLANS.get(plan_name, PLANS.get("free", {}))
@@ -149,7 +149,7 @@ async def get_billing_ledger(
             }
             for e in entries
         ],
-        "total_entries": len(entries),
+        "total_entries": billing_ledger.get_tenant_entry_count(tenant_id),
     }
 
 

@@ -1203,7 +1203,7 @@ async def _get_tenant_usage_db_pg(tenant_id):
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT COALESCE(SUM(gpu_seconds),0), COUNT(*) FROM usage_events WHERE tenant_id=%s",
+                "SELECT COALESCE(SUM(value),0), COUNT(*) FROM usage_events WHERE tenant_id=%s",
                 (tenant_id,),
             )
             row = cur.fetchone()
@@ -1215,7 +1215,7 @@ def _get_tenant_usage_db_sqlite(tenant_id):
     c = _sqlite_conn()
     try:
         row = c.execute(
-            "SELECT COALESCE(SUM(gpu_seconds),0), COUNT(*) FROM usage_events WHERE tenant_id=?",
+            "SELECT COALESCE(SUM(value),0), COUNT(*) FROM usage_events WHERE tenant_id=?",
             (tenant_id,),
         ).fetchone()
         return {"total_gpu_seconds": int(row[0]), "total_jobs": row[1]} if row else {"total_gpu_seconds": 0, "total_jobs": 0}

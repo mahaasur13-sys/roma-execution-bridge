@@ -229,3 +229,15 @@ class PGBillingLedger:
     @property
     def is_persistent(self) -> bool:
         return self._pg._create_pool() if self._pg._pool is None else self._pg.is_connected
+
+    def get_tenant_entry_count(self, tenant_id: str) -> int:
+        try:
+            rows = self._pg_execute(
+                "ledger_count",
+                "SELECT COUNT(*) FROM ledger_entries WHERE tenant_id = %s",
+                (tenant_id,), fetch=True,
+            )
+            return int(rows[0][0])
+        except PGUnavailableError:
+            pass
+        return len([e for e in self._entries if e["tenant_id"] == tenant_id])
