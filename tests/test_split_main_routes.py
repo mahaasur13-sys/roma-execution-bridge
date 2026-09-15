@@ -58,6 +58,7 @@ EXPECTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/metrics"),
     ("GET", "/openapi.json"),
     ("GET", "/ping"),
+    ("GET", "/ready"),
     ("GET", "/redoc"),
     ("GET", "/slurm/status/{slurm_job_id}"),
     ("GET", "/stats/daily"),
