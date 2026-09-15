@@ -43,3 +43,10 @@ secrets.json
 *.pfx
 .netrc
 .pgpass
+.env
+.env.plain
+.env.tmp
+*.key
+*.age
+age/keys.txt
+.sops/

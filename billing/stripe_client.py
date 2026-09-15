@@ -31,13 +31,13 @@ class StripeBillingClient:
         self._usage_records: list[StripeUsageRecord] = []
 
     def create_customer(self, tenant_id: str, email: str, name: str) -> str:
-        cid = f"cus_{hashlib.md5(tenant_id.encode()).hexdigest()[:14]}"
+        cid = f"cus_{hashlib.sha256(tenant_id.encode()).hexdigest()[:14]}"
         self._customers[tenant_id] = cid
         print(f"  [Stripe] Customer created: {cid} for tenant {tenant_id}")
         return cid
 
     def create_subscription(self, tenant_id: str, plan: str) -> str:
-        sid = f"sub_{hashlib.md5((tenant_id + plan).encode()).hexdigest()[:14]}"
+        sid = f"sub_{hashlib.sha256((tenant_id + plan).encode()).hexdigest()[:14]}"
         self._subscriptions[tenant_id] = sid
         print(f"  [Stripe] Subscription: {sid} (plan={plan})")
         return sid

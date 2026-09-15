@@ -1,0 +1,19 @@
+name: Security Scan
+on: [push, pull_request]
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install bandit pip-audit
+      - name: bandit (high+medium)
+        run: bandit -r billing/ routers/ main.py -ll -q
+      - name: pip-audit (report-only: mcp+starlette tracked separately)
+        run: pip-audit || true
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
