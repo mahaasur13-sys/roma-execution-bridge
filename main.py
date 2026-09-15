@@ -383,6 +383,7 @@ from routers.webhooks import router as webhooks_router
 from routers.auth import router as auth_router
 from routers.billing import router as billing_router
 from routers.public_jobs import router as public_jobs_router
+from routers.submit import router as submit_router
 from routers.beta import router as beta_router
 app.include_router(v1_router)
 app.include_router(decisions_router)
@@ -395,6 +396,7 @@ app.include_router(webhooks_router)
 app.include_router(auth_router)
 app.include_router(billing_router)
 app.include_router(public_jobs_router)
+app.include_router(submit_router)
 app.include_router(beta_router)
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -796,117 +798,6 @@ async def metrics():
 # ============================================
 # ENDPOINTS — DecisionOS: /submit via Gate + PG
 # ============================================
-
-def _parse_idempotency_key(request: Request) -> Optional[str]:
-    """Read and validate the Idempotency-Key header. Returns None if absent."""
-    raw = request.headers.get("Idempotency-Key")
-    if raw is None:
-        return None
-    key = raw.strip()
-    if not key:
-        raise HTTPException(status_code=400, detail="Idempotency-Key must not be empty")
-    if len(key) > 256:
-        raise HTTPException(status_code=400, detail="Idempotency-Key too long (max 256)")
-    return key
-
-
-def _submit_response(job_id: str, tenant_id: str, gpu_required: bool) -> RomaTaskResponse:
-    return RomaTaskResponse(
-        status="queued",
-        job_id=job_id,
-        tenant_id=tenant_id,
-        roma_dispatch={"protocol": "rom", "target": f"rom://local/{job_id}"},
-        dag=["validate", "dispatch", "execute", "commit"],
-        estimated_resources={"cpu_cores": 2, "memory_mb": 512, "gpu": 1 if gpu_required else 0},
-        gpu_required=gpu_required,
-    )
-
-
-@limiter.limit("30/minute")
-@app.post("/submit", response_model=RomaTaskResponse, status_code=202, dependencies=[Depends(verify_api_key)])
-async def submit_task(payload: RomaTaskInput, request: Request, key_info: dict = Depends(verify_api_key)):
-    global queue_depth
-    tenant_id = key_info["tenant_id"]
-
-    idempotency_key = _parse_idempotency_key(request)
-
-    # Replay: an existing (tenant_id, Idempotency-Key) mapping returns the same job.
-    if idempotency_key:
-        existing_job_id = db.find_job_by_idempotency(tenant_id, idempotency_key)
-        if existing_job_id:
-            existing = db.get_execution_job(existing_job_id)
-            if existing and existing.get("tenant_id") == tenant_id:
-                logger.info("submit.idempotent_replay tenant=%s key=%s job=%s",
-                            tenant_id, idempotency_key[:8], existing_job_id)
-                return _submit_response(
-                    existing_job_id, tenant_id,
-                    bool((existing.get("payload") or {}).get("gpu_required", False)),
-                )
-
-    gate = _get_gate()
-
-    # Build DecisionRequest
-    dreq = DecisionRequest(
-        tenant_id=tenant_id,
-        request_type="job_submit",
-        payload=payload.model_dump(),
-        idempotency_key=idempotency_key,
-    )
-
-    # Evaluate through Gate
-    decision = gate.evaluate(tenant_id=tenant_id, payload=payload.model_dump())
-    if decision.result.value != "allowed":
-        logger.warning("decision.denied tenant=%s reason=%s", tenant_id, decision.reason)
-        raise HTTPException(status_code=402, detail=decision.reason)
-
-    job_id = str(uuid.uuid4())
-
-    # Reserve the idempotency key atomically BEFORE creating the job, so two
-    # identical concurrent submits never produce two jobs.
-    if idempotency_key:
-        if not db.create_job_idempotency(tenant_id, idempotency_key, job_id):
-            winner_job_id = db.find_job_by_idempotency(tenant_id, idempotency_key)
-            if winner_job_id:
-                existing = db.get_execution_job(winner_job_id)
-                if existing and existing.get("tenant_id") == tenant_id:
-                    return _submit_response(
-                        winner_job_id, tenant_id,
-                        bool((existing.get("payload") or {}).get("gpu_required", False)),
-                    )
-
-    queue_depth += 1
-    roma_queue_depth.labels(tenant_id=tenant_id).set(queue_depth)
-
-    # Persist execution job in PG
-    db.insert_execution_job(
-        job_id=job_id,
-        decision_id=str(uuid.uuid4()),  # GateDecision has no decision_id
-        tenant_id=tenant_id,
-        status="queued",
-        payload=payload.model_dump(),
-    )
-    db.update_execution_job(job_id, backend=payload.backend, tenant_id=tenant_id)
-
-    # Dispatch — ТОЛЬКО фоновый poll_and_execute (одна точка). Не рентим здесь,
-    # иначе Vast создаётся дважды (submit + worker) → утечка инстанса.
-    # No debit at submit: the job is only queued. Actual billing happens exactly
-    # once at finalize via finalize_job_billing() (see /complete and execute_and_bill).
-
-    # Audit: job.created
-    try:
-        on_job_created(tenant_id, job_id, str(uuid.uuid4()))
-    except Exception as exc:
-        logger.warning("audit.job_created failed tenant=%s job=%s: %s", tenant_id, job_id, exc)
-
-    queue_depth -= 1
-    roma_queue_depth.labels(tenant_id=tenant_id).set(queue_depth)
-    roma_jobs_total.labels(tenant_id=tenant_id).inc()
-
-    ten_jobs = db.list_tenant_jobs(tenant_id, limit=100)
-    roma_jobs_active.labels(tenant_id=tenant_id).set(len(ten_jobs))
-
-    return _submit_response(job_id, tenant_id, payload.gpu_required)
-
 
 @app.post("/submit/cluster", status_code=202, dependencies=[Depends(verify_api_key)])
 async def submit_atom_cluster(payload: dict, key_info: dict = Depends(verify_api_key)):
