@@ -329,9 +329,36 @@ from models.app import (
 # APP
 # ============================================
 
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app):
+    try:
+        billing_ledger._pg._ensure_pool()
+        try:
+            init_worker()
+            asyncio.create_task(poll_and_execute())
+            logger.info("execution_worker initialized")
+        except Exception as e:
+            logger.warning("Failed to init execution_worker: %s", e)
+        logger.info("PG pool initialized on startup")
+    except Exception as e:
+        logger.warning("Failed to init PG pool on startup: %s", e)
+    yield
+    try:
+        from billing.pg_connection import shutdown_pg
+        shutdown_pg()
+        from db_adapter import close_pg_pool
+        close_pg_pool()
+        logger.info("PG pool released on shutdown")
+    except Exception as e:
+        logger.warning("Failed to close PG pool: %s", e)
+
+
 app = FastAPI(
     title="ROMA Execution Platform",
     version="2.1.0",
+    lifespan=lifespan,
 )
 app.state.limiter = limiter
 
@@ -1349,30 +1376,5 @@ async def submit_feedback(request: Request):
         raise HTTPException(status_code=500, detail="Failed to save feedback")
 
 
-@app.on_event("startup")
-async def startup_event():
-    try:
-        billing_ledger._pg._ensure_pool()
-        try:
-            init_worker()
-            asyncio.create_task(poll_and_execute())
-            logger.info("execution_worker initialized")
-        except Exception as e:
-            logger.warning("Failed to init execution_worker: %s", e)
-        logger.info("PG pool initialized on startup")
-    except Exception as e:
-        logger.warning("Failed to init PG pool on startup: %s", e)
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    try:
-        from billing.pg_connection import shutdown_pg
-        shutdown_pg()
-        from db_adapter import close_pg_pool
-        close_pg_pool()
-        logger.info("PG pool released on shutdown")
-    except Exception as e:
-        logger.warning("Failed to close PG pool: %s", e)
 
 

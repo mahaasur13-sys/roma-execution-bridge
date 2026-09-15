@@ -29,7 +29,7 @@ def test_insufficient_funds_returns_none(ledger, monkeypatch):
 
 def test_success_micro_debit_returns_ledger_id(ledger, monkeypatch):
     """Успешный micro-debit → возвращается ledger_id."""
-    monkeypatch.setattr(ledger, "_pg_execute", lambda *a, **k: [("led-1",)])
+    monkeypatch.setattr(ledger, "_txn", lambda *a, **k: [("led-1",)])
     assert ledger.debit_if_funds("t-test", 0.0000667) == "led-1"
 
 
@@ -47,20 +47,19 @@ def test_sql_has_balance_guard_and_same_columns(ledger, monkeypatch):
     """Запрос: те же колонки INSERT + условная вставка WHERE balance >= amount."""
     captured = {}
 
-    def fake(operation, query, params=None, fetch=False):
+    def fake(operation, statements, fetch_last=True):
         captured["operation"] = operation
-        captured["query"] = query
-        captured["params"] = params
+        captured["statements"] = statements
         return [("led-1",)]
 
-    monkeypatch.setattr(ledger, "_pg_execute", fake)
+    monkeypatch.setattr(ledger, "_txn", fake)
     ledger.debit_if_funds("t-test", 0.5)
 
     assert captured["operation"] == "ledger_debit_if_funds"
-    assert "INSERT INTO ledger_entries (ledger_id, tenant_id, entry_type, amount, currency, metadata)" in captured["query"]
-    assert "WHERE bal.b >= %s" in captured["query"]
-    # последний параметр = порог amount
-    assert captured["params"][-1] == 0.5
+    insert_sql, insert_params = captured["statements"][1]
+    assert "INSERT INTO ledger_entries (ledger_id, tenant_id, entry_type, amount, currency, metadata)" in insert_sql
+    assert "WHERE bal.b >= %s" in insert_sql
+    assert insert_params[-1] == 0.5
 
 
 def test_ledger_append_only_trigger():
