@@ -767,6 +767,27 @@ async def health():
     }
 
 
+@app.get("/ready")
+async def ready():
+    """Readiness probe — PG connected + pool healthy (fail-closed)."""
+    from fastapi.responses import JSONResponse
+    from billing.pg_connection import pg_health
+    pg_status = pg_health()
+    pg_ok = bool(pg_status.get("connected"))
+    pool_ok = bool(pg_status.get("pool_configured")) and pg_status.get("status") == "healthy"
+    ready = pg_ok and pool_ok and int(pg_status.get("error_count", 0)) < 5
+    return JSONResponse(
+        status_code=200 if ready else 503,
+        content={
+            "status": "ready" if ready else "not_ready",
+            "pg": pg_ok,
+            "pool": pg_status.get("pool_size", "0/10"),
+            "reconnect_count": pg_status.get("reconnect_count", 0),
+            "error_count": pg_status.get("error_count", 0),
+            "version": "2.1.0",
+        },
+    )
+
 @app.get("/metrics")
 async def metrics():
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
