@@ -94,12 +94,14 @@ def init_db(conn) -> None:
 
 
 def seed_tenants(conn, api_keys: dict) -> None:
+    import hashlib
     cur = conn.cursor()
     for key, info in api_keys.items():
+        digest = hashlib.sha256((key or "").encode("utf-8")).hexdigest()
         cur.execute(
-            "INSERT INTO tenants (id, api_key, name, plan, subscription_status) "
-            "VALUES (%s,%s,%s,'free','inactive') ON CONFLICT (id) DO NOTHING",
-            (info.get("tenant_id", ""), key, info.get("name", info.get("tenant_id", "")))
+            "INSERT INTO tenants (id, api_key, api_key_hash, name, plan, subscription_status) "
+            "VALUES (%s,%s,%s,%s,'free','inactive') ON CONFLICT (id) DO NOTHING",
+            (info.get("tenant_id", ""), key, digest, info.get("name", info.get("tenant_id", "")))
         )
     conn.commit()
 
