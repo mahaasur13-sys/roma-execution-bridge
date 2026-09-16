@@ -495,7 +495,7 @@ async def landing_page():
 
 
 roma_jobs_total = Counter("roma_jobs_total", "Total number of submitted jobs", ["tenant_id"])
-roma_jobs_active = Gauge("roma_jobs_active", "Currently active jobs", ["tenant_id"])
+roma_jobs_active = Gauge("roma_jobs_active", "Active (non-terminal: queued/running/pending) jobs", ["tenant_id"])
 roma_queue_depth = Gauge("roma_queue_depth", "Current queue depth", ["tenant_id"])
 queue_depth = 0
 jobs: dict = {}  # in-memory job registry for the demo/dashboard path
