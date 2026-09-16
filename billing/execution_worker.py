@@ -77,7 +77,7 @@ def dispatch_is_ready(backend_name: str | None, status: str | None) -> bool:
     )
 
 
-async def execute_and_bill(
+async def _execute_and_bill_impl(
     job_id: str,
     tenant_id: str,
     payload: dict,
@@ -242,6 +242,28 @@ async def execute_and_bill(
         "duration_seconds": round(elapsed, 2),
         "backend": backend_name,
     }
+
+
+async def execute_and_bill(job_id: str, tenant_id: str, payload: dict) -> dict:
+    """Врапер: гарантирует терминальный статус + cleanup backend при отмене (drain_inflight)."""
+    try:
+        return await _execute_and_bill_impl(job_id, tenant_id, payload)
+    except asyncio.CancelledError:
+        logger.warning("execute_and_bill.cancelled job=%s tenant=%s", job_id, tenant_id)
+        try:
+            _db_adapter.update_execution_job(
+                job_id, status="cancelled",
+                completed_at=datetime.now(timezone.utc).isoformat(),
+                error="cancelled by drain_inflight", tenant_id=tenant_id,
+            )
+        except Exception:
+            pass
+        try:
+            if _backend_manager:
+                await asyncio.shield(_backend_manager["cancel"](job_id, tenant_id))
+        except Exception:
+            pass
+        raise
 
 
 async def _execute_command(job_id: str, payload: dict, tenant_id: str) -> dict:
