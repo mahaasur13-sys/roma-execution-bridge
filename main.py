@@ -397,6 +397,8 @@ async def lifespan(app):
                 await asyncio.gather(*pending, return_exceptions=True)
             except asyncio.CancelledError:
                 pass
+        from billing.execution_worker import drain_inflight
+        await drain_inflight()
         from billing.pg_connection import shutdown_pg
         shutdown_pg()
         from db_adapter import close_pg_pool

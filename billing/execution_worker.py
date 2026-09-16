@@ -21,6 +21,24 @@ _db_adapter = None
 _backend_manager = None
 
 
+
+_INFLIGHT = set()
+
+def _track(task):
+    _INFLIGHT.add(task)
+    task.add_done_callback(_INFLIGHT.discard)
+    return task
+
+async def drain_inflight(grace_s: float = 15.0):
+    pending = [t for t in list(_INFLIGHT) if not t.done()]
+    if not pending:
+        return
+    _done, still = await asyncio.wait(pending, timeout=grace_s)
+    for t in still:
+        t.cancel()
+    if still:
+        await asyncio.gather(*still, return_exceptions=True)
+
 def init_worker():
     """Вызывается один раз при старте приложения. Устанавливает ссылки на компоненты."""
     global _billing_ledger, _db_adapter, _backend_manager
@@ -46,7 +64,7 @@ async def poll_and_execute():
                 payload = job.get("payload", {})
                 # Переводим из queued в running и запускаем
                 _db_adapter.update_execution_job(jid, status="running", tenant_id=tid)
-                asyncio.ensure_future(execute_and_bill(jid, tid, payload))
+                _track(asyncio.ensure_future(execute_and_bill(jid, tid, payload)))
                 logger.info("poll_and_execute.started job=%s tenant=%s", jid, tid)
         except Exception as e:
             logger.warning("poll_and_execute.error: %s", e)
@@ -244,4 +262,4 @@ async def _execute_command(job_id: str, payload: dict, tenant_id: str) -> dict:
 def bill_job(job_id: str, tenant_id: str, payload: dict) -> asyncio.Task:
     """Запускает execute_and_bill как фоновую задачу. Возвращает asyncio.Task."""
     loop = asyncio.get_event_loop()
-    return loop.create_task(execute_and_bill(job_id, tenant_id, payload))
+    return _track(loop.create_task(execute_and_bill(job_id, tenant_id, payload)))
