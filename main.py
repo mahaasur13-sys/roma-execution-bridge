@@ -331,13 +331,49 @@ from models.app import (
 
 from contextlib import asynccontextmanager
 
+async def _reconciliation_loop():
+    import glob, os
+    while True:
+        try:
+            from billing.pg_ledger import PGBillingLedger
+            from monitoring.metrics import (
+                roma_ledger_computed_balance, roma_api_balance,
+                roma_ledger_reconciliation_diff, roma_ledger_entry_count,
+                roma_backup_last_success_timestamp,
+            )
+            ledger = PGBillingLedger()
+            for tenant_id in ["t-test-paper-20260909"]:
+                try:
+                    balance = ledger.get_balance(tenant_id)
+                    computed = ledger.get_tenant_balance(tenant_id)
+                    count = ledger.get_tenant_entry_count(tenant_id)
+                    diff = abs(balance - computed)
+                    roma_ledger_computed_balance.labels(tenant_id=tenant_id).set(computed)
+                    roma_api_balance.labels(tenant_id=tenant_id).set(balance)
+                    roma_ledger_reconciliation_diff.labels(tenant_id=tenant_id).set(diff)
+                    roma_ledger_entry_count.labels(tenant_id=tenant_id).set(count)
+                except Exception as e:
+                    logger.warning("reconciliation failed tenant=%s: %s", tenant_id, e)
+            try:
+                files = glob.glob("/home/felix/backups/roma/roma_*.sql.gz")
+                if files:
+                    latest = max(files, key=os.path.getmtime)
+                    roma_backup_last_success_timestamp.set(os.path.getmtime(latest))
+            except Exception as e:
+                logger.warning("backup scan failed: %s", e)
+        except Exception as e:
+            logger.warning("reconciliation loop error: %s", e)
+        await asyncio.sleep(900)
+
+
 @asynccontextmanager
 async def lifespan(app):
     try:
         billing_ledger._pg._ensure_pool()
         try:
             init_worker()
-            asyncio.create_task(poll_and_execute())
+            app.state.worker_task = asyncio.create_task(poll_and_execute())
+            app.state.reconciliation_task = asyncio.create_task(_reconciliation_loop())
             logger.info("execution_worker initialized")
         except Exception as e:
             logger.warning("Failed to init execution_worker: %s", e)
@@ -346,6 +382,21 @@ async def lifespan(app):
         logger.warning("Failed to init PG pool on startup: %s", e)
     yield
     try:
+        for name in ("worker_task", "reconciliation_task"):
+            t = getattr(app.state, name, None)
+            if t is not None and not t.done():
+                t.cancel()
+        pending = [
+            getattr(app.state, name)
+            for name in ("worker_task", "reconciliation_task")
+            if getattr(app.state, name, None) is not None
+            and not getattr(app.state, name).done()
+        ]
+        if pending:
+            try:
+                await asyncio.gather(*pending, return_exceptions=True)
+            except asyncio.CancelledError:
+                pass
         from billing.pg_connection import shutdown_pg
         shutdown_pg()
         from db_adapter import close_pg_pool
