@@ -6,7 +6,10 @@ import db_adapter as db
 from deps import billing_ledger, alert_dispatcher
 from billing.pg_ledger import PGUnavailableError  # noqa: F401
 from billing.pg_metering import PGMeteringEngine as MeteringEngine
-from monitoring.metrics import gpu_seconds_total, tokens_total, billing_cost_total, job_cost
+from monitoring.metrics import (
+    gpu_seconds_total, tokens_total, billing_cost_total, job_cost,
+    roma_debit_total, roma_debit_no_funds_total, roma_debit_amount, roma_tenant_balance,
+)
 from alerts import Alert, AlertLevel
 
 logger = logging.getLogger("roma")
@@ -51,6 +54,8 @@ def _increment_usage(tenant_id, gpu_sec=0.0, input_tokens=0, output_tokens=0,
         job_id=job_id,
     )
     if ledger_id is None:
+        roma_debit_total.labels(tenant_id=tenant_id, status="no_funds").inc()
+        roma_debit_no_funds_total.labels(tenant_id=tenant_id).inc()
         logger.warning("billing.no_funds tenant=%s job=%s amount=%.8f",
                        tenant_id, job_id, total_cost)
         return total_cost, False
@@ -101,6 +106,10 @@ def _increment_usage(tenant_id, gpu_sec=0.0, input_tokens=0, output_tokens=0,
                  f"Threshold: $1.00/hour",
             tags={"tenant_id": tenant_id, "plan": plan_name, "event": "high_burn_rate"},
         ))
+
+    roma_debit_total.labels(tenant_id=tenant_id, status="ok").inc()
+    roma_debit_amount.labels(tenant_id=tenant_id).observe(total_cost)
+    roma_tenant_balance.labels(tenant_id=tenant_id).set(billing_ledger.get_tenant_balance(tenant_id))
 
     return total_cost, True
 

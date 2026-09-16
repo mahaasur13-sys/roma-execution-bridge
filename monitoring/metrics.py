@@ -104,6 +104,7 @@ roma_debit_total = Counter("roma_debit_total", "Debit results", ["tenant_id", "s
 roma_debit_no_funds_total = Counter("roma_debit_no_funds_total", "No funds", ["tenant_id"])
 roma_debit_amount = Histogram("roma_debit_amount", "Debit amount", ["tenant_id"])
 roma_tenant_lookup_total = Counter("roma_tenant_lookup_total", "Lookup method", ["method"])
+roma_backup_last_success_timestamp = Gauge("roma_backup_last_success_timestamp", "Last successful backup epoch seconds", [])
 
 # алиасы для нового префикса (совместимость)
 roma_spend_cap_balance_usd = spend_cap_balance
