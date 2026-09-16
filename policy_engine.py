@@ -46,7 +46,7 @@ def evaluate_policies(tenant_id: str, action: str, context: dict | None = None) 
     if action in ("job.submit", "decision.create", "decision.evaluate"):
         max_jobs = tier.get("max_jobs_month", 50)
         if max_jobs > 0:
-            job_count = db.count_jobs_for_tenant(tenant_id)
+            job_count = db.count_jobs_for_tenant_total(tenant_id)
             if job_count >= max_jobs:
                 return {"result": "denied", "reason": "quota_exceeded", "policy_name": "quota_policy"}
         budget = tier.get("budget_limit", 100.0)

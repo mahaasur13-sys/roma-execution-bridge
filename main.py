@@ -116,7 +116,7 @@ def _check_limits(tenant_id: str) -> tuple[bool, str]:
     max_jobs = plan.get("max_jobs_per_month", 50)
     if max_jobs < 0:
         return True, ""
-    used = db.count_jobs_for_tenant(tenant_id)
+    used = db.count_jobs_for_tenant_total(tenant_id)
     if used >= max_jobs:
         return False, f"Monthly job limit reached: {used}/{max_jobs}"
     return True, ""
@@ -994,8 +994,7 @@ async def submit_job(payload: RomaTaskInput, key_info: dict) -> RomaTaskResponse
         roma_jobs_total.labels(tenant_id=tenant_id).inc()
         # No debit at demo submit — billing is finalized exactly once via
         # finalize_job_billing() (see /complete and execute_and_bill).
-        tenant_jobs = [j for j in jobs.values() if j.get("tenant_id") == tenant_id]
-        roma_jobs_active.labels(tenant_id=tenant_id).set(len(tenant_jobs))
+        roma_jobs_active.labels(tenant_id=tenant_id).set(db.count_jobs_active_for_tenant(tenant_id))
         return RomaTaskResponse(
             status="queued",
             job_id=job_id,

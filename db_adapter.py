@@ -1308,8 +1308,8 @@ def is_pg_connected() -> bool:
 # Week 2 — decision/job store + plans loader (extends Week 1)
 # ═══════════════════════════════════════════════════════════
 
-def count_jobs_for_tenant(tenant_id: str) -> int:
-    """Count total jobs for tenant (for quota gating)."""
+def count_jobs_for_tenant_total(tenant_id: str) -> int:
+    """Count total jobs for tenant (for quota gating, monthly limits)."""
     if _pg_enabled():
         return _run_async(_count_jobs_for_tenant_pg(tenant_id))
     return _count_jobs_for_tenant_sqlite(tenant_id)
@@ -1686,7 +1686,8 @@ def _load_plans() -> dict:
 # DecisionOS Week 2 helpers
 # ────────────────────────────────────────
 
-def count_jobs_for_tenant(tenant_id: str) -> int:
+def count_jobs_active_for_tenant(tenant_id: str) -> int:
+    """Active (non-terminal) jobs: queued/running/pending."""
     if _pg_enabled():
         async def _count():
             conn = _pg_conn()

@@ -119,6 +119,6 @@ async def submit_task(payload: RomaTaskInput, request: Request,
     main.roma_queue_depth.labels(tenant_id=tenant_id).set(main.queue_depth)
     main.roma_jobs_total.labels(tenant_id=tenant_id).inc()
 
-    main.roma_jobs_active.labels(tenant_id=tenant_id).set(db.count_jobs_for_tenant(tenant_id))
+    main.roma_jobs_active.labels(tenant_id=tenant_id).set(db.count_jobs_active_for_tenant(tenant_id))
 
     return _submit_response(job_id, tenant_id, payload.gpu_required)

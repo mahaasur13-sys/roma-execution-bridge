@@ -43,7 +43,7 @@ class EnterpriseDecisionGate:
         plan_cfg = db._load_plans().get(plan, db._load_plans().get("free", {"max_jobs": 10}))
         max_jobs = plan_cfg.get("max_jobs", 10)
 
-        job_count = db.count_jobs_for_tenant(tenant_id)
+        job_count = db.count_jobs_active_for_tenant(tenant_id)
 
         if job_count >= max_jobs:
             return GateDecision(
