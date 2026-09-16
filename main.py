@@ -344,12 +344,12 @@ async def _reconciliation_loop():
             ledger = PGBillingLedger()
             for tenant_id in ["t-test-paper-20260909"]:
                 try:
-                    balance = ledger.get_balance(tenant_id)
-                    computed = ledger.get_tenant_balance(tenant_id)
+                    debit_sum = ledger.get_tenant_debit_sum(tenant_id)
+                    cost_sum = ledger.get_tenant_usage_cost(tenant_id)
                     count = ledger.get_tenant_entry_count(tenant_id)
-                    diff = abs(balance - computed)
-                    roma_ledger_computed_balance.labels(tenant_id=tenant_id).set(computed)
-                    roma_api_balance.labels(tenant_id=tenant_id).set(balance)
+                    diff = abs(debit_sum - cost_sum)
+                    roma_ledger_computed_balance.labels(tenant_id=tenant_id).set(debit_sum)
+                    roma_api_balance.labels(tenant_id=tenant_id).set(cost_sum)
                     roma_ledger_reconciliation_diff.labels(tenant_id=tenant_id).set(diff)
                     roma_ledger_entry_count.labels(tenant_id=tenant_id).set(count)
                 except Exception as e:

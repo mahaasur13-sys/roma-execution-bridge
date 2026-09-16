@@ -95,9 +95,9 @@ def track_spend_cap_blocked(tenant_id: str, plan_name: str) -> None:
     spend_cap_blocked_total.labels(tenant_id=tenant_id, plan=plan_name).inc()
 
 # --- NEW — reconciliation-cron + alerts (P1b) — добавлено в 266283e FIX ---
-roma_ledger_computed_balance = Gauge("roma_ledger_computed_balance", "SUM(CREDIT-DEBIT)", ["tenant_id"])
-roma_api_balance = Gauge("roma_api_balance", "API balance", ["tenant_id"])
-roma_ledger_reconciliation_diff = Gauge("roma_ledger_reconciliation_diff", "abs(computed-api)", ["tenant_id"])
+roma_ledger_computed_balance = Gauge("roma_ledger_computed_balance", "SUM(DEBIT) ledger_entries", ["tenant_id"])
+roma_api_balance = Gauge("roma_api_balance", "SUM(cost_usd) usage_events", ["tenant_id"])
+roma_ledger_reconciliation_diff = Gauge("roma_ledger_reconciliation_diff", "abs(ledger_debit - usage_cost)", ["tenant_id"])
 roma_ledger_entry_count = Gauge("roma_ledger_entry_count", "COUNT(*)", ["tenant_id"])
 roma_tenant_balance = Gauge("roma_tenant_balance", "Current balance", ["tenant_id"])
 roma_debit_total = Counter("roma_debit_total", "Debit results", ["tenant_id", "status"])

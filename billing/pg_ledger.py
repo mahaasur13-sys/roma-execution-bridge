@@ -155,6 +155,32 @@ class PGBillingLedger:
                 return existing[0][0]
         return None
 
+    def get_tenant_debit_sum(self, tenant_id: str) -> float:
+        try:
+            rows = self._pg_execute(
+                "ledger_debit_sum",
+                "SELECT COALESCE(SUM(amount), 0) FROM ledger_entries "
+                "WHERE tenant_id = %s AND entry_type = 'DEBIT'",
+                (tenant_id,), fetch=True,
+            )
+            return float(rows[0][0])
+        except PGUnavailableError:
+            pass
+        return sum(e["amount"] for e in self._entries
+                   if e["tenant_id"] == tenant_id and e["type"] == "DEBIT")
+
+    def get_tenant_usage_cost(self, tenant_id: str) -> float:
+        try:
+            rows = self._pg_execute(
+                "usage_cost_sum",
+                "SELECT COALESCE(SUM(cost_usd), 0) FROM usage_events WHERE tenant_id = %s",
+                (tenant_id,), fetch=True,
+            )
+            return float(rows[0][0])
+        except PGUnavailableError:
+            pass
+        return 0.0
+
     def get_tenant_balance(self, tenant_id: str) -> float:
         try:
             rows = self._pg_execute(
