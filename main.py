@@ -373,7 +373,7 @@ async def lifespan(app):
         try:
             init_worker()
             app.state.worker_task = asyncio.create_task(poll_and_execute())
-            asyncio.create_task(_reconciliation_loop())
+            app.state.reconciliation_task = asyncio.create_task(_reconciliation_loop())
             logger.info("execution_worker initialized")
         except Exception as e:
             logger.warning("Failed to init execution_worker: %s", e)
@@ -382,11 +382,19 @@ async def lifespan(app):
         logger.warning("Failed to init PG pool on startup: %s", e)
     yield
     try:
-        t = getattr(app.state, "worker_task", None)
-        if t is not None and not t.done():
-            t.cancel()
+        for name in ("worker_task", "reconciliation_task"):
+            t = getattr(app.state, name, None)
+            if t is not None and not t.done():
+                t.cancel()
+        pending = [
+            getattr(app.state, name)
+            for name in ("worker_task", "reconciliation_task")
+            if getattr(app.state, name, None) is not None
+            and not getattr(app.state, name).done()
+        ]
+        if pending:
             try:
-                await t
+                await asyncio.gather(*pending, return_exceptions=True)
             except asyncio.CancelledError:
                 pass
         from billing.pg_connection import shutdown_pg
