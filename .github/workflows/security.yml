@@ -1,19 +1,59 @@
 name: Security Scan
+
 on: [push, pull_request]
+
+permissions:
+  contents: read
+
 jobs:
-  scan:
+  bandit:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install bandit pip-audit
-      - name: bandit (high+medium)
-        run: bandit -r billing/ routers/ main.py -ll -q
-      - name: pip-audit (report-only: mcp+starlette tracked separately)
-        run: pip-audit || true
-      - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - run: pip install bandit
+
+      # Money path (billing/authrouters/monitoring): fail on medium+high.
+      # Known-safe dynamic SQL in db_adapter.py carries inline `# nosec B608`
+      # markers with justification, so any NEW string-built SQL fails here.
+      - name: bandit — money path (medium+)
+        run: >
+          bandit -r billing/ routers/ auth/ monitoring/ security/ main.py db_adapter.py
+          -ll -q
+
+      # Repo-wide: high severity only. This is the net that catches what a
+      # narrow scope used to hide (jinja2 autoescape, paramiko AutoAddPolicy).
+      - name: bandit — repo-wide (high only)
+        run: >
+          bandit -r . -x ./.venv,./node_modules,./tests,./.git
+          -lll -q
+
+  deps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pip-audit
+      - name: Install audited dependencies
+        run: pip install .
+      - name: pip-audit (enforced — any known vulnerability fails the job)
+        run: pip-audit --progress-spinner off
+
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: "gitleaks (config: .gitleaks.toml)"
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks detect --source . --no-banner --config .gitleaks.toml --redact --exit-code 1

@@ -5,6 +5,7 @@ Debit happens exactly once at finalize via billing/finalize.py:44 (L2/L3 there).
 from __future__ import annotations
 
 import logging
+import json
 import uuid
 from typing import Optional
 
@@ -64,9 +65,17 @@ async def submit_task(payload: RomaTaskInput, request: Request,
             if existing and existing.get("tenant_id") == tenant_id:
                 logger.info("submit.idempotent_replay tenant=%s key=%s job=%s",
                             tenant_id, idempotency_key[:8], existing_job_id)
+                payload = existing.get("payload") or {}
+                if isinstance(payload, str):
+                    # SQLite stores `payload` as TEXT; the adapter normally decodes it,
+                    # but a raw row must never turn an idempotent replay into a 500.
+                    try:
+                        payload = json.loads(payload)
+                    except ValueError:
+                        payload = {}
                 return _submit_response(
                     existing_job_id, tenant_id,
-                    bool((existing.get("payload") or {}).get("gpu_required", False)),
+                    bool(payload.get("gpu_required", False)),
                 )
 
     gate = main._get_gate()

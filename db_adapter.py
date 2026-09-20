@@ -6,6 +6,7 @@ Import this instead of db.py to get automatic PostgreSQL fallback.
 """
 
 import asyncio
+import json
 import logging
 import os
 import threading
@@ -641,12 +642,13 @@ def create_job_idempotency(tenant_id: str, idempotency_key: str, job_id: str) ->
     c = _sqlite_conn()
     try:
         _ensure_submit_idempotency_table(c)
-        c.execute(
+        # rowcount живёт на cursor; sqlite3.Connection его не имеет (AttributeError).
+        cur = c.execute(
             "INSERT OR IGNORE INTO submit_idempotency_keys (tenant_id, idempotency_key, job_id) VALUES (?,?,?)",
             (tenant_id, idempotency_key, job_id),
         )
         c.commit()
-        return c.rowcount > 0
+        return cur.rowcount > 0
     finally:
         c.close()
 
@@ -917,6 +919,7 @@ async def _get_job_pg(job_id, tenant_id):
             for dt_col in ("created_at", "started_at", "completed_at"):
                 if d.get(dt_col):
                     d[dt_col] = d[dt_col].isoformat() if hasattr(d[dt_col], "isoformat") else str(d[dt_col])
+            d["payload"] = _json_col(d.get("payload"), {})
             return d
     finally:
         _pg_return(conn)
@@ -952,10 +955,10 @@ async def _update_job_status_pg(job_id, status, completed_at, error, tenant_id=N
                 params.append(error)
             if tenant_id is not None:
                 params.extend([job_id, tenant_id])
-                cur.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = %s AND tenant_id = %s", params)
+                cur.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = %s AND tenant_id = %s", params)  # nosec B608 — SQL fragments are internal literals; all values are bound params
             else:
                 params.append(job_id)
-                cur.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = %s", params)
+                cur.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = %s", params)  # nosec B608 — SQL fragments are internal literals; all values are bound params
         conn.commit()
     finally:
         _pg_return(conn)
@@ -976,10 +979,10 @@ def _update_job_status_sqlite(job_id, status, completed_at, error, tenant_id=Non
             params.append(error)
         if tenant_id is not None:
             params.extend([job_id, tenant_id])
-            c.execute(f"UPDATE execution_jobs SET {sets} WHERE id = ? AND tenant_id = ?", params)
+            c.execute(f"UPDATE execution_jobs SET {sets} WHERE id = ? AND tenant_id = ?", params)  # nosec B608 — SQL fragments are internal literals; all values are bound params
         else:
             params.append(job_id)
-            c.execute(f"UPDATE execution_jobs SET {sets} WHERE id = ?", params)
+            c.execute(f"UPDATE execution_jobs SET {sets} WHERE id = ?", params)  # nosec B608 — SQL fragments are internal literals; all values are bound params
         c.commit()
     finally:
         c.close()
@@ -1386,16 +1389,38 @@ async def _get_execution_job_pg(job_id):
             for dt_col in ("created_at", "started_at", "completed_at"):
                 if d.get(dt_col) and hasattr(d.get(dt_col), "isoformat"):
                     d[dt_col] = d[dt_col].isoformat()
+            d["payload"] = _json_col(d.get("payload"), {})
             return d
     finally:
         _pg_return(conn)
+
+def _json_col(value, default=None):
+    """Decode a JSON column: SQLite hands back TEXT, PostgreSQL hands back dict/list."""
+    if value is None:
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8", "replace")
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError):
+            return default
+    return default
+
 
 def _get_execution_job_sqlite(job_id):
     c = _sqlite_conn()
     try:
         _ensure_execution_jobs_table(c)
         row = c.execute("SELECT * FROM execution_jobs WHERE id=?", (job_id,)).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        d = dict(row)
+        # `payload` is TEXT here (JSONB on PG) — callers expect a mapping.
+        d["payload"] = _json_col(d.get("payload"), {})
+        return d
     finally:
         c.close()
 
@@ -1479,7 +1504,7 @@ async def _update_execution_job_pg(job_id, status, completed_at, error, backend,
                     where += " AND status NOT IN (" + ",".join(["%s"] * len(if_status_not_in)) + ")"
                     extra.extend(list(if_status_not_in))
                 params.extend(extra)
-                cur.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE {where}", params)
+                cur.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE {where}", params)  # nosec B608 — SQL fragments are internal literals; all values are bound params
                 n = cur.rowcount
         conn.commit()
         return n
@@ -1526,8 +1551,12 @@ def _update_execution_job_sqlite(job_id, status, completed_at, error, backend, b
                 where += " AND status NOT IN (" + ",".join(["?"] * len(if_status_not_in)) + ")"
                 extra.extend(list(if_status_not_in))
             params.extend(extra)
-            c.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE {where}", params)
-            n = c.rowcount
+            cur = c.cursor()
+            try:
+                cur.execute(f"UPDATE execution_jobs SET {', '.join(sets)} WHERE {where}", params)  # nosec B608 — SQL fragments are internal literals; all values are bound params
+                n = cur.rowcount
+            finally:
+                cur.close()
         c.commit()
         return n
     finally:
@@ -1620,11 +1649,11 @@ async def _list_decision_records_pg(tenant_id, result, date_from, date_to, limit
                 where.append("decided_at <= %s"); params.append(date_to)
             where_clause = " AND ".join(where)
             cur.execute(
-                f"SELECT COUNT(*) FROM decision_records WHERE {where_clause}", params,
+                f"SELECT COUNT(*) FROM decision_records WHERE {where_clause}", params,  # nosec B608 — SQL fragments are internal literals; all values are bound params
             )
             total = cur.fetchone()[0]
             cur.execute(
-                f"SELECT * FROM decision_records WHERE {where_clause} ORDER BY decided_at DESC LIMIT %s OFFSET %s",
+                f"SELECT * FROM decision_records WHERE {where_clause} ORDER BY decided_at DESC LIMIT %s OFFSET %s",  # nosec B608 — SQL fragments are internal literals; all values are bound params
                 params + [limit, offset],
             )
             cols = [desc[0] for desc in cur.description]
@@ -1651,9 +1680,9 @@ def _list_decision_records_sqlite(tenant_id, result, date_from, date_to, limit, 
         if date_to:
             where.append("decided_at <= ?"); params.append(date_to)
         where_clause = " AND ".join(where)
-        total = c.execute(f"SELECT COUNT(*) FROM decision_records WHERE {where_clause}", params).fetchone()[0]
+        total = c.execute(f"SELECT COUNT(*) FROM decision_records WHERE {where_clause}", params).fetchone()[0]  # nosec B608 — SQL fragments are internal literals; all values are bound params
         rows = c.execute(
-            f"SELECT * FROM decision_records WHERE {where_clause} ORDER BY decided_at DESC LIMIT ? OFFSET ?",
+            f"SELECT * FROM decision_records WHERE {where_clause} ORDER BY decided_at DESC LIMIT ? OFFSET ?",  # nosec B608 — SQL fragments are internal literals; all values are bound params
             params + [limit, offset],
         ).fetchall()
         return ([dict(r) for r in rows], total)
@@ -1663,23 +1692,46 @@ def _list_decision_records_sqlite(tenant_id, result, date_from, date_to, limit, 
 
 # ── Plans loader (shared between gate and API) ──
 
+_PLAN_DEFAULTS: dict = {
+    "free": {"max_jobs": 10, "max_gpu_hours": 0, "name": "Free"},
+    "start": {"max_jobs": 50, "max_gpu_hours": 10, "name": "Start"},
+    "pro": {"max_jobs": 150, "max_gpu_hours": 50, "name": "Pro"},
+    "enterprise": {"max_jobs": -1, "max_gpu_hours": -1, "name": "Enterprise"},
+}
+
+
 def _load_plans() -> dict:
-    """Load pricing plans from plans.json or return sensible defaults."""
+    """Load pricing plans from `config/plans.json`, normalized for callers.
+
+    Single source of truth: on-disk plans use `max_jobs_per_month`, while the
+    gate and API read `max_jobs`. Every default plan is always present (merged),
+    so an unknown or partially specified plan can never silently inherit
+    unlimited quota. A negative `max_jobs` means unlimited.
+    """
     import json
     from pathlib import Path
-    plan_path = Path(__file__).parent / "plans.json"
+
+    plan_path = Path(__file__).resolve().parent / "config" / "plans.json"
+    loaded: dict = {}
     try:
         if plan_path.exists():
-            return json.loads(plan_path.read_text())
+            loaded = json.loads(plan_path.read_text())
     except Exception:
-        pass
-    # Sensible defaults
-    return {
-        "free": {"max_jobs": 10, "max_gpu_hours": 0, "name": "Free"},
-        "start": {"max_jobs": 50, "max_gpu_hours": 10, "name": "Start"},
-        "pro": {"max_jobs": 150, "max_gpu_hours": 50, "name": "Pro"},
-        "enterprise": {"max_jobs": -1, "max_gpu_hours": -1, "name": "Enterprise"},
-    }
+        logger.warning("plans.json unreadable at %s — using defaults", plan_path)
+        loaded = {}
+
+    plans = {name: dict(cfg) for name, cfg in _PLAN_DEFAULTS.items()}
+    for name, cfg in (loaded or {}).items():
+        if not isinstance(cfg, dict):
+            continue
+        entry = dict(cfg)
+        # On-disk plans express the quota as `max_jobs_per_month`; callers read
+        # `max_jobs`. Normalize before merging defaults so the on-disk value wins
+        # over the default instead of being shadowed by it.
+        if "max_jobs" not in entry and "max_jobs_per_month" in entry:
+            entry["max_jobs"] = entry["max_jobs_per_month"]
+        plans[name] = {**plans.get(name, {}), **entry}
+    return plans
 
 
 # ────────────────────────────────────────
@@ -1711,13 +1763,7 @@ def count_jobs_active_for_tenant(tenant_id: str) -> int:
         finally:
             c.close()
 
-def _load_plans() -> dict:
-    import json
-    try:
-        with open("plans.json", "r") as f:
-            return json.load(f)
-    except Exception:
-        return {"free": {"max_jobs": 10, "gpu": False}, "pro": {"max_jobs": 150, "gpu": True}}
+# (duplicate `_load_plans` removed — the plans loader above is the single source)
 
 def get_decision_record(decision_id: str) -> dict | None:
     if _pg_enabled():
@@ -1774,10 +1820,10 @@ def list_decision_records(tenant_id: str, result: str | None = None,
                         params.append(date_to)
 
                     where = " AND ".join(clauses)
-                    cur.execute(f"SELECT COUNT(*) FROM decision_records WHERE {where}", params)
+                    cur.execute(f"SELECT COUNT(*) FROM decision_records WHERE {where}", params)  # nosec B608 — SQL fragments are internal literals; all values are bound params
                     total = cur.fetchone()[0]
                     cur.execute(
-                        f"SELECT id, request_id, gate_result, gate_reason, estimated_cost, quota_remaining, decided_at FROM decision_records WHERE {where} ORDER BY decided_at DESC LIMIT %s OFFSET %s",
+                        f"SELECT id, request_id, gate_result, gate_reason, estimated_cost, quota_remaining, decided_at FROM decision_records WHERE {where} ORDER BY decided_at DESC LIMIT %s OFFSET %s",  # nosec B608 — SQL fragments are internal literals; all values are bound params
                         params + [limit, offset],
                     )
                     rows = [{"id": r[0], "request_id": r[1], "gate_result": r[2],
@@ -1803,9 +1849,9 @@ def list_decision_records(tenant_id: str, result: str | None = None,
                 clauses.append("decided_at <= ?")
                 params.append(date_to)
             where = " AND ".join(clauses)
-            total = c.execute(f"SELECT COUNT(*) FROM decision_records WHERE {where}", params).fetchone()[0]
+            total = c.execute(f"SELECT COUNT(*) FROM decision_records WHERE {where}", params).fetchone()[0]  # nosec B608 — SQL fragments are internal literals; all values are bound params
             rows = c.execute(
-                f"SELECT id, request_id, gate_result, gate_reason, estimated_cost, quota_remaining, decided_at FROM decision_records WHERE {where} ORDER BY decided_at DESC LIMIT ? OFFSET ?",
+                f"SELECT id, request_id, gate_result, gate_reason, estimated_cost, quota_remaining, decided_at FROM decision_records WHERE {where} ORDER BY decided_at DESC LIMIT ? OFFSET ?",  # nosec B608 — SQL fragments are internal literals; all values are bound params
                 params + [limit, offset],
             ).fetchall()
             return [{"id": r[0], "request_id": r[1], "gate_result": r[2],

@@ -27,7 +27,7 @@ def create_decision(
 
     gate = EnterpriseDecisionGate()
     decision = gate.evaluate(tenant_id, payload)
-    quota_remaining = max(decision.job_limit - db.count_jobs_active_for_tenant(tenant_id), 0)
+    quota_remaining = max(decision.job_limit - db.count_jobs_for_tenant_total(tenant_id), 0)
     estimated_cost_val = estimate_cost(payload)
 
     if decision.result == GateResult.DENIED:
@@ -97,7 +97,7 @@ def evaluate_decision(
 ) -> dict:
     gate = EnterpriseDecisionGate()
     decision = gate.evaluate(tenant_id, payload)
-    quota_remaining = max(decision.job_limit - db.count_jobs_active_for_tenant(tenant_id), 0)
+    quota_remaining = max(decision.job_limit - db.count_jobs_for_tenant_total(tenant_id), 0)
     estimated_cost_val = estimate_cost(payload)
 
     return {

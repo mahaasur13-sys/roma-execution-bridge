@@ -41,7 +41,13 @@ class SlurmPlugin:
         try:
             import paramiko
             self._ssh_client = paramiko.SSHClient()
-            self._ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            # Никакого AutoAddPolicy: непроверенный ключ хоста = MITM на кластер.
+            # Доверяем только known_hosts (системный + ~/.ssh/known_hosts).
+            self._ssh_client.load_system_host_keys()
+            user_known_hosts = Path.home() / ".ssh" / "known_hosts"
+            if user_known_hosts.exists():
+                self._ssh_client.load_host_keys(str(user_known_hosts))
+            self._ssh_client.set_missing_host_key_policy(paramiko.RejectPolicy())
             connect_kwargs = {"username": self.user, "timeout": 10}
             if self.ssh_key:
                 key_path = Path(self.ssh_key).expanduser()

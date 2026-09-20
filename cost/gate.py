@@ -40,12 +40,16 @@ class EnterpriseDecisionGate:
             return GateDecision(GateResult.DENIED, "tenant not found", tenant_id)
 
         plan = tenant.get("plan", "free")
-        plan_cfg = db._load_plans().get(plan, db._load_plans().get("free", {"max_jobs": 10}))
+        plans = db._load_plans()
+        plan_cfg = plans.get(plan, plans.get("free", {"max_jobs": 10}))
         max_jobs = plan_cfg.get("max_jobs", 10)
 
-        job_count = db.count_jobs_active_for_tenant(tenant_id)
+        # Quota is cumulative (plan = N jobs per period), not concurrency:
+        # `max_concurrent` is a separate, per-plan knob enforced elsewhere.
+        job_count = db.count_jobs_for_tenant_total(tenant_id)
 
-        if job_count >= max_jobs:
+        # Negative limit means "unlimited" (enterprise plans).
+        if max_jobs >= 0 and job_count >= max_jobs:
             return GateDecision(
                 GateResult.DENIED,
                 f"quota exceeded: {job_count}/{max_jobs} jobs",

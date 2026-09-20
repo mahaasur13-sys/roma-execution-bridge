@@ -77,10 +77,17 @@ def init_db(conn) -> None:
     cur.execute("""
         CREATE TABLE IF NOT EXISTS workers (
             id TEXT PRIMARY KEY, tenant_id TEXT DEFAULT '', status TEXT DEFAULT 'idle',
-            drained BOOLEAN DEFAULT false, created_at TIMESTAMP DEFAULT now(),
+            drained BOOLEAN DEFAULT false,
+            capabilities JSONB DEFAULT '{}'::jsonb,
+            last_heartbeat TIMESTAMPTZ,
+            created_at TIMESTAMP DEFAULT now(),
             updated_at TIMESTAMP DEFAULT now()
         )
     """)
+    # Legacy clusters have `workers` without these columns (register_worker writes
+    # both) — keep the bootstrap idempotent instead of failing on an old schema.
+    cur.execute("ALTER TABLE workers ADD COLUMN IF NOT EXISTS capabilities JSONB DEFAULT '{}'::jsonb")
+    cur.execute("ALTER TABLE workers ADD COLUMN IF NOT EXISTS last_heartbeat TIMESTAMPTZ")
     cur.execute("""
         CREATE TABLE IF NOT EXISTS submit_idempotency_keys (
             tenant_id TEXT NOT NULL,

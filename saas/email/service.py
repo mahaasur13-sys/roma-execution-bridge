@@ -139,7 +139,16 @@ class EmailService:
     def __init__(self, provider=EmailProvider.CONSOLE, smtp_host="smtp.gmail.com", smtp_port=587, smtp_user="", smtp_password="", from_email="noreply@roma.ai", from_name="ROMA Platform", sendgrid_api_key="", resend_api_key="", resend_domain=""):
         self.cfg = EmailConfig(provider=provider, smtp_host=smtp_host, smtp_port=smtp_port, smtp_user=smtp_user, smtp_password=smtp_password, from_email=from_email, from_name=from_name, sendgrid_api_key=sendgrid_api_key, resend_api_key=resend_api_key, resend_domain=resend_domain)
         if _HAS_JINJA2:
-            self._env = jinja2.Environment()
+            # autoescape обязателен: шаблоны — HTML-письма, а значения приходят
+            # из пользовательских данных (tenant_name, invoice_id, URL).
+            # Без него это B701 / HTML-инъекция в письмо.
+            self._env = jinja2.Environment(
+                autoescape=jinja2.select_autoescape(
+                    enabled_extensions=("html", "htm", "xml"),
+                    default_for_string=True,
+                    default=True,
+                )
+            )
             self._templates = {name: self._env.from_string(src) for name, src in TEMPLATES.items()}
         else:
             self._env = None

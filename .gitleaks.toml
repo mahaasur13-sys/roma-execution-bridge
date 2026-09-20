@@ -18,5 +18,11 @@ regexes = [
   '''wrong-key''',
   '''sk_test_placeholder''',
   '''whsec_placeholder''',
-  '''VASTAI_API_KEY=\s*VASTAI_DEFAULT_GPU=''',
+  # `.env.example` ships the pair `VASTAI_API_KEY=` + `VASTAI_DEFAULT_GPU=<model>`.
+  # generic-api-key matches across the newline, so the allowlist must cover the
+  # same span (the old pattern required a `VASTAI_API_KEY=` prefix and never fired).
+  '''API_KEY=\s*\n?VASTAI_DEFAULT_GPU=''',
+  # Placeholder Stripe keys in `deploy/vault/scripts/vault-init.sh` (literal X's).
+  '''sk_live_X+''',
+  '''sk_test_X+''',
 ]

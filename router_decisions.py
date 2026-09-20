@@ -58,7 +58,7 @@ async def create_decision(payload: dict, x_api_key: str = Header(None)):
 
     db.insert_decision_request(rid, tenant_id, request_type, pay, idem_key)
     db.insert_decision_record(did, rid, tenant_id, decision.result.value, decision.reason,
-                              decision.job_limit - db.count_jobs_active_for_tenant(tenant_id),
+                              decision.job_limit - db.count_jobs_for_tenant_total(tenant_id),
                               decision.cost_estimated, "default")
 
     write_audit_event(tenant_id,

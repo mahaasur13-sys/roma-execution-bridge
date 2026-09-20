@@ -1,12 +1,13 @@
-"""Тесты для L4 debit_if_funds (атомарный дебит) — образец для ROMA.
+"""Тесты для L4 debit_if_funds (атомарный дебит, CTE + advisory-lock).
 
-Копировать в ~/roma-execution-bridge/tests/ ПОСЛЕ наката (не сейчас).
 Запуск:
   cd ~/roma-execution-bridge
   .venv/bin/python -m pytest tests/test_ledger_atomicity.py -q
 
-Первые 4 теста — юнит (мок _pg_execute, без PG).
-Последний — проверка триггера append-only (нужен PG_DSN; иначе skip, мутаций нет — ROLLBACK).
+Первые 4 теста — юнит: мокается `_txn` (единственный путь в PG внутри
+`debit_if_funds`), поэтому PG не нужен. Мок `_pg_execute` здесь бесполезен —
+этим путём дебет не ходит.
+Последний — проверка триггера append-only (нужен PG_DSN; иначе skip).
 """
 import pytest
 
@@ -21,7 +22,7 @@ def ledger():
 
 def test_insufficient_funds_returns_none(ledger, monkeypatch):
     """Недостаточно средств (CTE вставил 0 строк) → None, fallback не пишем."""
-    monkeypatch.setattr(ledger, "_pg_execute", lambda *a, **k: [])
+    monkeypatch.setattr(ledger, "_txn", lambda *a, **k: [])
     assert ledger.debit_if_funds("t-test", 1.0) is None
     # fail-closed: in-memory fallback НЕ должен пополниться
     assert ledger._entries == []
@@ -34,13 +35,19 @@ def test_success_micro_debit_returns_ledger_id(ledger, monkeypatch):
 
 
 def test_pg_down_fails_closed(ledger, monkeypatch):
-    """PG недоступен → None (минус не пишется)."""
+    """PG недоступен → исключение наружу, минус в fallback НЕ пишется.
+
+    L4 fail-closed: вызывающий код (execution_worker, public_jobs) превращает
+    PGUnavailableError в 503, а не в «дебет прошёл».
+    """
 
     def boom(*a, **k):
         raise PGUnavailableError("pg down")
 
-    monkeypatch.setattr(ledger, "_pg_execute", boom)
-    assert ledger.debit_if_funds("t-test", 1.0) is None
+    monkeypatch.setattr(ledger, "_txn", boom)
+    with pytest.raises(PGUnavailableError):
+        ledger.debit_if_funds("t-test", 1.0)
+    assert ledger._entries == []
 
 
 def test_sql_has_balance_guard_and_same_columns(ledger, monkeypatch):

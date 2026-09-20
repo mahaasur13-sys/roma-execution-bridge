@@ -16,6 +16,27 @@ API_BASE = "http://localhost:8000"
 class ROMAException(Exception):
     pass
 
+class ATOMClusterJob:
+    """Handle of a job submitted in ATOMCluster managed mode.
+
+    Wraps the raw API payload; `job_id` and item access are provided so callers
+    do not have to know the payload shape.
+    """
+
+    def __init__(self, payload: Dict[str, Any]):
+        self.payload = payload
+
+    @property
+    def job_id(self) -> str:
+        return self.payload.get("job_id", "")
+
+    def __getitem__(self, key: str) -> Any:
+        return self.payload[key]
+
+    def __repr__(self) -> str:
+        return f"ATOMClusterJob(job_id={self.job_id!r})"
+
+
 @dataclass
 class ROMAJob:
     job_id: str
@@ -74,13 +95,18 @@ class ROMAClient:
         resp = requests.get(f"{self.base_url}/health")
         return resp.status_code == 200
 
-if __name__ == "__main__":
-    client = ROMAClient()
-    print("ROMA SDK ready. Usage: client.submit('train YOLOv8')")    def submit_atom_cluster(self, task: str, cluster_spec: dict) -> "ATOMClusterJob":
+    def submit_atom_cluster(self, task: str, cluster_spec: dict) -> ATOMClusterJob:
         """Submit execution as ATOMCluster managed job."""
         resp = requests.post(f"{self.base_url}/submit", json={
             "task": task,
             "execution_mode": "atom_cluster",
-            "cluster_spec": cluster_spec
+            "cluster_spec": cluster_spec,
         })
+        if resp.status_code >= 400:
+            raise ROMAException(f"HTTP {resp.status_code}: {resp.text}")
         return ATOMClusterJob(resp.json())
+
+
+if __name__ == "__main__":
+    client = ROMAClient()
+    print("ROMA SDK ready. Usage: client.submit('train YOLOv8')")
