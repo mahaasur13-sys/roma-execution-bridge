@@ -1,7 +1,27 @@
 {
-  "global_floor": 24.4,
-  "money_floor": 48.1,
-  "ratchet_rule": "floors may only be raised; lowering requires an explicit, reviewed diff to this file",
+  "global_floor": 31.7,
+  "money_floor": 48.9,
+  "ratchet_rule": "floors may only be raised: понижение требует явного reviewed-диффа этого файла И отклоняется механически — ci/coverage_gate.sh сверяет текущий пол с floor_history и падает при понижении",
+  "floor_history": [
+    {
+      "date": "2026-09-21",
+      "global_floor": 24.4,
+      "money_floor": 48.1,
+      "fact_global_pct": 24.45,
+      "fact_money_pct": 48.13,
+      "commit": "e16e354/434fb54/85a171b (Ш5 scope correction: область product-only)",
+      "reason": "перебазирование пола: тесты больше не считаются покрытием продукта"
+    },
+    {
+      "date": "2026-09-21",
+      "global_floor": 31.7,
+      "money_floor": 48.9,
+      "fact_global_pct": 31.732,
+      "fact_money_pct": 48.94,
+      "commit": "74ade31 (A-6: в область измерения вошёл scripts/ci_run_completeness.py — +101 оператор, 90 покрыто)",
+      "reason": "A-7: пол = машинный факт единственного прогона, отсечение ВНИЗ (31.732 -> 31.7; 48.940 -> 48.9). Запас продукта 0.034 п.п. (~5 покрытых строк)"
+    }
+  ],
   "scope": {
     "include": [
       "alerts",
@@ -163,6 +183,13 @@
       "total_lines": "3840/15703",
       "money_lines": "477/991",
       "note": "Ш5: явная область product-only (tests/ исключён). Прежние 32.42% — whole-repo, справочная величина."
+    },
+    "2026-09-21-a7": {
+      "total_pct": 31.73,
+      "money_path_pct": 48.94,
+      "total_lines": "4902/15448",
+      "money_lines": "485/991",
+      "note": "A-7: факт после A-6 (74ade31) — в область измерения вошёл scripts/ci_run_completeness.py; пол поднят 24.4 -> 31.7 и 48.1 -> 48.9"
     }
   }
 }

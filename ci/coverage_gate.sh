@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
 # P1-D coverage ratchet gate.
 #
-# Замер 2026-09-21:
-#   product-only 24.45%  (3840/15703 stmts)   ← область гейта (floor 24.4)
-#   whole-repo   32.42%  (5766/17784)         ← справочно, печатается для аудита дрейфа
-#   money path   48.13%  (477/991)            — billing/* + ledger/idempotency
+# Замер 2026-09-21 (A-7: факт из единственного прогона 74ade31):
+#   product-only 31.732% (4902/15448 stmts)  ← область гейта (floor 31.7, отсечение ВНИЗ)
+#   whole-repo   42.476% (7994/18820)         ← справочно, печатается для аудита дрейфа
+#   money path   48.940% (485/991)            — billing/* + ledger/idempotency (floor 48.9)
+#   запас до пола: 0.034 п.п. продукта (~5 покрытых строк) — новый непокрытый код уронит гейт, это ожидаемо
 #   lowest: billing/metering.py, billing/invoicing.py, billing/stripe_client.py,
 #           billing/aggregator.py — 0% (не покрыты ни одним тестом)
 #
 # Правило: порог НИКОГДА не понижается. Поднимать — только вместе с новыми тестами.
+# A-7: храповик проверяется МЕХАНИЧЕСКИ — текущий пол сверяется с floor_history
+# thresholds-файла; понижение или отсутствие истории = exit 3 (fail-closed).
+# Рычаги (все печатаются в лог, молчаливых дефолтов нет):
+#   SCOPE_MODE=product|whole · RUN_MODE=repo-wide|narrow · THRESHOLDS=<path>
+#   MEASUREMENT_DIR=<dir> — внешнее измерение (roma_cov.json + roma_junit.xml), pytest НЕ запускается
 #
 # T4 fail-closed fix (2026-09-21):
 #   * путь к порогам — относительно самого скрипта (был CWD-зависимый ".ci/...":
@@ -36,7 +42,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-THRESHOLDS="$REPO_ROOT/.ci/coverage-thresholds.json"
+THRESHOLDS="${THRESHOLDS:-$REPO_ROOT/.ci/coverage-thresholds.json}"  # A-7: переопределяемо для негативов
 
 # CWD-гигиена (A1/Ф0.4): гейт обязан работать из любого каталога, а pytest —
 # видеть tests/ и конфиг корня репозитория, а не каталог вызова.
@@ -80,6 +86,36 @@ PYEOF
 FILE_GLOBAL="$(read_floor global_floor)" || fail "invalid global_floor in $THRESHOLDS"
 FILE_MONEY="$(read_floor money_floor)" || fail "invalid money_floor in $THRESHOLDS"
 
+# A-7: храповик полов — механическая проверка «порог может только расти».
+# floor_history обязана быть непустой: без неё храповик нечем подтвердить, а понижение
+# пола прошло бы молча. И то и другое — fail-closed.
+RATCHET_OUT="$("$PY" - "$THRESHOLDS" "$FILE_GLOBAL" "$FILE_MONEY" <<'PYEOF'
+import json
+import sys
+
+path, cur_global, cur_money = sys.argv[1], float(sys.argv[2]), float(sys.argv[3])
+data = json.load(open(path, encoding="utf-8"))
+hist = data.get("floor_history")
+if not isinstance(hist, list) or not hist:
+    print(f"RATCHET: FAILED -> в {path} нет непустого floor_history: храповик нечем подтвердить")
+    raise SystemExit(3)
+max_global = max(float(h["global_floor"]) for h in hist)
+max_money = max(float(h["money_floor"]) for h in hist)
+if cur_global < max_global or cur_money < max_money:
+    print(
+        f"RATCHET: FAILED -> понижение пола: текущие {cur_global}/{cur_money} "
+        f"< исторического максимума {max_global}/{max_money}"
+    )
+    raise SystemExit(3)
+print(
+    f"RATCHET   : OK · floors {cur_global}/{cur_money} >= исторического максимума "
+    f"{max_global}/{max_money} (записей: {len(hist)})"
+)
+PYEOF
+)"
+if [ $? -ne 0 ]; then echo "$RATCHET_OUT" >&2; exit 3; fi
+echo "$RATCHET_OUT"
+
 GLOBAL_FLOOR="${GLOBAL_FLOOR:-$FILE_GLOBAL}"
 MONEY_FLOOR="${MONEY_FLOOR:-$FILE_MONEY}"
 case "$GLOBAL_FLOOR" in ''|*[!0-9.]*) fail "global_floor is not numeric: '$GLOBAL_FLOOR'";; esac
@@ -95,10 +131,23 @@ run_scope() {  # A-2 (N7b): область ПРОГОНА обязана быт�
 RUN_MODE="${RUN_MODE:-repo-wide}"
 if [ "$RUN_MODE" = "narrow" ]; then RUN_TARGET="tests/"; else RUN_TARGET="."; fi
 
-rm -f "$JSON_OUT" "$JUNIT_OUT"
-"$PY" -m pytest $RUN_TARGET -q -p no:cacheprovider -p no:warnings \
-  --cov=. --cov-report="json:$JSON_OUT" --junitxml="$JUNIT_OUT" >"$RUN_LOG" 2>&1
-PYTEST_STATUS=$?
+MEASUREMENT_DIR="${MEASUREMENT_DIR:-}"  # A-7: внешнее измерение (негативный/локальный рычаг), pytest не запускается
+if [ -n "$MEASUREMENT_DIR" ]; then
+  # Явно и без молчания: оба артефакта обязаны быть на месте, иначе проверка полноты
+  # по junitxml выпадет тихо и «зелено» станет ложью.
+  JSON_OUT="$MEASUREMENT_DIR/roma_cov.json"
+  JUNIT_OUT="$MEASUREMENT_DIR/roma_junit.xml"
+  RUN_LOG="$MEASUREMENT_DIR/roma_cov_run.log"
+  [ -s "$JSON_OUT" ] || fail "MEASUREMENT_DIR=$MEASUREMENT_DIR: нет roma_cov.json"
+  [ -s "$JUNIT_OUT" ] || fail "MEASUREMENT_DIR=$MEASUREMENT_DIR: нет roma_junit.xml (проверка полноты обязана иметь машинный источник)"
+  PYTEST_STATUS=0
+  echo "measurement: ВНЕШНЕЕ измерение из $MEASUREMENT_DIR — pytest НЕ запускался (рычаг негативных/локальных прогонов)"
+else
+  rm -f "$JSON_OUT" "$JUNIT_OUT"
+  "$PY" -m pytest $RUN_TARGET -q -p no:cacheprovider -p no:warnings \
+    --cov=. --cov-report="json:$JSON_OUT" --junitxml="$JUNIT_OUT" >"$RUN_LOG" 2>&1
+  PYTEST_STATUS=$?
+fi
 
 # A-6: полнота набора из МАШИННОГО источника (junitxml одного прогона).
 # collected == executed (нулевое расхождение) + точное равенство канону:
