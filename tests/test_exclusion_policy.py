@@ -88,3 +88,52 @@ def test_exclusions_are_not_expired() -> None:
                 f"issue={entry.get('issue')}) — починить или продлить осознанно"
             )
     assert not expired, "\n  ".join(["просроченные исключения:"] + expired)
+
+# ---------------------------------------------------------------------------
+# A-3 (N7c/N7d): политика исключений обязана покрывать не только --ignore,
+# но и xfail. Иначе зелёный CI скрывает сломанную функциональность ровно так же,
+# как её скрывал безымянный --ignore.
+# ---------------------------------------------------------------------------
+
+XFAIL_RE = re.compile(r"@pytest\.mark\.xfail\((?P<body>.*?)\n\s{0,8}\)", re.DOTALL)
+XFAIL_FILES = sorted(
+    [p for p in REPO_ROOT.rglob("test_*.py") if ".venv" not in p.parts]
+)
+
+
+def audit_xfail_blocks(text: str) -> list[str]:
+    """Проверяет ОДИН блок xfail. Вынесено отдельно, чтобы негатив мог её вызвать."""
+    problems = []
+    if "strict=True" not in text:
+        problems.append("xfail без strict=True: при починке молча станет XPASS и дефект потеряется")
+    if not re.search(r"issue:\s*\S+", text):
+        problems.append("xfail без issue-id")
+    m = re.search(r"expiry:\s*(\d{4}-\d{2}-\d{2})", text)
+    if not m:
+        problems.append("xfail без expiry (YYYY-MM-DD)")
+    else:
+        try:
+            if dt.date.fromisoformat(m.group(1)) <= dt.date.today():
+                problems.append(f"xfail просрочен (expiry={m.group(1)}) — починить или продлить осознанно")
+        except ValueError:
+            problems.append(f"xfail expiry не дата: {m.group(1)!r}")
+    return problems
+
+
+def test_every_xfail_has_issue_expiry_and_strict() -> None:
+    offenders = []
+    for path in XFAIL_FILES:
+        for block in XFAIL_RE.finditer(path.read_text(encoding="utf-8")):
+            for problem in audit_xfail_blocks(block.group("body")):
+                offenders.append(f"{path.relative_to(REPO_ROOT)}: {problem}")
+    assert not offenders, "xfail без тройки reason·issue·expiry или без strict:\n  " + "\n  ".join(offenders)
+
+
+def test_xfail_policy_can_actually_fail() -> None:
+    """НЕГАТИВ (доктрина: у каждого детектора есть негативный тест, иначе его не существует)."""
+    bad = 'reason=("R-5: что-то сломано", ),'
+    problems = audit_xfail_blocks(bad)
+    assert len(problems) >= 3, f"детектор xfail не сработал на заведомо плохом блоке: {problems}"
+    good = 'strict=True, reason=("issue: P1-A · expiry: 2099-01-01 · причина",)'
+    assert audit_xfail_blocks(good) == [], "детектор xfail ложно краснеет на корректном блоке"
+

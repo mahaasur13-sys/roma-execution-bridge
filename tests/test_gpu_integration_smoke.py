@@ -156,7 +156,7 @@ def test_cost_gate_contract_holds() -> None:
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "R-5b: route_job вызывает EnterpriseDecisionGate.evaluate(task=..., "
+        "issue: P1-B · expiry: 2026-10-05 · R-5b: route_job вызывает EnterpriseDecisionGate.evaluate(task=..., "
         "gpu_required=..., plugin_type=...), сигнатура — (tenant_id, payload). "
         "Каждый submit/execute_job падает TypeError. Ждёт GO владельца."
     ),

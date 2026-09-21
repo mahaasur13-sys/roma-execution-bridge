@@ -83,9 +83,9 @@ class TestGatewayIntegration:
         assert resp.json()["display_name"] == "ACME Corp"
 
     @pytest.mark.xfail(
-        strict=False,
+        strict=True,
         reason=(
-            "R-5c/Г1: AuthMiddleware исполняется РАНЬШЕ TenantMiddleware "
+            "issue: P1-A · expiry: 2026-10-05 · R-5c/Г1: AuthMiddleware исполняется РАНЬШЕ TenantMiddleware "
             "(в Starlette последний add_middleware = самый внешний), поэтому "
             "tenant_id=None в момент проверки → auth_cfg=None → require_api_key "
             "не проверяется и защищённый роут отдаёт 200. Ждёт GO владельца."
