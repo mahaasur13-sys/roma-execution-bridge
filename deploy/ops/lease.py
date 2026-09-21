@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A-0: протокол аренды писателя — с маркерами сессий, которые реально обновляются.
+"""A-0/P-LEASE-3: протокол аренды писателя — с маркерами сессий, которые реально обновляются.
 
 Зачем (дефект P-3 из реестра аудитора): маркер `.sessions/<uuid>.json` писался один раз
 при захвате и НЕ обновлялся вместе с heartbeat. Из-за этого `last_seen` «застывал»,
@@ -10,7 +10,12 @@
   * любая запись — под `flock` и атомарно (`tmp` + `os.replace`);
   * `heartbeat` обновляет `heartbeat_at` в аренде И `last_seen`/`pid`/`boot_id` в маркере;
   * `fencing_token` увеличивается ТОЛЬКО при захвате (`capture`), не при heartbeat;
-  * `guard` блокирует запись, если свежих маркеров (< ttl) больше одного, и требует эскалации.
+  * `guard` блокирует запись, если свежих маркеров (< ttl) больше одного, и требует эскалации;
+  * P-LEASE-3: право перезахвата даёт ТОЛЬКО истёкший TTL, а не отсутствующий PID.
+    `capture` под тем же `flock` и ДО любых изменений проверяет heartbeat/TTL и свежий чужой
+    маркер: живая чужая аренда или неразбираемый heartbeat → exit 3, аренда/маркеры побайтово
+    неизменны и новый маркер не создаётся; протухшая аренда → ровно один захват с token+1;
+    держатель со своим `instance_id` продлевает СВОЮ аренду.
 
 CLI:
     lease.py capture [instance_id]   # захват: token+1, новый/заданный instance_id, маркер
@@ -39,7 +44,7 @@ SCOPE = [
 
 
 class CollisionError(RuntimeError):
-    """Свежих маркеров больше одного — писать нельзя никому (эскалация владельцу)."""
+    """Писать нельзя: свежих маркеров больше одного, живая чужая аренда или повреждённое состояние."""
 
 
 def utcnow() -> datetime.datetime:
@@ -70,6 +75,51 @@ def read_json(path: pathlib.Path) -> dict:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
+
+
+def read_state_strict(path: pathlib.Path) -> dict:
+    """Строгое чтение аренды для решения о захвате.
+
+    Отсутствие файла = `{}` (первый захват). Побитый/нечитаемый JSON — ОТКАЗ (fail-closed):
+    иначе повреждённая аренда выглядела бы как «свободно», и перо забиралось бы молча.
+    """
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise CollisionError(
+            f"CAPTURE REFUSED: {path} не читается/не разбирается ({exc.__class__.__name__}) — "
+            "состояние аренды повреждено (fail-closed); token/аренда/маркеры не изменены."
+        ) from exc
+    if not isinstance(data, dict):
+        raise CollisionError(
+            f"CAPTURE REFUSED: {path} — не объект JSON (fail-closed); token/аренда/маркеры не изменены."
+        )
+    return data
+
+
+def parse_heartbeat_at(value) -> datetime.datetime:
+    """Строгий разбор `heartbeat_at`.
+
+    Пустое/неразбираемое значение — ОТКАЗ, а не «протухшая аренда»: право перезахвата
+    определяется только разбираемым heartbeat, иначе повреждённое поле молча открыло бы перо.
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise CollisionError(
+            f"CAPTURE REFUSED: heartbeat_at={value!r} пуст или не строка — аренда повреждена "
+            "(fail-closed); token/аренда/маркеры не изменены."
+        )
+    try:
+        ts = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise CollisionError(
+            f"CAPTURE REFUSED: heartbeat_at={value!r} не разбирается ({exc.__class__.__name__}) — "
+            "аренда повреждена (fail-closed); token/аренда/маркеры не изменены."
+        ) from exc
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=datetime.timezone.utc)
+    return ts
 
 
 def marker_path(sessions_dir: pathlib.Path, instance_id: str) -> pathlib.Path:
@@ -148,6 +198,8 @@ class Lease:
         self.lease_path = self.dir / ".writer_lease.json"
         self.lock_path = self.dir / ".writer_lease.lock"
         self.ttl_min = ttl_min
+        # явные области измерения последней попытки захвата (печатаются в CLI, «ничего неявного»)
+        self.capture_checks: dict = {}
 
     @property
     def state(self) -> dict:
@@ -159,10 +211,63 @@ class Lease:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         return handle
 
+    def _assert_capture_allowed(self, state: dict, requested: str | None, iid: str) -> dict:
+        """P-LEASE-3: проверки права захвата ДО любых изменений (под тем же flock).
+
+        Возвращает явный отчёт о применённых проверках; при отказе бросает CollisionError
+        (CLI exit 3), не создавая маркер и не переписывая аренду.
+        """
+        ttl = self.ttl_min
+        checks: dict = {
+            "ttl_min": ttl,
+            "holder": state.get("instance_id"),
+            "requested_instance": requested or f"(new {iid})",
+        }
+        if not state:
+            checks.update({"lease": "absent", "heartbeat_age_min": None, "fresh_foreign_markers": 0})
+            self.capture_checks = checks
+            return checks
+
+        hb = state.get("heartbeat_at")
+        age_min = round((utcnow() - parse_heartbeat_at(hb)).total_seconds() / 60, 1)
+        checks.update({"heartbeat_at": hb, "heartbeat_age_min": age_min})
+        holder = state.get("instance_id")
+        foreign = {
+            iid_: data
+            for iid_, data in fresh_markers(self.sessions, ttl).items()
+            if iid_ not in {holder, iid}
+        }
+        checks["fresh_foreign_markers"] = len(foreign)
+
+        if age_min <= ttl:
+            if not (requested and requested == holder):
+                raise CollisionError(
+                    "CAPTURE REFUSED: аренда жива — heartbeat_age=%.1fmin <= ttl=%dmin, holder=%s, "
+                    "requested=%s. Право перезахвата даёт ТОЛЬКО истёкший TTL (или явный stand-down "
+                    "владельца); token/аренда/маркеры не изменены."
+                    % (age_min, ttl, holder, requested or f"(new {iid})")
+                )
+            if foreign:
+                raise CollisionError(_collision_message({holder: state, **foreign}))
+            checks["lease"] = f"live-own(holder={holder})"
+            self.capture_checks = checks
+            return checks
+
+        checks["lease"] = f"stale(heartbeat_age={age_min}min > ttl={ttl}min)"
+        if foreign:
+            raise CollisionError(
+                "CAPTURE REFUSED: аренда протухла, но свежие чужие маркеры сессий живы: %s. "
+                "Писать нельзя никому — эскалация владельцу; token/аренда/маркеры не изменены."
+                % ", ".join(sorted(foreign))
+            )
+        self.capture_checks = checks
+        return checks
+
     def capture(self, instance_id: str | None = None, *, task: str = "", status: str = "") -> dict:
+        iid = instance_id or str(uuid.uuid4())
         with self._locked():
-            old = self.state
-            iid = instance_id or str(uuid.uuid4())
+            old = read_state_strict(self.lease_path)
+            self._assert_capture_allowed(old, instance_id, iid)
             payload = {
                 "conversation_id": old.get("conversation_id", ""),
                 "instance_id": iid,
@@ -224,7 +329,7 @@ class Lease:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="Lease v2 (A-0): аренда писателя + маркеры сессий")
+    ap = argparse.ArgumentParser(description="Lease v2 (A-0/P-LEASE-3): аренда писателя + маркеры сессий")
     ap.add_argument("command", choices=("capture", "heartbeat", "status", "guard"))
     ap.add_argument("instance_id", nargs="?", default=None)
     ap.add_argument("--artifacts-dir", default=str(DEFAULT_ARTIFACTS_DIR))
@@ -235,7 +340,20 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "capture":
             state = lease.capture(args.instance_id)
+            checks = lease.capture_checks
             print(f"LEASED instance_id={state['instance_id']} fencing_token={state['fencing_token']}")
+            print(
+                "checks: lease={lease} · heartbeat_age_min={heartbeat_age_min} · ttl_min={ttl_min} "
+                "· requested={requested_instance} · fresh_foreign_markers={fresh_foreign_markers}".format(
+                    **{
+                        "lease": checks.get("lease"),
+                        "heartbeat_age_min": checks.get("heartbeat_age_min"),
+                        "ttl_min": checks.get("ttl_min"),
+                        "requested_instance": checks.get("requested_instance"),
+                        "fresh_foreign_markers": checks.get("fresh_foreign_markers"),
+                    }
+                )
+            )
             print(f"marker: {lease.sessions / (state['instance_id'] + '.json')}")
             return 0
         if args.command == "heartbeat":
