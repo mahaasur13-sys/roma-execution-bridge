@@ -126,6 +126,8 @@ import fnmatch, json, sys
 
 path, global_floor, money_floor = sys.argv[1], float(sys.argv[2]), float(sys.argv[3])
 scope_path, mode = sys.argv[4], sys.argv[5]
+RUN_SCOPE_NOTE = sys.argv[6] if len(sys.argv) > 6 else "?"
+THRESHOLD_SHA = sys.argv[7] if len(sys.argv) > 7 else "?"
 d = json.load(open(path))
 files = d["files"]
 thr = json.load(open(scope_path))
@@ -194,8 +196,17 @@ money = {k: v for k, v in files.items()
 m_pct, m_c, m_s = agg(money)
 
 shown = ", ".join(include)
-print(f"SCOPE      : product-only · {len(include)} entries · exclude={exclude or '[]'}")
-print(f"             {shown[:150]}{' …' if len(shown) > 150 else ''}")
+hist = thr.get("scope_history") or []
+print("=== MEASUREMENT SCOPE (A-5: три области одним блоком) ===")
+print(f"COVERAGE SCOPE : product-only · {len(include)} entries · exclude={exclude or '[]'}")
+print(f"             include: {shown[:150]}{' …' if len(shown) > 150 else ''}")
+print(f"             exclude: {', '.join(exclude) if exclude else '[]'}")
+print(f"RUN SCOPE     : repo-wide ({RUN_SCOPE_NOTE})")
+print(f"THRESHOLDS    : {scope_path}")
+print(f"             sha256={THRESHOLD_SHA}")
+print(f"SCOPE HISTORY : {len(hist)} записей · последняя {hist[-1].get('date', '?')} "
+      f"(scope: {hist[-1].get('scope') or hist[-1].get('total_pct', '?')})" if hist else "SCOPE HISTORY : 0 записей")
+print("=" * 56)
 print(f"TOTAL      : {prod_pct:.2f}% ({p_c}/{p_s}) floor {global_floor:.1f}   [scope: product-only]")
 print(f"TOTAL ref  : {whole_pct:.2f}% ({w_c}/{w_s})            [scope: whole-repo, справочно]")
 print(f"MONEY PATH : {m_pct:.2f}% ({m_c}/{m_s}) floor {money_floor:.1f}")
