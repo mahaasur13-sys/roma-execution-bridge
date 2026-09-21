@@ -8,8 +8,8 @@
 
 Здесь три уровня честности:
   1) инварианты, обязанные держаться БЕЗ GPU и БЕЗ env — исполняются всегда;
-  2) сломанный путь исполнителя помечен xfail(strict=True): дефект виден в CI
-     (strict: когда починят — тест начнёт падать, то есть дефект нельзя «забыть»);
+  2) путь исполнителя (route_job) — обычная проверка контракта решения; дефект P1-B
+     закрыт 2026-09-21 (evaluate(tenant_id, payload) по фактической сигнатуре);
   3) живой GPU-воркер — только по явному ROMA_GPU_LIVE=1, иначе skip с reason+issue.
 """
 
@@ -153,14 +153,6 @@ def test_cost_gate_contract_holds() -> None:
     assert decision.reason
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "issue: P1-B · expiry: 2026-10-05 · R-5b: route_job вызывает EnterpriseDecisionGate.evaluate(task=..., "
-        "gpu_required=..., plugin_type=...), сигнатура — (tenant_id, payload). "
-        "Каждый submit/execute_job падает TypeError. Ждёт GO владельца."
-    ),
-)
 def test_job_submit_path_returns_route() -> None:
     """Документированный путь submit обязан вернуть маршрут, а не исключение."""
     import asyncio

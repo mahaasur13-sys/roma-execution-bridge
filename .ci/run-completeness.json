@@ -3,10 +3,10 @@
   "rule": "collected == executed (нулевое расхождение) И collected/passed/failures/errors/skipped == canon. Проверяет scripts/ci_run_completeness.py, вызывается из ci/coverage_gate.sh и из CI-шага scripts/ci_junit_smoke.py. Прежний порог 'collected >= 244' пропускал исчезновение 19 тестов — заменён точным равенством.",
   "canon": {
     "collected": 281,
-    "passed": 274,
+    "passed": 275,
     "failures": 0,
     "errors": 0,
-    "skipped": 7,
+    "skipped": 6,
     "measured_on": "2026-09-21",
     "run_scope": "repo-wide (target=., pytest -q -p no:cacheprovider -p no:warnings)"
   },
@@ -57,7 +57,19 @@
       },
       "reason": "R5-gateway-auth: снят xfail P1-A (обход аутентификации устранён перестановкой middleware) и добавлен негатив «двойник публичного пути → 401»; collected 280 -> 281, skipped 8 -> 7.",
       "note": "История: 254 -> 263 -> 270 -> 276 -> 280 -> 281. Полы покрытия не менялись (31.7 / 48.9)."
+    },
+    {
+      "date": "2026-09-21-r5b",
+      "canon": {
+        "collected": 281,
+        "passed": 275,
+        "skipped": 6,
+        "failures": 0,
+        "errors": 0
+      },
+      "reason": "R5b-ROUTING: route_job вызывает EnterpriseDecisionGate.evaluate(tenant_id, payload) по фактическому контракту; xfail P1-B снят. Набор не менялся: 274/7 -> 275/6.",
+      "note": "История набора: 254 -> 263 -> 270 -> 276 -> 280 -> 281. Полы покрытия не менялись (31.7 / 48.9)."
     }
   ],
-  "measurement": "280 (A-3b) + 1 негатив точного совпадения путей (R5-gateway-auth) = 281 · 281 - 7 skipped = 274 passed. Рост passed на 2: снят xfail P1-A (был skipped, стал passing) и добавлен тест-двойник пути."
+  "measurement": "281 (после R5-gateway-auth) · R5b-ROUTING: раскладка 275 passed + 6 skipped — xfail P1-B снят (тест стал обычным проходящим), набор не менялся. История набора: 254 -> 263 -> 270 -> 276 -> 280 -> 281."
 }

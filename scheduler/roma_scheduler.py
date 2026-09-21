@@ -10,7 +10,7 @@ from typing import Optional
 
 from scheduler.gpu_policy_engine_v2 import GPUPolicyEngineV2
 from gpu_worker.connector import get_gpu_connector
-from cost.gate import EnterpriseDecisionGate as DecisionGate
+from cost.gate import EnterpriseDecisionGate as DecisionGate, GateResult
 from cost.predictor import CostPredictor
 from queue_manager.queue_manager import QueueManager
 
@@ -56,18 +56,26 @@ class ROMAGPUScheduler:
             policy_engine=self.policy_engine
         )
 
-        gate_result = self.cost_gate.evaluate(
-            task=job.get("task_type", "default"),
-            gpu_required=gpu_required,
-            tenant_id=job.get("tenant_id", "default"),
-            plugin_type=job.get("plan_tier", "PRO")
-        )
+        # R5b: контракт EnterpriseDecisionGate.evaluate(tenant_id, payload) -> GateDecision;
+        # решение читается из полей dataclass, а не как из словаря ("REJECTED" контракт не отдаёт).
+        payload = {
+            "task": job.get("task_type", "default"),
+            "gpu_required": gpu_required,
+            "plugin_type": job.get("plan_tier", "PRO"),
+        }
+        if self.cost_gate is None:
+            gate_decision, gate_allowed, gate_reason = "disabled", True, "cost gate disabled"
+        else:
+            gate_result = self.cost_gate.evaluate(job.get("tenant_id", "default"), payload)
+            gate_decision = getattr(gate_result.result, "value", str(gate_result.result))
+            gate_allowed = gate_decision != GateResult.DENIED.value
+            gate_reason = gate_result.reason
 
         if gpu_required and self.gpu_connector.is_available():
-            if gate_result.get("decision") == "REJECTED":
+            if not gate_allowed:
                 return {
                     "status": "rejected",
-                    "reason": gate_result.get("reason"),
+                    "reason": gate_reason,
                     "estimated_cost": prediction.get("estimated_cost", 0)
                 }
             execution_target = "gpu_worker"
@@ -79,7 +87,7 @@ class ROMAGPUScheduler:
             "execution_target": execution_target,
             "job_id": job.get("job_id"),
             "estimated_cost": prediction.get("estimated_cost", 0),
-            "gate_decision": gate_result.get("decision")
+            "gate_decision": gate_decision
         }
 
     async def execute_job(self, job: dict) -> dict:
