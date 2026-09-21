@@ -1,7 +1,107 @@
 {
-  "global_floor": 32.4,
+  "global_floor": 24.4,
   "money_floor": 48.1,
   "ratchet_rule": "floors may only be raised; lowering requires an explicit, reviewed diff to this file",
+  "scope": {
+    "include": [
+      "alerts",
+      "audit",
+      "audit_events.py",
+      "auth",
+      "backends",
+      "billing",
+      "compiler",
+      "consistency",
+      "control_plane",
+      "cost",
+      "crypto_payments",
+      "dashboard",
+      "db.py",
+      "db_adapter.py",
+      "db_pg.py",
+      "db_pg_sync.py",
+      "decision_service.py",
+      "decision_store.py",
+      "deps.py",
+      "durability",
+      "ecosystem",
+      "env_loader.py",
+      "error_model.py",
+      "gpu_worker",
+      "ha",
+      "health_gpu.py",
+      "input_contract",
+      "k8s",
+      "local_worker.py",
+      "main.py",
+      "models",
+      "monitoring",
+      "observability",
+      "openapi_gen.py",
+      "operator_sdk",
+      "org",
+      "plugins",
+      "policy",
+      "policy_engine.py",
+      "policy_transition.py",
+      "queue_manager",
+      "rbac",
+      "reconciler",
+      "roma",
+      "roma_cli.py",
+      "roma_planner",
+      "roma_sdk.py",
+      "router_decisions.py",
+      "router_jobs.py",
+      "routers",
+      "routes",
+      "saas",
+      "saas_api",
+      "scheduler",
+      "scripts",
+      "support_chat",
+      "tenancy",
+      "test_ci.py",
+      "test_gpu_integration.py",
+      "tier_gate.py",
+      "tier_profiles.py",
+      "validator",
+      "white_label.py",
+      "worker.py"
+    ],
+    "exclude": [
+      "tests/"
+    ],
+    "note": "product-only: явный список продуктовых путей; tests/ исключён явно. Замена неявного --cov=. (Ш5)."
+  },
+  "money_scope": {
+    "prefixes": [
+      "billing/"
+    ],
+    "name_contains": [
+      "ledger",
+      "idempotenc"
+    ],
+    "exclude_prefixes": [
+      "tests/"
+    ]
+  },
+  "scope_history": [
+    {
+      "date": "2026-09-21",
+      "scope": "whole-repo (--cov=. без явной области)",
+      "total_pct": 32.42,
+      "commit": "03c7361",
+      "reason": "A5: floor поднят в области, включавшей 2081 стмт tests/ (92.55% покрытие тестов самих себя)."
+    },
+    {
+      "date": "2026-09-21",
+      "scope": "product-only (явный include, tests/ исключён)",
+      "total_pct": 24.45,
+      "commit": "этот коммит",
+      "reason": "Ш5 scope correction: КОРРЕКЦИЯ ОБЛАСТИ, не понижение порога. money-path 48.13% не менялся."
+    }
+  ],
   "measured_on": {
     "2026-09-21": {
       "total_pct": 32.0,
@@ -15,6 +115,13 @@
       "total_lines": "5766/17784",
       "money_lines": "477/991",
       "note": "A1: инварианты больше не скипаются → знаменатель вырос (17560→17784), покрытие 32.1→32.4"
+    },
+    "2026-09-21-scope-correction": {
+      "total_pct": 24.45,
+      "money_path_pct": 48.13,
+      "total_lines": "3840/15703",
+      "money_lines": "477/991",
+      "note": "Ш5: явная область product-only (tests/ исключён). Прежние 32.42% — whole-repo, справочная величина."
     }
   }
 }
