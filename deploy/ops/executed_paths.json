@@ -30,6 +30,16 @@
       "probe_url": "http://127.0.0.1:3000/api/login",
       "why": "A4: без sealed-файла Grafana должна НЕ стартовать (exit 78). Проверяем shim, приоритет PATH, платформенный command и отсутствие дефолтного пароля",
       "platform_sealed": "/root/.sealed/grafana-admin.txt"
+    },
+    {
+      "name": "promtail-pg-watchdog",
+      "type": "promtail_config",
+      "live_path": "/__substrate/logging/promtail-config.yaml",
+      "canon_path": "deploy/monitoring/promtail-config.yaml",
+      "sha256_file": "deploy/monitoring/promtail-config.sha256",
+      "required_job": "pg_watchdog_persistent",
+      "required_job_label": "pg_watchdog",
+      "why": "R6: платформенный promtail-конфиг регенерируется и молча теряет джобу pg_watchdog_persistent — журнал сторожа /var/lib/pg-watchdog/watchdog.log перестаёт доходить до Loki (поток job=pg_watchdog)"
     }
   ]
 }

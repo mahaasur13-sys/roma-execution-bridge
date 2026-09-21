@@ -2,8 +2,8 @@
   "note": "A-6: канон полноты набора тестов. Числа — машинный факт последнего repo-wide прогона (junitxml), не оценка. Порог никогда не понижается: любое отличие от факта прогона роняет гейт, обновление — только явным диффом этого файла вместе с изменением набора тестов.",
   "rule": "collected == executed (нулевое расхождение) И collected/passed/failures/errors/skipped == canon. Проверяет scripts/ci_run_completeness.py, вызывается из ci/coverage_gate.sh и из CI-шага scripts/ci_junit_smoke.py. Прежний порог 'collected >= 244' пропускал исчезновение 19 тестов — заменён точным равенством.",
   "canon": {
-    "collected": 281,
-    "passed": 275,
+    "collected": 287,
+    "passed": 281,
     "failures": 0,
     "errors": 0,
     "skipped": 6,
@@ -69,6 +69,18 @@
       },
       "reason": "R5b-ROUTING: route_job вызывает EnterpriseDecisionGate.evaluate(tenant_id, payload) по фактическому контракту; xfail P1-B снят. Набор не менялся: 274/7 -> 275/6.",
       "note": "История набора: 254 -> 263 -> 270 -> 276 -> 280 -> 281. Полы покрытия не менялись (31.7 / 48.9)."
+    },
+    {
+      "date": "2026-09-21-r6",
+      "canon": {
+        "collected": 287,
+        "passed": 281,
+        "skipped": 6,
+        "failures": 0,
+        "errors": 0
+      },
+      "reason": "R6-LOKI-PERSISTENT: джоба pg_watchdog_persistent возвращена в живой платформенный конфиг, снапшот+фингерпринт в git, дрейф-проверка ловит регенерацию. +6 негативов: 281 -> 287.",
+      "note": "История набора: 254 -> 263 -> 270 -> 276 -> 280 -> 281 -> 287. Полы покрытия не менялись (31.7 / 48.9)."
     }
   ],
   "measurement": "281 (после R5-gateway-auth) · R5b-ROUTING: раскладка 275 passed + 6 skipped — xfail P1-B снят (тест стал обычным проходящим), набор не менялся. История набора: 254 -> 263 -> 270 -> 276 -> 280 -> 281."

@@ -6,6 +6,9 @@ tracked-копию, а работает другая. Класс дефекта 
 исполняемая копия сторожа содержала фикс R3, а версионированная — нет (расхождение 21 строка).
 Класс A4: security-контроль (барьер Grafana) тоже живёт вне git и может быть молча отменён
 регенерацией платформенного конфига.
+Класс R6: платформенный promtail-конфиг /__substrate/logging/promtail-config.yaml регенерируется молча
+и теряет джобу pg_watchdog_persistent — журнал сторожа /var/lib/pg-watchdog/watchdog.log перестаёт
+доходить до Loki. Ловится фингерпринтом живого конфига + снапшотом в git + обязательной джобой с label.
 
 Политика:
   * только чтение и сравнение; НИКАКИХ авто-перезаписей — repo→executed применяется вручную
@@ -14,11 +17,22 @@ tracked-копию, а работает другая. Класс дефекта 
   * --ci: отсутствие executed_path (чужая машина, CI-раннер) — предупреждение, а не провал;
   * проба пароля: только 127.0.0.1, пароль не логируется ни при каком исходе.
 
+R6: платформенный promtail-конфиг (/__substrate/logging/promtail-config.yaml) регенерируется
+платформой и молча теряет джобу pg_watchdog_persistent — строки сторожа перестают доходить
+до Loki. Фикс жил вне git под ложным именем pre-r3fix. Проверка promtail_config сверяет:
+живой sha256 == записанный фингерпринт == версионированный снапшот, и что обязательная джоба
+(с точным label в Loki) присутствует. Регенерация ловится дрейф-проверкой, а не глазами.
+
 Проверки A4 (fail-closed барьер Grafana), все — по манифесту:
   shim-exists · shim-drift (сравнение с каноном) · path-priority (command -v) ·
   conf-bypass (платформенный конфиг не должен звать бинарь напрямую) ·
   sealed-present (файл секрета есть и непуст) ·
   probe (admin/admin отвечает 200 → КРИТИЧНО: алерт через relay + остановка сервиса).
+
+Проверки R6 (promtail_config), все — по манифесту:
+  live-exists · fingerprint-drift (sha живого против deploy/monitoring/promtail-config.sha256) ·
+  canon-drift (sha живого против снапшота в git) · job-missing · job-label-drift
+  (подмена job: pg_watchdog на другое имя — поток в Loki был бы не тот).
 
 Запуск:  python3 scripts/drift_check.py [--ci] [--no-probe] [--no-alert] [--manifest PATH]
 """
@@ -134,6 +148,115 @@ def probe_default_password(url: str) -> tuple[bool, str]:
         return False, f"{type(exc).__name__} (сервис недоступен)"
 
 
+def parse_sha_file(path: Path) -> str | None:
+    """Записанный фингерпринт из файла sha256sum-формата (первый token)."""
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            token = line.split()[0] if line.split() else ""
+            if len(token) == 64 and all(c in "0123456789abcdef" for c in token.lower()):
+                return token.lower()
+    except OSError:
+        return None
+    return None
+
+
+def job_block(text: str, job_name: str) -> str | None:
+    """Вложенный блок одной scrape_configs-джобы — по отступу.
+
+    Блочный разбор по «- » невозможен: внутри джобы есть вложенные списки
+    (targets/labels), поэтому границы блока определяются уровнем job_name.
+    """
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped not in (f"job_name: {job_name}", f"- job_name: {job_name}"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        block = [line]
+        for nxt in lines[i + 1:]:
+            if not nxt.strip():
+                block.append(nxt)
+                continue
+            if len(nxt) - len(nxt.lstrip()) <= indent:
+                break
+            block.append(nxt)
+        return "\n".join(block)
+    return None
+
+
+def check_promtail_config(chk: dict, name: str, args: argparse.Namespace) -> list[tuple[str, str, str]]:
+    """R6: живой платформенный promtail-конфиг против фингерпринта, снапшота и обязательной джобы.
+
+    Три независимых признака, потому что регенерация может сохранить один и потерять другой:
+    sha живого == фингерпринт, sha живого == снапшот в git, обязательная джоба с нужным label.
+    Ничего не перезаписываем: расхождение — только сигнал (платформа может регенерировать конфиг снова).
+    """
+    problems: list[tuple[str, str, str]] = []
+
+    def fail(kind: str, detail: str) -> list[tuple[str, str, str]]:
+        print(f"CHECK {name}: {kind} — {detail}")
+        problems.append((name, kind, detail))
+        return problems
+
+    live = Path(chk["live_path"])
+    canon = REPO_ROOT / chk["canon_path"]
+    sha_file = REPO_ROOT / chk["sha256_file"]
+    required_job = chk.get("required_job")
+    required_label = chk.get("required_job_label")
+    log_path = chk.get("log_path", "журнал сторожа")
+
+    if not live.exists():
+        if args.ci:
+            print(f"CHECK {name}: SKIP живой платформенный конфиг недоступен (--ci): {live}")
+            return problems
+        return fail("LIVE-MISSING", f"живой платформенный конфиг не найден: {live}")
+    if not canon.exists():
+        return fail("CANON-MISSING", f"версионированный снапшот отсутствует: {chk['canon_path']}")
+    if not sha_file.exists():
+        return fail("FINGERPRINT-MISSING", f"файл фингерпринта отсутствует: {chk['sha256_file']}")
+
+    live_sha, canon_sha = sha256(live), sha256(canon)
+    recorded = parse_sha_file(sha_file)
+
+    if recorded is None:
+        fail("FINGERPRINT-UNPARSABLE", f"не прочитан записанный фингерпринт: {chk['sha256_file']}")
+    elif recorded != live_sha:
+        fail(
+            "FINGERPRINT-DRIFT",
+            f"живой sha256={live_sha[:12]} != записанный {recorded[:12]}: платформенный конфиг "
+            f"изменён/регенерирован — проверить, что джоба {required_job} на месте",
+        )
+    if live_sha != canon_sha:
+        fail(
+            "CANON-DRIFT",
+            f"живой sha256={live_sha[:12]} != снапшот в git {canon_sha[:12]} ({chk['canon_path']})",
+        )
+
+    block = job_block(live.read_text(encoding="utf-8", errors="replace"), required_job)
+    if block is None:
+        fail(
+            "JOB-MISSING",
+            f"в живом конфиге нет джобы {required_job}: строки {log_path} не доходят до Loki (класс R6)",
+        )
+    elif required_label and not any(
+        ln.strip() == f"job: {required_label}" for ln in block.splitlines()
+    ):
+        fail(
+            "JOB-LABEL-DRIFT",
+            f"джоба {required_job} есть, но label 'job: {required_label}' в ней отсутствует — "
+            f"поток в Loki подменён",
+        )
+    elif "__path__" not in block:
+        fail("JOB-PATH-MISSING", f"в джобе {required_job} нет __path__")
+
+    if not problems:
+        print(
+            f"CHECK {name}: OK sha256={live_sha[:12]} джоба {required_job} "
+            f"(label job: {required_label}) на месте, снапшот совпадает"
+        )
+    return problems
+
+
 def run_pairs(pairs: list[dict], args: argparse.Namespace) -> tuple[list[tuple[str, str, str]], int]:
     problems: list[tuple[str, str, str]] = []
     compared = 0
@@ -175,6 +298,10 @@ def run_checks(checks: list[dict], args: argparse.Namespace) -> list[tuple[str, 
     for chk in checks:
         kind = chk.get("type")
         name = chk.get("name", kind or "?")
+        if kind == "promtail_config":
+            checked += 1
+            problems += check_promtail_config(chk, name, args)
+            continue
         if kind != "grafana_fail_closed":
             problems.append((name, "UNKNOWN-CHECK", f"неизвестный тип проверки: {kind!r}"))
             continue
