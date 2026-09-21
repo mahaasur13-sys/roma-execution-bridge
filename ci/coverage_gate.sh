@@ -38,6 +38,8 @@ cd "$REPO_ROOT" || fail "cannot cd to repo root $REPO_ROOT"
 PY="${PY:-python3}"
 JSON_OUT="${JSON_OUT:-/tmp/roma_cov.json}"
 RUN_LOG="${RUN_LOG:-/tmp/roma_cov_run.log}"
+MIN_COLLECTED="${MIN_COLLECTED:-244}"  # A-2 smoke: repo-wide обязан собирать не меньше канона
+JUNIT_OUT="${JUNIT_OUT:-/tmp/roma_junit.xml}"  # A-2: машинный источник канонических чисел
 SCOPE_JSON="${SCOPE_JSON:-$THRESHOLDS}"
 SCOPE_MODE="${SCOPE_MODE:-product}"
 
@@ -79,10 +81,39 @@ echo "thresholds : $THRESHOLDS (global $FILE_GLOBAL, money $FILE_MONEY)"
 echo "applied    : total floor $GLOBAL_FLOOR, money floor $MONEY_FLOOR"
 echo "scope mode : $SCOPE_MODE (source: $SCOPE_JSON)"
 
-rm -f "$JSON_OUT"
-"$PY" -m pytest tests/ -q -p no:cacheprovider -p no:warnings \
-  --cov=. --cov-report="json:$JSON_OUT" >"$RUN_LOG" 2>&1
+run_scope() {  # A-2 (N7b): область ПРОГОНА обязана быть repo-wide и наблюдаемой
+  if [ "$RUN_MODE" = "narrow" ]; then printf '%s' "tests/ (narrow — негатив/локально)"; else printf '%s' "repo-wide"; fi
+}
+RUN_MODE="${RUN_MODE:-repo-wide}"
+if [ "$RUN_MODE" = "narrow" ]; then RUN_TARGET="tests/"; else RUN_TARGET="."; fi
+
+rm -f "$JSON_OUT" "$JUNIT_OUT"
+"$PY" -m pytest $RUN_TARGET -q -p no:cacheprovider -p no:warnings \
+  --cov=. --cov-report="json:$JSON_OUT" --junitxml="$JUNIT_OUT" >"$RUN_LOG" 2>&1
 PYTEST_STATUS=$?
+
+# A-2: число тестов из МАШИННОГО источника (junitxml), не из прогресс-строки
+if [ -s "$JUNIT_OUT" ]; then
+  JUNIT_SHA="$(sha256sum "$JUNIT_OUT" | cut -d' ' -f1)"
+  "$PY" - "$JUNIT_OUT" "$MIN_COLLECTED" <<'PYEOF'
+import sys, xml.etree.ElementTree as ET
+root = ET.parse(sys.argv[1]).getroot()
+s = root if root.tag == "testsuite" else root.find("testsuite")
+n = int(s.get("tests") or 0)
+print(f"JUNIT        : {sys.argv[1]} · tests={n} failures={s.get('failures')} "
+      f"errors={s.get('errors')} skipped={s.get('skipped')}")
+if n < int(sys.argv[2]):
+    print(f"COVERAGE GATE: FAILED -> тестов собрано {n} < порога {sys.argv[2]} "
+          f"(область прогона сузилась: ожидается repo-wide)", file=sys.stderr)
+    sys.exit(9)
+PYEOF
+  SMOKE_STATUS=$?
+  if [ "$SMOKE_STATUS" -ne 0 ]; then echo "JUNIT sha256 : $JUNIT_SHA"; exit 9; fi
+  echo "JUNIT sha256 : $JUNIT_SHA"
+  echo "RUN SCOPE    : $(run_scope) · target=$RUN_TARGET · collected>=$MIN_COLLECTED (smoke PASS)"
+else
+  fail "junitxml не создан: $JUNIT_OUT (канонические числа обязаны быть машинными — A-2)"
+fi
 
 if [ ! -s "$JSON_OUT" ]; then
   echo "pytest exit: $PYTEST_STATUS"

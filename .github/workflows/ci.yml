@@ -37,8 +37,10 @@ jobs:
           python-version: "3.11"
       - name: Install deps
         run: pip install typer rich requests pyyaml plotly dash pytest pytest-cov psycopg2-binary prometheus-client fastapi httpx
-      - name: Full suite (honest counts, skip reasons shown)
-        run: python -m pytest tests/ -q -rs
+      - name: Full suite — repo-wide (A-2/N7b: область прогона = весь репозиторий)
+        run: |
+          python -m pytest -q -rs --junitxml=junit.xml
+          python scripts/ci_junit_smoke.py junit.xml
       - name: Single-file parity gate (P1-C)
         run: bash ci/parity_check.sh
       - name: Coverage ratchet gate (P1-D)
