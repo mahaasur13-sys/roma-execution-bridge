@@ -53,7 +53,7 @@ Push to master → CI (test + lint + helm) → Deploy to Zo → Health check
 ## Adding New Tests
 
 1. Create test in `tests/` directory
-2. Add to `test_ci.py` or create standalone pytest file
+2. Add to `scripts/ci_smoke.py` or create a standalone pytest file
 3. CI picks it up automatically
 
 ## Troubleshooting

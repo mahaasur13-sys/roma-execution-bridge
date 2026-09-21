@@ -61,8 +61,6 @@
       "scripts",
       "support_chat",
       "tenancy",
-      "test_ci.py",
-      "test_gpu_integration.py",
       "tier_gate.py",
       "tier_profiles.py",
       "validator",
@@ -115,6 +113,16 @@
       "total": 24.45,
       "reason": "N6-канонизация добавила tracked deploy/ops/*.py вне области — гейт упал (unscoped); ops-артефакты исключены явно, весь остальной deploy/ остаётся в измерении",
       "commit": "85405b6"
+    },
+    {
+      "date": "2026-09-21",
+      "scope": "product-only",
+      "change": "удалены записи мёртвых путей 'test_ci.py' (→ scripts/ci_smoke.py) и 'test_gpu_integration.py' (→ tests/test_gpu_integration_smoke.py + scripts/gpu_integration_smoke.py): zero-match guard ДОБ-2 поймал их как 'matched 0 files'",
+      "total_pct": 25.56,
+      "money_pct": 48.94,
+      "floor_total": 24.4,
+      "floor_money": 48.1,
+      "reason": "R-5: сборка репозитория. Полы НЕ менялись (ratchet — только с подтверждением числа на финальном состоянии)."
     }
   ],
   "measured_on": {

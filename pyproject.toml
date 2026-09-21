@@ -75,10 +75,18 @@ include = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "--ignore=test_ci.py --ignore=saas/gateway/tests/test_gateway.py --ignore=saas/gateway/tests/test_rate_limiter.py -q"
+addopts = "--ignore=saas/gateway/tests/test_gateway.py -q"
 markers = [
     "ops: операционные/инвариантные проверки (бюджет рестартов, изоляция, дрейф артефактов)",
+    "gpu: проверки, требующие живого GPU-воркера (без ROMA_GPU_LIVE=1 скипаются)",
 ]
+
+# E-01: любое исключение из pytest (--ignore / collect_ignore) обязано иметь тройку
+# (таблица стоит вне [tool.pytest], иначе pytest видит конфликт native TOML и ini_options)
+# reason · issue · expiry. Проверяется tests/test_exclusion_policy.py: без тройки
+# или с истёкшей датой suite краснеет. Иначе исключение = слепой ignore.
+[tool.pytest_exclusions]
+"saas/gateway/tests/test_gateway.py" = { reason = "Реальный fail-open в saas/gateway: AuthMiddleware исполняется РАНЬШЕ TenantMiddleware (в Starlette последний add_middleware = внешний, а docstring middleware.py утверждает обратное), поэтому tenant_id=None → auth_cfg=None → проверка require_api_key не выполняется и /api/hello для тенанта acme отдаёт 200 без ключа (доказано диагностикой: [DEBUG-AUTH] tenant_id=None auth_cfg=None). Починка = порядок middleware в saas/gateway/middleware.py, решение по поведению прод-gateway за владельцем.", issue = "R-5-gateway-auth", expiry = "2026-10-05" }
 
 [dependency-groups]
 dev = [

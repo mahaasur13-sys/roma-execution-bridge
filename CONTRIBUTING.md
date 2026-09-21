@@ -53,7 +53,7 @@ roma-execution-bridge/
 pytest tests/ -v --cov=.
 
 # Specific suite
-pytest tests/test_ci.py -v
+python3 scripts/ci_smoke.py   # не pytest-файл: это CI-раннер с собственным счётчиком
 
 # GPU integration (requires CUDA)
 pytest tests/test_gpu_integration.py -v

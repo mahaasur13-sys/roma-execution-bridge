@@ -21,8 +21,12 @@ jobs:
         run: |
           find . -name "*.py" -not -path "./__pycache__/*" -exec python -m py_compile {} + 2>&1 | tail -5
           echo "Compile OK"
+      - name: Import smoke (repo-wide, без env/GPU)
+        run: |
+          python -c "import gpu_worker.connector; print('import-smoke OK: gpu_worker.connector')"
+          python -c "import scheduler.roma_scheduler; print('import-smoke OK: scheduler.roma_scheduler')"
       - name: Run tests
-        run: python3 test_ci.py
+        run: python3 scripts/ci_smoke.py
   pytest-suite:
     runs-on: ubuntu-latest
     timeout-minutes: 20

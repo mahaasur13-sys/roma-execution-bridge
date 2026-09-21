@@ -7,17 +7,64 @@ import uuid
 import asyncio
 import logging
 from typing import Optional
+from urllib.parse import urlsplit
 
 import requests
 
 logger = logging.getLogger("roma.gpu_connector")
 
 # =============================================================================
-# Config
+# Config — разбор env ЛЕНИВЫЙ (R-5, грабли Г5)
 # =============================================================================
-ROMA_GPU_WORKER_URL = os.getenv("ROMA_GPU_WORKER_URL", "http://localhost:8000")
-ROMA_GPU_TIMEOUT = int(os.getenv("ROMA_GPU_TIMEOUT", "300"))
-GPU_POOL_DISCOVERY = os.getenv("GPU_POOL_DISCOVERY", "static")  # static | dynamic
+# Импорт модуля не должен зависеть от окружения: никаких int() над env, никакой
+# индексации и никаких обращений к env на уровне модуля. Ошибка конфигурации
+# поднимается в точке ИСПОЛЬЗОВАНИЯ и с внятным сообщением (fail-closed там, где
+# значение реально нужно), а не при импорте (иначе любой repo-wide контроль —
+# collect, import-smoke, compileall — падает из-за чужого env).
+DEFAULT_WORKER_URL = "http://localhost:8000"
+DEFAULT_TIMEOUT_S = 300
+DEFAULT_POOL_DISCOVERY = "static"
+
+
+class ConnectorConfigError(ValueError):
+    """Некорректная конфигурация коннектора (поднимается при использовании)."""
+
+
+def _env(name: str, default: str = "") -> str:
+    raw = os.environ.get(name)
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return default
+
+
+def worker_url() -> str:
+    return _env("ROMA_GPU_WORKER_URL", DEFAULT_WORKER_URL)
+
+
+def gpu_timeout() -> int:
+    raw = _env("ROMA_GPU_TIMEOUT")
+    if not raw:
+        return DEFAULT_TIMEOUT_S
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ConnectorConfigError(
+            f"ROMA_GPU_TIMEOUT must be an integer number of seconds, got {raw!r}"
+        ) from None
+    if value <= 0:
+        raise ConnectorConfigError(f"ROMA_GPU_TIMEOUT must be > 0, got {value}")
+    return value
+
+
+def pool_discovery() -> str:
+    return _env("GPU_POOL_DISCOVERY", DEFAULT_POOL_DISCOVERY)
+
+
+def worker_id_for(url: str) -> str:
+    """Идентификатор воркера из URL. Не падает на форме без схемы (host:port)."""
+    candidate = url if "://" in url else f"//{url}"
+    host = urlsplit(candidate).hostname
+    return f"worker-{host or url}"
 
 
 # =============================================================================
@@ -31,13 +78,13 @@ class GPUWorkerPool:
 
     def _load_static_workers(self):
         """Load workers from environment variables."""
-        worker_urls = os.getenv("ROMA_GPU_WORKERS", ROMA_GPU_WORKER_URL)
+        worker_urls = _env("ROMA_GPU_WORKERS", worker_url())
         for url in worker_urls.split(","):
             url = url.strip()
             if url:
                 self.workers.append({
                     "url": url,
-                    "id": f"worker-{url.split('://')[1].split(':')[0]}",
+                    "id": worker_id_for(url),
                     "available": True,
                     "gpu_name": "unknown",
                     "load": 0
@@ -95,7 +142,7 @@ class GPUWorkerPool:
                 lambda: requests.post(
                     f"{worker['url']}/execute",
                     json=payload,
-                    timeout=ROMA_GPU_TIMEOUT
+                    timeout=gpu_timeout()
                 )
             )
 
@@ -211,7 +258,7 @@ if __name__ == "__main__":
         print("=== ROMA GPU Connector ===")
         print(f"Available: {metrics['connector_available']}")
         print(f"Workers: {metrics['worker_count']}")
-        print(f"URL: {ROMA_GPU_WORKER_URL}")
+        print(f"URL: {worker_url()}")
 
         # Test job
         test_job = {
