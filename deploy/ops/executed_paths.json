@@ -1,0 +1,21 @@
+{
+  "rule": "исполняемый код == версионируемый код. repo_path — канон; executed_path — то, что реально запущено. drift-check сравнивает sha256 и НЕ перезаписывает ничего автоматически.",
+  "pairs": [
+    {
+      "name": "pg-watchdog",
+      "repo_path": "deploy/ops/pg_watchdog.py",
+      "executed_path": "/home/workspace/artifacts/pg-watchdog/pg_watchdog.py",
+      "service": "pg-watchdog",
+      "severity": "critical",
+      "why": "охранник доступности PG: поднимает кластер в рамках бюджета, следит за append-only ledger"
+    },
+    {
+      "name": "alert-relay",
+      "repo_path": "deploy/ops/alert_relay.py",
+      "executed_path": "/home/workspace/artifacts/alert-relay/alert_relay.py",
+      "service": "alert-relay",
+      "severity": "critical",
+      "why": "канал доставки алертов в Telegram; его отказ делает молчаливыми все остальные алерты"
+    }
+  ]
+}

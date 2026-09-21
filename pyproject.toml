@@ -76,6 +76,9 @@ include = [
 
 [tool.pytest.ini_options]
 addopts = "--ignore=test_ci.py --ignore=saas/gateway/tests/test_gateway.py --ignore=saas/gateway/tests/test_rate_limiter.py -q"
+markers = [
+    "ops: операционные/инвариантные проверки (бюджет рестартов, изоляция, дрейф артефактов)",
+]
 
 [dependency-groups]
 dev = [
