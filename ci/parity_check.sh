@@ -42,6 +42,8 @@ FULL_STATUS=$?
 # полный прогон может упасть по причинам вне парности — фиксируем, но не сравниваем exit code
 
 FAILED=0
+INVARIANT_TOTAL=${#KEY_FILES[@]}
+INVARIANT_EXECUTED=0
 for f in "${KEY_FILES[@]}"; do
   xml="$TMP/$(basename "$f").xml"
   # PARITY_SOLO_ARGS — только для негативной проверки самого гейта (напр. --noconftest)
@@ -72,7 +74,22 @@ PYEOF
     echo "PARITY FAIL $f : solo=[$solo] full=[$full]"
     FAILED=1
   fi
+
+  # P1-C fix: ловушка «оба прогона скипнули файл» — parity сравнивает нули с нулями
+  # и печатает PASSED, хотя инвариант не исполнялся. Требуем, чтобы файл из
+  # invariant-списка РЕАЛЬНО исполнился в полном прогоне:
+  #   executed = tests - failures - errors - skipped > 0
+  read -r f_tot f_fail f_err f_skip <<<"$full"
+  f_exec=$(( f_tot - f_fail - f_err - f_skip ))
+  if [ "$f_exec" -gt 0 ]; then
+    INVARIANT_EXECUTED=$(( INVARIANT_EXECUTED + 1 ))
+  else
+    echo "INVARIANT NOT EXECUTED $f : full=[$full] (passed=0 — файл скипнут, а не выполнен)"
+    FAILED=1
+  fi
 done
+
+echo "invariant files executed: $INVARIANT_EXECUTED/$INVARIANT_TOTAL"
 
 echo "== skip ledger =="
 if [ -f /tmp/roma_skip_ledger.json ]; then
