@@ -7,6 +7,16 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 ALGORITHM = "HS256"
 
+# P1-A: единственные пути, доступные ДО предъявления ключа — health-проба и
+# bootstrap конфига/брендинга. Сравнение ТОЧНОЕ по пути: похожие пути
+# ("/gateway/healthz") освобождения не получают, иначе освобождение
+# превращается в обход. Полный список проверяется тестами gateway.
+PUBLIC_PATH_EXEMPTIONS = (
+    "/gateway/health",
+    "/gateway/config",
+    "/gateway/tenant-info",
+)
+
 
 class AuthMiddleware(BaseHTTPMiddleware):
     def __init__(
@@ -33,6 +43,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
         from starlette.responses import JSONResponse
 
         try:
+            if self._is_public_path(request.url.path):
+                return await call_next(request)
+
             origin = request.headers.get("origin", "")
             if self._cors_origin_match(origin):
                 request.state.origin_allowed = True
@@ -75,6 +88,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
             raise
         except Exception as e:
             return JSONResponse({"detail": f"Auth error: {str(e)}"}, status_code=401)
+
+    def _is_public_path(self, path: str) -> bool:
+        """Точное совпадение с освобождённым путём (без префиксных послаблений)."""
+        return path.rstrip("/") in PUBLIC_PATH_EXEMPTIONS
 
     def _get_api_key(self, request: Request) -> Optional[str]:
         for header_name in ["X-API-Key", "X-API-KEY", "Authorization"]:

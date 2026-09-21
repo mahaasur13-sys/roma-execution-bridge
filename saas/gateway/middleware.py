@@ -16,29 +16,31 @@ def setup_gateway_middleware(
 ) -> None:
     """
     Wire all gateway middleware into a FastAPI app.
-    
-    Starlette BaseHTTPMiddleware uses FIFO order:
-    First add_middleware() = first in the request chain.
-    
-    Correct order (FIFO):
-    1. TenantMiddleware    — MUST be added FIRST so it resolves tenant FIRST
-    2. AuthMiddleware       — uses tenant_id set by TenantMiddleware
-    3. BrandingInjector    — injects headers at response time
-    4. CORS                 — outermost, handles preflight
-    
-    If CORS were added last (outermost), it would run first and reject
-    OPTIONS requests before TenantMiddleware could set tenant context.
+
+    Порядок (P1-A): Starlette собирает стек в ОБРАТНОМ порядке добавления —
+    последний add_middleware() оказывается САМЫМ ВНЕШНИМ и исполняется первым.
+    Значит порядок добавления здесь обратен порядку исполнения.
+
+    Исполнение запроса (внешний → внутренний):
+    1. CORS                 — внешний, обрабатывает preflight
+    2. BrandingInjector     — читает tenant_id ПОСЛЕ call_next, поэтому позиция не критична
+    3. TenantMiddleware     — резолвит tenant и пишет request.state.tenant_id
+    4. AuthMiddleware       — читает tenant_id, который уже выставлен шагом 3
+
+    Прежняя версия утверждала обратное («первый add_middleware = первый в цепочке»)
+    и добавляла TenantMiddleware первой; из-за этого AuthMiddleware становился
+    внешним, видел tenant_id=None, не находил auth_cfg и пропускал защищённые
+    роуты без ключа (CWE-287). Комментарий был источником класса дефекта, а не
+    только описанием инстанса.
+
+    Безопасность опирается на ФАКТ порядка, а не на комментарий: порядок
+    зафиксирован тестами saas/gateway/tests/test_gateway.py (paid-тенант без
+    ключа → 401, FREE-тенант без ключа → 200).
     """
     if allowed_origins is None:
         allowed_origins = ["*"]
 
-    # Tenant resolution — MUST be added FIRST (runs first in chain)
-    app.add_middleware(
-        TenantMiddleware,
-        tenant_config=tenant_config or {},
-    )
-
-    # Auth — runs AFTER tenant resolution (tenant_id already in request.state)
+    # Внутренний по исполнению: проверка ключа идёт ПОСЛЕ резолва tenant.
     app.add_middleware(
         AuthMiddleware,
         jwt_secret=jwt_secret,
@@ -46,13 +48,19 @@ def setup_gateway_middleware(
         tenant_config=tenant_config or {},
     )
 
-    # Branding injection — innermost in request chain
+    # Резолв тенанта — внешний относительно AuthMiddleware.
+    app.add_middleware(
+        TenantMiddleware,
+        tenant_config=tenant_config or {},
+    )
+
+    # Инъекция брендинга — между резолвом тенанта и CORS.
     app.add_middleware(
         BrandingInjectorMiddleware,
         tenant_config=tenant_config or {},
     )
 
-    # CORS (outermost — added last so it wraps everything)
+    # CORS — добавляется последним, поэтому исполняется первым (preflight).
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
