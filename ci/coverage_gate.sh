@@ -11,8 +11,18 @@
 set -uo pipefail
 
 PY="${PY:-python3}"
-GLOBAL_FLOOR="${GLOBAL_FLOOR:-31}"
-MONEY_FLOOR="${MONEY_FLOOR:-46}"
+# Пороги — единый источник истины: .ci/coverage-thresholds.json (ratchet: только вверх).
+# Env-переменные перекрывают файл (нужно для негативных прогонов гейта).
+THRESHOLDS=".ci/coverage-thresholds.json"
+if [ -f "$THRESHOLDS" ]; then
+  FILE_GLOBAL="$(python3 -c "import json;print(json.load(open('$THRESHOLDS'))['global_floor'])")"
+  FILE_MONEY="$(python3 -c "import json;print(json.load(open('$THRESHOLDS'))['money_floor'])")"
+else
+  FILE_GLOBAL=31; FILE_MONEY=46
+fi
+
+GLOBAL_FLOOR="${GLOBAL_FLOOR:-$FILE_GLOBAL}"
+MONEY_FLOOR="${MONEY_FLOOR:-$FILE_MONEY}"
 JSON_OUT="${JSON_OUT:-/tmp/roma_cov.json}"
 
 "$PY" -m pytest tests/ -q -p no:cacheprovider -p no:warnings \

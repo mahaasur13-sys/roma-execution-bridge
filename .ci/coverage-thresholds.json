@@ -1,0 +1,13 @@
+{
+  "global_floor": 31.0,
+  "money_floor": 46.0,
+  "ratchet_rule": "floors may only be raised; lowering requires an explicit, reviewed diff to this file",
+  "measured_on": {
+    "2026-09-21": {
+      "total_pct": 32.0,
+      "money_path_pct": 48.1,
+      "total_lines": "5627/17560",
+      "money_lines": "477/991"
+    }
+  }
+}
