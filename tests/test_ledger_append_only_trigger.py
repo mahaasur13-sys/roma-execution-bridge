@@ -35,14 +35,14 @@ def _seed_entry(cur):
         "INSERT INTO ledger_entries (ledger_id, tenant_id, entry_type, amount, currency, metadata)"
         " VALUES (%s, %s, 'CREDIT', 0.0, 'USD', '{}'::jsonb)"
         " ON CONFLICT (ledger_id) DO NOTHING RETURNING ledger_id",
-        (f"l1-trigger-test-{os.getpid()}", "t-l1-trigger"),
+        (f"l1-trigger-test-{os.getpid()}", "test-l1-trigger"),
     )
     row = cur.fetchone()
     if row:
         return row[0]
     cur.execute(
         "SELECT ledger_id FROM ledger_entries WHERE tenant_id = %s LIMIT 1",
-        ("t-l1-trigger",),
+        ("test-l1-trigger",),
     )
     fallback = cur.fetchone()
     if not fallback:
@@ -115,6 +115,6 @@ def test_insert_still_allowed():
             "INSERT INTO ledger_entries (ledger_id, tenant_id, entry_type, amount, currency, metadata)"
             " VALUES (%s, %s, 'CREDIT', 0.0, 'USD', '{}'::jsonb)"
             " ON CONFLICT (ledger_id) DO NOTHING",
-            (ledger_id, "t-l1-trigger"),
+            (ledger_id, "test-l1-trigger"),
         )
         conn.rollback()

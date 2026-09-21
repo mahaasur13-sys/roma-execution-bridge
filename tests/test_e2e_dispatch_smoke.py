@@ -40,7 +40,7 @@ def _disable_background_worker(monkeypatch):
 
 @pytest.fixture()
 def tenant(monkeypatch):
-    tenant_id = _uniq("t-e2e")
+    tenant_id = _uniq("test-e2e")
     key = _uniq("key-e2e")
     db.seed_tenants({key: {"tenant_id": tenant_id, "name": "A"}})
     monkeypatch.setattr(main, "is_email_verified", lambda api_key: True)
@@ -105,7 +105,7 @@ def test_submit_status_and_fake_dispatch(tenant, monkeypatch):
 def test_status_is_tenant_scoped(tenant):
     client = TestClient(main.app, raise_server_exceptions=False)
     other_key = _uniq("key-other")
-    db.seed_tenants({other_key: {"tenant_id": _uniq("t-other"), "name": "B"}})
+    db.seed_tenants({other_key: {"tenant_id": _uniq("test-other"), "name": "B"}})
 
     resp = client.post("/submit", json={"task": "echo hi"}, headers={"X-API-Key": tenant["key"]})
     assert resp.status_code == 202

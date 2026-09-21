@@ -34,7 +34,7 @@ def _uniq(prefix: str) -> str:
 
 
 def test_create_job_idempotency_sqlite_returns_true_then_false(sqlite_mode):
-    tenant_id = _uniq("t-rowcount")
+    tenant_id = _uniq("test-rowcount")
     key = _uniq("key")
 
     assert db.create_job_idempotency(tenant_id, key, "job-1") is True
@@ -45,7 +45,7 @@ def test_create_job_idempotency_sqlite_returns_true_then_false(sqlite_mode):
 
 def test_update_execution_job_sqlite_rowcount(sqlite_mode):
     job_id = _uniq("job-upd")
-    tenant_id = _uniq("t-upd")
+    tenant_id = _uniq("test-upd")
     db.insert_execution_job(job_id, "d-1", tenant_id, "queued", {"task": "echo hi"})
 
     n = db._update_execution_job_sqlite(

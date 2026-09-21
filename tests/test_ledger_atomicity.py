@@ -23,7 +23,7 @@ def ledger():
 def test_insufficient_funds_returns_none(ledger, monkeypatch):
     """Недостаточно средств (CTE вставил 0 строк) → None, fallback не пишем."""
     monkeypatch.setattr(ledger, "_txn", lambda *a, **k: [])
-    assert ledger.debit_if_funds("t-test", 1.0) is None
+    assert ledger.debit_if_funds("test-atomicity", 1.0) is None
     # fail-closed: in-memory fallback НЕ должен пополниться
     assert ledger._entries == []
 
@@ -31,7 +31,7 @@ def test_insufficient_funds_returns_none(ledger, monkeypatch):
 def test_success_micro_debit_returns_ledger_id(ledger, monkeypatch):
     """Успешный micro-debit → возвращается ledger_id."""
     monkeypatch.setattr(ledger, "_txn", lambda *a, **k: [("led-1",)])
-    assert ledger.debit_if_funds("t-test", 0.0000667) == "led-1"
+    assert ledger.debit_if_funds("test-atomicity", 0.0000667) == "led-1"
 
 
 def test_pg_down_fails_closed(ledger, monkeypatch):
@@ -46,7 +46,7 @@ def test_pg_down_fails_closed(ledger, monkeypatch):
 
     monkeypatch.setattr(ledger, "_txn", boom)
     with pytest.raises(PGUnavailableError):
-        ledger.debit_if_funds("t-test", 1.0)
+        ledger.debit_if_funds("test-atomicity", 1.0)
     assert ledger._entries == []
 
 
@@ -60,7 +60,7 @@ def test_sql_has_balance_guard_and_same_columns(ledger, monkeypatch):
         return [("led-1",)]
 
     monkeypatch.setattr(ledger, "_txn", fake)
-    ledger.debit_if_funds("t-test", 0.5)
+    ledger.debit_if_funds("test-atomicity", 0.5)
 
     assert captured["operation"] == "ledger_debit_if_funds"
     insert_sql, insert_params = captured["statements"][1]

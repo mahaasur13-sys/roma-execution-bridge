@@ -43,7 +43,7 @@ def _patch(monkeypatch, plan: str, total: int, active: int) -> _Counters:
 def test_gate_denies_on_total_not_active(monkeypatch):
     """total уже на лимите, active мал → DENIED (иначе квота обходится)."""
     counters = _patch(monkeypatch, plan="free", total=50, active=1)
-    decision = EnterpriseDecisionGate().evaluate("t-quota", {"gpu_required": False})
+    decision = EnterpriseDecisionGate().evaluate("test-quota", {"gpu_required": False})
 
     assert decision.result == GateResult.DENIED
     assert "quota exceeded" in decision.reason
@@ -53,7 +53,7 @@ def test_gate_denies_on_total_not_active(monkeypatch):
 def test_gate_allows_one_below_total_limit(monkeypatch):
     """total = max_jobs - 1 → ALLOWED (граница не сдвинута)."""
     _patch(monkeypatch, plan="free", total=49, active=49)
-    decision = EnterpriseDecisionGate().evaluate("t-quota", {"gpu_required": False})
+    decision = EnterpriseDecisionGate().evaluate("test-quota", {"gpu_required": False})
 
     assert decision.result == GateResult.ALLOWED
     assert decision.job_limit == 50
@@ -63,13 +63,13 @@ def test_gate_allows_one_below_total_limit(monkeypatch):
 def test_gate_denies_at_total_boundary(monkeypatch):
     """Ровно на границе (total == max_jobs) → DENIED, семантика >=."""
     _patch(monkeypatch, plan="free", total=50, active=0)
-    assert EnterpriseDecisionGate().evaluate("t-quota", {}).result == GateResult.DENIED
+    assert EnterpriseDecisionGate().evaluate("test-quota", {}).result == GateResult.DENIED
 
 
 def test_enterprise_plan_is_unlimited(monkeypatch):
     """enterprise: max_jobs = -1 = безлимит; -1 не должен трактоваться как «0 остатка»."""
     _patch(monkeypatch, plan="enterprise", total=10_000, active=3)
-    decision = EnterpriseDecisionGate().evaluate("t-quota", {"gpu_required": True})
+    decision = EnterpriseDecisionGate().evaluate("test-quota", {"gpu_required": True})
 
     assert decision.result == GateResult.ALLOWED, decision.reason
 

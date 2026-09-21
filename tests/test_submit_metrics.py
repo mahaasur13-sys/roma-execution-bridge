@@ -29,7 +29,7 @@ def _disable_background_worker(monkeypatch):
 
 @pytest.fixture()
 def tenant(monkeypatch):
-    tenant_id = _uniq("t-metrics")
+    tenant_id = _uniq("test-metrics")
     key = _uniq("key-metrics")
     db.seed_tenants({key: {"tenant_id": tenant_id, "name": "A"}})
     monkeypatch.setattr(main, "is_email_verified", lambda api_key: True)

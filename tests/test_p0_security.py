@@ -44,8 +44,8 @@ def _disable_background_worker(monkeypatch):
 @pytest.fixture()
 def tenants(monkeypatch):
     """Seed two distinct tenants A/B with their own API keys."""
-    a_id = _uniq("t-a")
-    b_id = _uniq("t-b")
+    a_id = _uniq("test-a")
+    b_id = _uniq("test-b")
     key_a = _uniq("key-a")
     key_b = _uniq("key-b")
 

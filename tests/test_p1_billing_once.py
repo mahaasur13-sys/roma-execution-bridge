@@ -47,7 +47,7 @@ def _disable_background_worker(monkeypatch):
 @pytest.fixture()
 def tenant(monkeypatch):
     """Seed one tenant with a known API key and bypass email verification."""
-    tenant_id = _uniq("t-bill")
+    tenant_id = _uniq("test-bill")
     key = _uniq("key-bill")
     db.seed_tenants({key: {"tenant_id": tenant_id, "name": "A"}})
     main.billing_ledger.credit(tenant_id, 1.0)
@@ -126,7 +126,7 @@ def test_worker_db_functions_exist(tenant):
 @_NEEDS_PG
 def test_complete_without_funds_returns_402(monkeypatch):
     """fail-closed: no CREDIT → /complete 402, no debit, status unchanged."""
-    tenant_id = _uniq("t-bill")
+    tenant_id = _uniq("test-bill")
     key = _uniq("key-bill")
     db.seed_tenants({key: {"tenant_id": tenant_id, "name": "A"}})
     monkeypatch.setattr(main, "is_email_verified", lambda api_key: True)

@@ -21,6 +21,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 THRESHOLDS="$REPO_ROOT/.ci/coverage-thresholds.json"
 
+# CWD-гигиена (A1/Ф0.4): гейт обязан работать из любого каталога, а pytest —
+# видеть tests/ и конфиг корня репозитория, а не каталог вызова.
+cd "$REPO_ROOT" || fail "cannot cd to repo root $REPO_ROOT"
+
 PY="${PY:-python3}"
 JSON_OUT="${JSON_OUT:-/tmp/roma_cov.json}"
 RUN_LOG="${RUN_LOG:-/tmp/roma_cov_run.log}"
