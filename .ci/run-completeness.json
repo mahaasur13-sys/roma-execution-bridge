@@ -2,14 +2,14 @@
   "note": "A-6: канон полноты набора тестов. Числа — машинный факт последнего repo-wide прогона (junitxml), не оценка. Порог никогда не понижается: любое отличие от факта прогона роняет гейт, обновление — только явным диффом этого файла вместе с изменением набора тестов.",
   "rule": "collected == executed (нулевое расхождение) И collected/passed/failures/errors/skipped == canon. Проверяет scripts/ci_run_completeness.py, вызывается из ci/coverage_gate.sh и из CI-шага scripts/ci_junit_smoke.py. Прежний порог 'collected >= 244' пропускал исчезновение 19 тестов — заменён точным равенством.",
   "canon": {
-    "collected": 276,
-    "passed": 268,
+    "collected": 280,
+    "passed": 272,
     "failures": 0,
     "errors": 0,
     "skipped": 8,
     "measured_on": "2026-09-21",
     "run_scope": "repo-wide (target=., pytest -q -p no:cacheprovider -p no:warnings)",
-    "measurement": "263 (после P-LEASE-3) + 7 негативов полноты набора (A-6) = 270; + 6 негативов храповика полов (A-7) = 276 · 276 - 8 skipped = 268 passed"
+    "measurement": "263 (после P-LEASE-3) + 7 негативов полноты набора (A-6) = 270; + 6 негативов храповика полов (A-7) = 276; + 4 негатива/проверки политики skip (A-3b) = 280 · 280 - 8 skipped = 272 passed"
   },
   "history": [
     {
@@ -39,6 +39,13 @@
       "passed": 268,
       "skipped": 8,
       "change": "A-7: +6 негативов храповика полов (tests/test_coverage_ratchet.py) — измерение чуть ниже пола продукта, то же измерение при прежних полах, ниже денежного пола, понижение пола, отсутствие floor_history, контроль выше полов"
+    },
+    {
+      "date": "2026-09-21",
+      "collected": 280,
+      "passed": 272,
+      "skipped": 8,
+      "change": "A-3b: +4 проверки политики skip (tests/test_exclusion_policy.py) — место skip без тройки reason·issue·expiry, сканер видит синтетический голый skip и не исключает себя, рантайм-бюджет скипов требует ту же тройку"
     }
   ]
 }

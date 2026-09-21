@@ -250,7 +250,7 @@ def test_cli_guard_exits_3_on_collision(tmp_path: pathlib.Path) -> None:
 def test_real_sessions_dir_has_at_most_one_fresh_marker() -> None:
     """Интеграционная проверка реального каталога: живой писатель должен быть один."""
     if not REAL_SESSIONS.is_dir():
-        pytest.skip("issue: A-0 · нет каталога .sessions — проверка неприменима")
+        pytest.skip("issue: A-0 · expiry: 2026-12-31 · нет каталога .sessions — проверка неприменима")
     fresh = lease.fresh_markers(REAL_SESSIONS, 15)
     assert len(fresh) <= 1, f"свежих маркеров больше одного: {sorted(fresh)}"
 

@@ -80,7 +80,7 @@ def test_no_drop_without_if_exists():
 def test_runner_reapply_is_idempotent(capsys):
     """Second runner pass applies nothing (all files already tracked)."""
     if not _pg_reachable():
-        pytest.skip("PG not reachable — skipping migration re-apply contract")
+        pytest.skip("PG not reachable — migration re-apply contract requires live PG; issue: P1-C · expiry: 2026-12-31")
     runner = _load_runner()
     assert runner.main() == 0
     capsys.readouterr()  # discard first pass output
@@ -93,7 +93,7 @@ def test_runner_reapply_is_idempotent(capsys):
 def test_migrations_create_expected_tables():
     """After apply, the tables the code reads must exist in PG."""
     if not _pg_reachable():
-        pytest.skip("PG not reachable — skipping object-existence contract")
+        pytest.skip("PG not reachable — object-existence contract requires live PG; issue: P1-C · expiry: 2026-12-31")
     runner = _load_runner()
     runner.main()
 

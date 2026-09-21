@@ -26,7 +26,7 @@ import main
 
 _NEEDS_PG = pytest.mark.skipif(
     not os.environ.get("PG_DSN"),
-    reason="дебет L2/L4 идёт только через PG (advisory-lock + CTE); без PG_DSN путь не проверить",
+    reason="дебет L2/L4 идёт только через PG (advisory-lock + CTE); без PG_DSN путь не проверить · issue: P1-C · expiry: 2026-12-31",
 )
 
 

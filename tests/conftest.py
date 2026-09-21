@@ -41,6 +41,7 @@ INVARIANT_FILES = (
     "test_p0_security.py",
 )
 ISSUE_MARK = "issue:"
+EXPIRY_MARK = "expiry:"  # A-3b: рантайм-бюджет требует ту же тройку, что статическая политика
 LEDGER_PATH = Path("/tmp/roma_skip_ledger.json")
 
 _skips: list[dict] = []
@@ -130,7 +131,8 @@ def pytest_sessionfinish(session, exitstatus) -> None:
     violations = [
         s
         for s in _skips
-        if any(f in s["nodeid"] for f in INVARIANT_FILES) and ISSUE_MARK not in s["reason"]
+        if any(f in s["nodeid"] for f in INVARIANT_FILES)
+        and (ISSUE_MARK not in s["reason"] or EXPIRY_MARK not in s["reason"])
     ]
     invariant_skips = [s for s in _skips if any(f in s["nodeid"] for f in INVARIANT_FILES)]
 
@@ -150,7 +152,7 @@ def pytest_sessionfinish(session, exitstatus) -> None:
         "\n[conftest] skip-budget:"
         f" invariant files skipped: {len(invariant_files_skipped)}"
         f" · invariant skips: {len(invariant_skips)}"
-        f" · threshold: скипы без '{ISSUE_MARK} <ID>' (допустимо 0)"
+        f" · threshold: скипы без '{ISSUE_MARK} <ID>' и '{EXPIRY_MARK} <дата>' (допустимо 0)"
         f" · violations: {len(violations)}"
     )
     if invariant_files_skipped:
@@ -160,7 +162,7 @@ def pytest_sessionfinish(session, exitstatus) -> None:
 
     if violations:
         print(
-            "\n[conftest] SKIP BUDGET VIOLATION: инвариантный тест скипнут без issue-id:"
+            "\n[conftest] SKIP BUDGET VIOLATION: инвариантный тест скипнут без тройки issue+expiry:"
         )
         for v in violations:
             print(f"  - {v['nodeid']} :: {v['reason'][:160]}")

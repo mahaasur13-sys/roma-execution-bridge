@@ -19,13 +19,13 @@ FUNCTION_NAME = "ledger_no_mutate"
 def _pg_conn():
     """Живое PG-соединение или skip (нет PG_DSN / PG недоступен)."""
     if not os.environ.get("PG_DSN"):
-        pytest.skip("PG_DSN не задан — триггер L1 проверяется только на живом PG; issue: P1-C")
+        pytest.skip("PG_DSN не задан — триггер L1 проверяется только на живом PG; issue: P1-C · expiry: 2026-12-31")
 
     from billing.pg_connection import get_pg_manager, PGUnavailableError
     try:
         ctx = get_pg_manager().get_connection("test_ledger_append_only")
     except PGUnavailableError:
-        pytest.skip("PG недоступен в этом процессе pytest; issue: P1-C")
+        pytest.skip("PG недоступен в этом процессе pytest; issue: P1-C · expiry: 2026-12-31")
     return ctx
 
 
@@ -46,7 +46,7 @@ def _seed_entry(cur):
     )
     fallback = cur.fetchone()
     if not fallback:
-        pytest.skip("ledger_entries пуста и INSERT недоступен — нечего проверять; issue: P1-C")
+        pytest.skip("ledger_entries пуста и INSERT недоступен — нечего проверять; issue: P1-C · expiry: 2026-12-31")
     return fallback[0]
 
 

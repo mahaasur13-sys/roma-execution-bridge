@@ -178,7 +178,7 @@ def test_job_submit_path_returns_route() -> None:
 
 @pytest.mark.skipif(
     not os.environ.get("ROMA_GPU_LIVE"),
-    reason=f"живой GPU-воркер: нужен ROMA_GPU_LIVE=1 (issue: {ISSUE_R5})",
+    reason=f"живой GPU-воркер: нужен ROMA_GPU_LIVE=1 (issue: {ISSUE_R5} · expiry: 2026-12-31)",
 )
 def test_live_gpu_worker_health() -> None:
     """Смоук против ЖИВОГО воркера — только по явному opt-in."""

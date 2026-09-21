@@ -137,3 +137,145 @@ def test_xfail_policy_can_actually_fail() -> None:
     good = 'strict=True, reason=("issue: P1-A · expiry: 2099-01-01 · причина",)'
     assert audit_xfail_blocks(good) == [], "детектор xfail ложно краснеет на корректном блоке"
 
+# ---------------------------------------------------------------------------
+# A-3b: политика исключений обязана покрывать skip-механизмы.
+# Дефект класса, а не инстанс: детектор знал только --ignore и xfail. В дереве
+# 16 мест skip/skipif, и ни одно не несло полной тройки; 6 из них исполнялись
+# в каноническом прогоне (JUnit: skipped=8) — то есть «зелёный прогон» молча нёс
+# незакрытые проверки. Правило то же, что для xfail:
+#     reason · issue: <ID> · expiry: YYYY-MM-DD
+# ---------------------------------------------------------------------------
+
+# Экранирование в шаблонах — не косметика: этот файл сканируется наравне с прочими,
+# и неэкранированный образец делал бы его нарушителем собственного правила.
+SKIP_PATTERNS = (
+    (re.compile(r"pytest\.skip\("), "skip"),
+    (re.compile(r"pytest\.mark\.skipif"), "skipif-маркер"),
+    (re.compile(r"pytest\.mark\.skip\b"), "skip-маркер"),
+    (re.compile(r"pytest\.importorskip\("), "importorskip"),
+    (re.compile(r"pytest\.xfail\("), "императивный xfail"),
+)
+DECORATOR_KINDS = {"skipif-маркер", "skip-маркер"}
+MAX_CALL_LINES = 6
+SKIP_GLOBS = ("test_*.py", "*_test.py", "conftest.py")
+
+
+def _call_window(lines: list[str], index: int) -> str:
+    """Логический вызов: от строки места до закрывающей скобки (не длиннее MAX_CALL_LINES).
+
+    Окно именно вызова, а не «±4 строки»: иначе тройка соседнего теста маскировала бы
+    голый skip рядом — ровно тот класс слепоты, против которого это правило и написано.
+    """
+    window = [lines[index - 1]]
+    depth = window[0].count("(") - window[0].count(")")
+    cursor = index
+    while depth > 0 and cursor < len(lines) and len(window) < MAX_CALL_LINES:
+        nxt = lines[cursor]
+        window.append(nxt)
+        depth += nxt.count("(") - nxt.count(")")
+        cursor += 1
+    return "\n".join(window)
+
+
+def audit_skip_block(text: str, kind: str = "skip") -> list[str]:
+    """Проверяет ОДНО место skip-механизма. Вынесено отдельно, чтобы негатив мог её вызвать."""
+    problems = []
+    if kind in DECORATOR_KINDS:
+        if not re.search(r"reason\s*=", text):
+            problems.append("skip-маркер без reason=")
+    elif "reason=" not in text and not re.search(r"\(\s*[\"']", text):
+        problems.append("skip без причины (нет строкового аргумента и нет reason=)")
+    if not re.search(r"issue:\s*\S+", text):
+        problems.append("skip без issue-id")
+    m = re.search(r"expiry:\s*(\d{4}-\d{2}-\d{2})", text)
+    if not m:
+        problems.append("skip без expiry (YYYY-MM-DD)")
+    else:
+        try:
+            if dt.date.fromisoformat(m.group(1)) <= dt.date.today():
+                problems.append(
+                    f"skip просрочен (expiry={m.group(1)}) — починить или продлить осознанно"
+                )
+        except ValueError:
+            problems.append(f"skip expiry не дата: {m.group(1)!r}")
+    return problems
+
+
+def find_skip_sites(text: str) -> list[tuple[int, str, str]]:
+    """Места skip-механизмов в ОДНОМ тексте: (строка, вид, окно вызова)."""
+    lines = text.splitlines()
+    sites = []
+    for index, line in enumerate(lines, start=1):
+        for pattern, kind in SKIP_PATTERNS:
+            if pattern.search(line):
+                sites.append((index, kind, _call_window(lines, index)))
+    return sites
+
+
+def skip_files() -> list[Path]:
+    """Все тест-файлы дерева (включая вложенные наборы и сам файл политики)."""
+    found = {p for glob in SKIP_GLOBS for p in REPO_ROOT.rglob(glob)}
+    return sorted(p for p in found if ".venv" not in p.parts and "__pycache__" not in p.parts)
+
+
+def test_every_skip_has_issue_and_expiry() -> None:
+    offenders = []
+    for path in skip_files():
+        for line, kind, window in find_skip_sites(path.read_text(encoding="utf-8")):
+            for problem in audit_skip_block(window, kind):
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{line} ({kind}): {problem}")
+    assert not offenders, (
+        "места skip-механизмов без тройки reason·issue·expiry (невидимое исключение):\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_skip_policy_can_actually_fail() -> None:
+    """НЕГАТИВ (доктрина: детектор без негативного теста не существует).
+
+    Образцы собираются конкатенацией: файл политики сканируется тем же шаблоном,
+    поэтому литеральный образец сделал бы его нарушителем собственного правила.
+    """
+    bare = "pytest." + 'skip("PG недоступен")'
+    problems = audit_skip_block(bare, "skip")
+    assert len(problems) >= 2, f"детектор skip не сработал на заведомо плохом блоке: {problems}"
+
+    good = "pytest." + 'skip("PG недоступен — только живой PG; issue: P1-C · expiry: 2099-01-01")'
+    assert audit_skip_block(good, "skip") == [], "детектор skip ложно краснеет на корректном блоке"
+
+    bad_marker = "@pytest.mark." + "skipif(True)"
+    assert audit_skip_block(bad_marker, "skipif-маркер"), "skipif без тройки обязан падать"
+
+    good_marker = "@pytest.mark." + (
+        'skipif(True, reason="ждём живой PG · issue: P1-C · expiry: 2099-01-01")'
+    )
+    assert audit_skip_block(good_marker, "skipif-маркер") == [], "корректный skipif ложно краснеет"
+
+
+def test_skip_scanner_covers_synthetic_file_and_itself() -> None:
+    """Структурный негатив: сканер видит голый skip в синтетическом тексте и не исключает себя."""
+    synthetic = "def test_x():\n    pytest." + 'skip("просто так")\n'
+    sites = find_skip_sites(synthetic)
+    assert sites, "сканер не увидел голый skip в синтетическом тексте"
+    assert any(audit_skip_block(window, kind) for _, kind, window in sites), (
+        "голый skip в синтетическом тексте не распознан как нарушение"
+    )
+    assert any(p.name == "test_exclusion_policy.py" for p in skip_files()), (
+        "файл политики исключён из собственного скана — дыра в правиле"
+    )
+
+def test_runtime_skip_budget_requires_issue_and_expiry() -> None:
+    """Рантайм-бюджет скипов (conftest) обязан требовать ту же тройку, что и статическая политика.
+
+    Два разных порога на одно явление — источник дефекта (класс, найденный в A-6):
+    статический скан требовал тройку, рантайм-бюджет — только issue, из-за чего
+    «зелёный» прогон был слабее, чем читался.
+    """
+    conftest = (REPO_ROOT / "tests" / "conftest.py").read_text(encoding="utf-8")
+    assert "EXPIRY_MARK" in conftest, "рантайм-бюджет скипов не знает про expiry"
+    budget = conftest.split("def pytest_sessionfinish", 1)[-1]
+    assert "ISSUE_MARK" in budget and "EXPIRY_MARK" in budget, (
+        "рантайм-бюджет скипов проверяет не всю тройку issue+expiry"
+    )
+
+
