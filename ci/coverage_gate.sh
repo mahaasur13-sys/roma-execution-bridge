@@ -89,8 +89,9 @@ if [ ! -s "$JSON_OUT" ]; then
   fail "no coverage report at $JSON_OUT (pytest exit $PYTEST_STATUS; see $RUN_LOG)"
 fi
 
-"$PY" - "$JSON_OUT" "$GLOBAL_FLOOR" "$MONEY_FLOOR" "$SCOPE_JSON" "$SCOPE_MODE" <<'PYEOF'
-import json, sys
+THRESHOLD_SHA_FULL="$(sha256sum "$THRESHOLDS" | cut -d' ' -f1)"
+"$PY" - "$JSON_OUT" "$GLOBAL_FLOOR" "$MONEY_FLOOR" "$SCOPE_JSON" "$SCOPE_MODE" "$(run_scope)" "$THRESHOLD_SHA_FULL" <<'PYEOF'
+import fnmatch, json, sys
 
 path, global_floor, money_floor = sys.argv[1], float(sys.argv[2]), float(sys.argv[3])
 scope_path, mode = sys.argv[4], sys.argv[5]
@@ -99,20 +100,36 @@ files = d["files"]
 thr = json.load(open(scope_path))
 
 def matched(name, prefixes):
-    """Точное совпадение пути или совпадение по каталогу (без ложно-подстрочного 'in').
+    """Совпадение пути с элементом области: точное, по каталогу или по glob (fnmatch).
 
-    '*' и '.' — match-all: режим whole-repo нужен только как негатив на дрейф области.
+    A-1 (N7a): элемент вида '**/tests/**' обязан матчить и ВЛОЖЕННЫЕ тесты, а не только корень.
+    '*'/'**'/'test_*.py' — тоже glob. Без этого exclude 'tests/' закрывал лишь корневой каталог,
+    вложенные тесты попадали в область измерения, и TOTAL зависел от структуры каталогов.
     """
     for p in prefixes:
         if not p:
             continue
         if p in ("*", "."):
             return True
+        if fnmatch.fnmatch(name, p):
+            return True
         if name == p or name.startswith(p.rstrip("/") + "/"):
             return True
+        if any(ch in p for ch in "*?["):
+            if fnmatch.fnmatch(name, p) or fnmatch.fnmatch(name, p.rstrip("/") + "/*") or fnmatch.fnmatch(name, "/" + name):
+                return True
         if p.endswith(".py") and name == p:
             return True
     return False
+
+
+def is_test_path(name):
+    """Тест — это путь с каталогом tests/ на ЛЮБОМ уровне или файл test_*.py / *_test.py."""
+    parts = name.split("/")
+    if any(seg == "tests" for seg in parts[:-1]):
+        return True
+    base = parts[-1]
+    return base.startswith("test_") or base.endswith("_test.py") or base == "conftest.py"
 
 if mode == "whole":
     include, exclude = ["."], []
@@ -159,15 +176,13 @@ problems = []
 for entry in include:
     if not any(matched(f, [entry]) for f in files):
         problems.append(f"scope entry matched 0 files: '{entry}' (опечатка в области измерения?)")
-# Дрейф области: тесты НИКОГДА не являются продуктом. Проверка не зависит от текущего
-# exclude-списка (иначе негатив SCOPE_MODE=whole не срабатывает: exclude пуст → drift не виден).
-TEST_PREFIX = "tests/"
-drifted = sorted(f for f in files
-                 if matched(f, include) and (f == TEST_PREFIX.rstrip("/") or f.startswith(TEST_PREFIX)))
+# Дрейф области: тесты НИКОГДА не являются продуктом. Проверка идёт по ИТОГОВОЙ области
+# (include ∧ ¬exclude): при SCOPE_MODE=whole exclude пуст → тест-файлы в области → негатив срабатывает.
+drifted = sorted(f for f in product if is_test_path(f))
 if drifted:
     problems.append(
-        f"scope drift: tests/ внутри области измерения ({len(drifted)} файлов, напр. {drifted[0]}) — "
-        "покрытие тестов самих себя не считается покрытием продукта")
+        f"scope drift: тест-файлы внутри области измерения (в т.ч. вложенные) — {len(drifted)} файлов, "
+        f"напр. {drifted[0]} — покрытие тестов самих себя не считается покрытием продукта")
 unscoped = sorted(f for f in files if not matched(f, include) and not matched(f, exclude))
 if unscoped:
     problems.append(f"unscoped: файл вне области и вне exclude: {unscoped[0]}"
