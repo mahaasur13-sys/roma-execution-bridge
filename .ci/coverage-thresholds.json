@@ -127,6 +127,20 @@
       "floor_total": 24.4,
       "floor_money": 48.1,
       "reason": "R-5: сборка репозитория. Полы НЕ менялись (ratchet — только с подтверждением числа на финальном состоянии)."
+    },
+    {
+      "date": "2026-09-21",
+      "scope": "product-only, exclude += deploy/ops/",
+      "transition": "15703 -> 15607 statements",
+      "reason": "N6-канонизация: deploy/ops/*.py — версионированные операционные артефакты, не продукт. Выведены из области явно, иначе гейт считал ops-скрипты продуктом.",
+      "commit": "85a171b"
+    },
+    {
+      "date": "2026-09-21",
+      "scope": "product-only, exclude += **/tests/** · **/test_*.py · **/*_test.py",
+      "transition": "15607 -> 15347 statements",
+      "reason": "A-1/N7a: exclude 'tests/' матчил только КОРНЕВОЙ каталог; вложенные наборы (plugins/*/tests, saas/gateway/tests, tests/integration) попадали в область измерения. Паттерны стали glob.",
+      "commit": "A-1"
     }
   ],
   "measured_on": {
