@@ -25,6 +25,13 @@
 #   * мета-тесты области: scope-элемент, не совпавший ни с одним файлом → FAIL;
 #     tests/ внутри области измерения → FAIL (scope drift); файл вне области и вне exclude → FAIL.
 #     Негатив-рычаг: SCOPE_MODE=whole → tests/ попадают в продукт → FAIL "scope drift".
+# A-6 completeness fix (2026-09-21):
+#   * смоук-порог "collected >= 244" пропускал ПОЛНОЕ исчезновение 19 тестов (263 -> 244):
+#     фильтр пути, -k или --deselect оставляли гейт зелёным;
+#   * область прогона утверждается ТОЧНЫМ равенством канону (.ci/run-completeness.json)
+#     и нулевым расхождением collected == executed;
+#   * числа — из одного junitxml (машинный источник), не из прогресс-строки;
+#   * проверка одна для гейта и CI: scripts/ci_run_completeness.py.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,7 +45,8 @@ cd "$REPO_ROOT" || fail "cannot cd to repo root $REPO_ROOT"
 PY="${PY:-python3}"
 JSON_OUT="${JSON_OUT:-/tmp/roma_cov.json}"
 RUN_LOG="${RUN_LOG:-/tmp/roma_cov_run.log}"
-MIN_COLLECTED="${MIN_COLLECTED:-244}"  # A-2 smoke: repo-wide обязан собирать не меньше канона
+COMPLETENESS_MANIFEST="$REPO_ROOT/.ci/run-completeness.json"  # A-6: канон полноты набора
+COMPLETENESS_CHECKER="$REPO_ROOT/scripts/ci_run_completeness.py"  # A-6: единая проверка полноты
 JUNIT_OUT="${JUNIT_OUT:-/tmp/roma_junit.xml}"  # A-2: машинный источник канонических чисел
 SCOPE_JSON="${SCOPE_JSON:-$THRESHOLDS}"
 SCOPE_MODE="${SCOPE_MODE:-product}"
@@ -92,27 +100,23 @@ rm -f "$JSON_OUT" "$JUNIT_OUT"
   --cov=. --cov-report="json:$JSON_OUT" --junitxml="$JUNIT_OUT" >"$RUN_LOG" 2>&1
 PYTEST_STATUS=$?
 
-# A-2: число тестов из МАШИННОГО источника (junitxml), не из прогресс-строки
+# A-6: полнота набора из МАШИННОГО источника (junitxml одного прогона).
+# collected == executed (нулевое расхождение) + точное равенство канону:
+# прежний порог "collected >= 244" пропускал исчезновение 19 тестов (263 -> 244).
 if [ -s "$JUNIT_OUT" ]; then
   JUNIT_SHA="$(sha256sum "$JUNIT_OUT" | cut -d' ' -f1)"
-  "$PY" - "$JUNIT_OUT" "$MIN_COLLECTED" <<'PYEOF'
-import sys, xml.etree.ElementTree as ET
-root = ET.parse(sys.argv[1]).getroot()
-s = root if root.tag == "testsuite" else root.find("testsuite")
-n = int(s.get("tests") or 0)
-print(f"JUNIT        : {sys.argv[1]} · tests={n} failures={s.get('failures')} "
-      f"errors={s.get('errors')} skipped={s.get('skipped')}")
-if n < int(sys.argv[2]):
-    print(f"COVERAGE GATE: FAILED -> тестов собрано {n} < порога {sys.argv[2]} "
-          f"(область прогона сузилась: ожидается repo-wide)", file=sys.stderr)
-    sys.exit(9)
-PYEOF
-  SMOKE_STATUS=$?
-  if [ "$SMOKE_STATUS" -ne 0 ]; then echo "JUNIT sha256 : $JUNIT_SHA"; exit 9; fi
+  COMPLETENESS_MODE="repo-wide"
+  if [ "$RUN_MODE" = "narrow" ]; then COMPLETENESS_MODE="narrow"; fi
+  "$PY" "$COMPLETENESS_CHECKER" --junit "$JUNIT_OUT" \
+    --manifest "$COMPLETENESS_MANIFEST" --mode "$COMPLETENESS_MODE"
+  COMPLETENESS_STATUS=$?
   echo "JUNIT sha256 : $JUNIT_SHA"
-  echo "RUN SCOPE    : $(run_scope) · target=$RUN_TARGET · collected>=$MIN_COLLECTED (smoke PASS)"
+  if [ "$COMPLETENESS_STATUS" -ne 0 ]; then
+    echo "COVERAGE GATE: FAILED -> полнота набора не подтверждена (канон: $COMPLETENESS_MANIFEST)" >&2
+    exit 9
+  fi
 else
-  fail "junitxml не создан: $JUNIT_OUT (канонические числа обязаны быть машинными — A-2)"
+  fail "junitxml не создан: $JUNIT_OUT (канонические числа обязаны быть машинными — A-2/A-6)"
 fi
 
 if [ ! -s "$JSON_OUT" ]; then

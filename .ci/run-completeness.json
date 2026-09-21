@@ -1,0 +1,37 @@
+{
+  "note": "A-6: канон полноты набора тестов. Числа — машинный факт последнего repo-wide прогона (junitxml), не оценка. Порог никогда не понижается: любое отличие от факта прогона роняет гейт, обновление — только явным диффом этого файла вместе с изменением набора тестов.",
+  "rule": "collected == executed (нулевое расхождение) И collected/passed/failures/errors/skipped == canon. Проверяет scripts/ci_run_completeness.py, вызывается из ci/coverage_gate.sh и из CI-шага scripts/ci_junit_smoke.py. Прежний порог 'collected >= 244' пропускал исчезновение 19 тестов — заменён точным равенством.",
+  "canon": {
+    "collected": 270,
+    "passed": 262,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 8,
+    "measured_on": "2026-09-21",
+    "run_scope": "repo-wide (target=., pytest -q -p no:cacheprovider -p no:warnings)",
+    "measurement": "263 (после P-LEASE-3) + 7 негативов полноты набора (A-6) = 270 · 270 - 8 skipped = 262 passed"
+  },
+  "history": [
+    {
+      "date": "2026-09-21",
+      "collected": 254,
+      "passed": 246,
+      "skipped": 8,
+      "change": "состояние до P-LEASE-3 (RPT-17: tests=254 failures=0 errors=0 skipped=8)"
+    },
+    {
+      "date": "2026-09-21",
+      "collected": 263,
+      "passed": 255,
+      "skipped": 8,
+      "change": "P-LEASE-3: +9 негативов протокола аренды (живая чужая аренда, битый heartbeat, два capture — один успех)"
+    },
+    {
+      "date": "2026-09-21",
+      "collected": 270,
+      "passed": 262,
+      "skipped": 8,
+      "change": "A-6: +7 негативов полноты набора (tests/test_run_completeness.py) — сужение выше прежнего порога, collected != executed, нечитаемый junit, отсутствующий манифест, обратная сборка гейт/CI"
+    }
+  ]
+}

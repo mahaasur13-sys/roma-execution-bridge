@@ -1,40 +1,44 @@
 #!/usr/bin/env python3
-"""A-2/N7b smoke: область прогона CI обязана быть repo-wide и собирать не меньше канона.
+"""A-2/N7b smoke → A-6: обёртка над единой проверкой полноты набора.
 
-Зачем: 62 теста (в т.ч. saas/gateway/tests/*) не исполнялись в CI, потому что шаг вызывал
-`pytest tests/`. Тесты, скрывавшие fail-open аутентификации, были спрятаны дважды: --ignore и областью прогона.
-Здесь область прогона печатается явно, а число берётся из junitxml — машинного источника, а не из прогресс-строки.
+История: здесь был СВОЙ порог (`CANON_MIN = 244`), дублирующий inline-проверку гейта.
+Два порога на одну величину расходятся, а `>= 244` не отличал полный набор от набора,
+из которого молча выпало 19 тестов. Реализация теперь одна —
+`scripts/ci_run_completeness.py` (collected == executed + точное равенство канону
+`.ci/run-completeness.json`); обёртка нужна только чтобы CI-шаг остался прежним.
+
+CLI:
+    ci_junit_smoke.py [junit.xml] [--mode repo-wide|narrow]
+Код выхода: как у проверки полноты (0 — набор полон; 3 — отказ).
 """
 
-import sys
-import xml.etree.ElementTree as ET
-from pathlib import Path
+from __future__ import annotations
 
-CANON_MIN = 244
+import pathlib
+import subprocess
+import sys
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+CHECKER = REPO_ROOT / "scripts" / "ci_run_completeness.py"
+MANIFEST = REPO_ROOT / ".ci" / "run-completeness.json"
 
 
 def main(argv: list[str]) -> int:
-    path = Path(argv[1] if len(argv) > 1 else "junit.xml")
-    if not path.exists():
-        print(f"SMOKE FAIL: junitxml не найден: {path} (CI обязан запускать pytest с --junitxml)", file=sys.stderr)
-        return 1
-    root = ET.parse(path).getroot()
-    suite = root if root.tag == "testsuite" else root.find("testsuite")
-    if suite is None:
-        print("SMOKE FAIL: в junitxml нет testsuite", file=sys.stderr)
-        return 1
-    tests = int(suite.get("tests", 0))
-    counts = {k: suite.get(k) for k in ("tests", "failures", "errors", "skipped")}
-    print("RUN SCOPE: repo-wide · target=. · junitxml:", counts)
-    if tests < CANON_MIN:
-        print(
-            f"SMOKE FAIL: собрано {tests} тестов < канона {CANON_MIN} — область прогона сузилась "
-            "(проверь, не вернулся ли `pytest tests/`)",
-            file=sys.stderr,
-        )
-        return 1
-    print(f"SMOKE PASS: собрано {tests} >= {CANON_MIN}")
-    return 0
+    args = [a for a in argv[1:] if not a.startswith("--")]
+    mode_args = [a for a in argv[1:] if a.startswith("--")]
+    junit = args[0] if args else "junit.xml"
+    return subprocess.call(
+        [
+            sys.executable,
+            str(CHECKER),
+            "--junit",
+            junit,
+            "--manifest",
+            str(MANIFEST),
+            *mode_args,
+        ],
+        cwd=REPO_ROOT,
+    )
 
 
 if __name__ == "__main__":
