@@ -8,26 +8,69 @@
 #           billing/aggregator.py — 0% (не покрыты ни одним тестом)
 #
 # Правило: порог НИКОГДА не понижается. Поднимать — только вместе с новыми тестами.
+#
+# T4 fail-closed fix (2026-09-21):
+#   * путь к порогам — относительно самого скрипта (был CWD-зависимый ".ci/...":
+#     при запуске вне корня репозитория гейт молча брал хардкод-фолбэк 31/46);
+#   * нет файла / битый / пустой / нечисловой порог → exit 3 с внятным сообщением;
+#   * в stdout печатаются ИЗМЕРЕННОЕ покрытие и ПРИМЕНЁННЫЙ порог (total + money);
+#   * гейт не читает покрытие, оставшееся от предыдущего прогона.
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+THRESHOLDS="$REPO_ROOT/.ci/coverage-thresholds.json"
+
 PY="${PY:-python3}"
-# Пороги — единый источник истины: .ci/coverage-thresholds.json (ratchet: только вверх).
-# Env-переменные перекрывают файл (нужно для негативных прогонов гейта).
-THRESHOLDS=".ci/coverage-thresholds.json"
-if [ -f "$THRESHOLDS" ]; then
-  FILE_GLOBAL="$(python3 -c "import json;print(json.load(open('$THRESHOLDS'))['global_floor'])")"
-  FILE_MONEY="$(python3 -c "import json;print(json.load(open('$THRESHOLDS'))['money_floor'])")"
-else
-  FILE_GLOBAL=31; FILE_MONEY=46
-fi
+JSON_OUT="${JSON_OUT:-/tmp/roma_cov.json}"
+RUN_LOG="${RUN_LOG:-/tmp/roma_cov_run.log}"
+
+fail() { echo "COVERAGE GATE: FAILED -> $*" >&2; exit 3; }
+
+read_floor() {  # $1 = json key; печатает число, при любой проблеме — exit≠0 + сообщение в stderr
+  "$PY" - "$THRESHOLDS" "$1" <<'PYEOF'
+import json, sys
+
+path, key = sys.argv[1], sys.argv[2]
+try:
+    value = json.load(open(path))[key]
+except FileNotFoundError:
+    print(f"thresholds file not found: {path}", file=sys.stderr)
+    sys.exit(1)
+except (json.JSONDecodeError, KeyError) as exc:
+    print(f"{type(exc).__name__} reading '{key}' from {path}: {exc}", file=sys.stderr)
+    sys.exit(1)
+except OSError as exc:
+    print(f"{type(exc).__name__} reading {path}: {exc}", file=sys.stderr)
+    sys.exit(1)
+if isinstance(value, bool) or not isinstance(value, (int, float)):
+    print(f"'{key}' is not numeric in {path}: {value!r}", file=sys.stderr)
+    sys.exit(1)
+print(value)
+PYEOF
+}
+
+[ -f "$THRESHOLDS" ] || fail "thresholds file missing: $THRESHOLDS (ratchet source of truth)"
+FILE_GLOBAL="$(read_floor global_floor)" || fail "invalid global_floor in $THRESHOLDS"
+FILE_MONEY="$(read_floor money_floor)" || fail "invalid money_floor in $THRESHOLDS"
 
 GLOBAL_FLOOR="${GLOBAL_FLOOR:-$FILE_GLOBAL}"
 MONEY_FLOOR="${MONEY_FLOOR:-$FILE_MONEY}"
-JSON_OUT="${JSON_OUT:-/tmp/roma_cov.json}"
+case "$GLOBAL_FLOOR" in ''|*[!0-9.]*) fail "global_floor is not numeric: '$GLOBAL_FLOOR'";; esac
+case "$MONEY_FLOOR" in ''|*[!0-9.]*) fail "money_floor is not numeric: '$MONEY_FLOOR'";; esac
 
+echo "thresholds : $THRESHOLDS (global $FILE_GLOBAL, money $FILE_MONEY)"
+echo "applied    : total floor $GLOBAL_FLOOR, money floor $MONEY_FLOOR"
+
+rm -f "$JSON_OUT"
 "$PY" -m pytest tests/ -q -p no:cacheprovider -p no:warnings \
-  --cov=. --cov-report="json:$JSON_OUT" >/tmp/roma_cov_run.log 2>&1
+  --cov=. --cov-report="json:$JSON_OUT" >"$RUN_LOG" 2>&1
 PYTEST_STATUS=$?
+
+if [ ! -s "$JSON_OUT" ]; then
+  echo "pytest exit: $PYTEST_STATUS"
+  fail "no coverage report at $JSON_OUT (pytest exit $PYTEST_STATUS; see $RUN_LOG)"
+fi
 
 "$PY" - "$JSON_OUT" "$GLOBAL_FLOOR" "$MONEY_FLOOR" <<'PYEOF'
 import json, sys
