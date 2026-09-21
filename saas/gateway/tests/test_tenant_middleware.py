@@ -1,4 +1,5 @@
 """Tests for tenant_middleware.py."""
+
 import pytest
 from saas.gateway.tenant_middleware import TenantMiddleware
 from saas.gateway.models import TenantGatewayConfig, BrandingConfig
@@ -12,7 +13,9 @@ def tenant_config():
         "acme": TenantGatewayConfig(
             tenant_id="acme",
             display_name="ACME Corp",
-            branding=BrandingConfig(inject_headers=True, logo_url="https://acme.com/logo.png"),
+            branding=BrandingConfig(
+                inject_headers=True, logo_url="https://acme.com/logo.png"
+            ),
         ),
         "beta": TenantGatewayConfig(
             tenant_id="beta",
@@ -45,7 +48,11 @@ class TestTenantMiddleware:
         assert resp.json()["tenant_id"] == "acme"
 
     def test_resolves_tenant_from_subdomain(self, gateway_app):
-        client = TestClient(gateway_app, base_url="http://acme.example.com", raise_server_exceptions=False)
+        client = TestClient(
+            gateway_app,
+            base_url="http://acme.example.com",
+            raise_server_exceptions=False,
+        )
         resp = client.get("/test")
         assert resp.status_code == 200
 

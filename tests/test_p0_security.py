@@ -34,6 +34,7 @@ def _uniq(prefix: str) -> str:
 @pytest.fixture(autouse=True)
 def _disable_background_worker(monkeypatch):
     """Prevent startup from launching the infinite poll_and_execute loop."""
+
     async def _noop():
         return None
 
@@ -49,20 +50,24 @@ def tenants(monkeypatch):
     key_a = _uniq("key-a")
     key_b = _uniq("key-b")
 
-    db.seed_tenants({
-        key_a: {"tenant_id": a_id, "name": "A"},
-        key_b: {"tenant_id": b_id, "name": "B"},
-    })
+    db.seed_tenants(
+        {
+            key_a: {"tenant_id": a_id, "name": "A"},
+            key_b: {"tenant_id": b_id, "name": "B"},
+        }
+    )
 
     # verify_api_key enforces email verification for non-admin keys — bypass it.
     monkeypatch.setattr(main, "is_email_verified", lambda api_key: True)
 
     # _admin_only reads main.API_KEYS (in-memory registry).
     original = dict(main.API_KEYS)
-    main.API_KEYS.update({
-        key_a: {"tenant_id": a_id},
-        key_b: {"tenant_id": b_id},
-    })
+    main.API_KEYS.update(
+        {
+            key_a: {"tenant_id": a_id},
+            key_b: {"tenant_id": b_id},
+        }
+    )
     main.API_KEYS["hotfix-admin-demo"] = {"tenant_id": "tenant-demo"}
 
     yield {"a_id": a_id, "b_id": b_id, "key_a": key_a, "key_b": key_b}
@@ -86,6 +91,7 @@ def _seed_job(tenant_id, status="running"):
 # ─────────────────────────────────────────────────────────────────────
 # /billing/top-up — admin gating
 # ─────────────────────────────────────────────────────────────────────
+
 
 def test_top_up_non_admin_forbidden(tenants):
     client = TestClient(main.app, raise_server_exceptions=False)
@@ -116,6 +122,7 @@ def test_top_up_cannot_credit_other_tenant(tenants):
 # Job mutation authz (main.py + router_jobs.py)
 # ─────────────────────────────────────────────────────────────────────
 
+
 def test_complete_requires_auth(tenants):
     jid = _seed_job(tenants["a_id"])
     client = TestClient(main.app, raise_server_exceptions=False)
@@ -143,7 +150,9 @@ def test_v1_complete_requires_auth(tenants):
 def test_v1_complete_cross_tenant_404(tenants):
     jid = _seed_job(tenants["a_id"])
     client = TestClient(main.app, raise_server_exceptions=False)
-    resp = client.post(f"/v1/jobs/{jid}/complete", headers={"X-API-Key": tenants["key_b"]})
+    resp = client.post(
+        f"/v1/jobs/{jid}/complete", headers={"X-API-Key": tenants["key_b"]}
+    )
     assert resp.status_code == 404
     assert db.get_execution_job(jid)["status"] == "running"
 
@@ -164,14 +173,17 @@ def test_worker_ack_cross_tenant_404(tenants):
 # _tenant_from_key
 # ─────────────────────────────────────────────────────────────────────
 
+
 def test_tenant_from_key_returns_real_tenant(tenants):
     from router_jobs import _tenant_from_key
+
     assert _tenant_from_key(tenants["key_a"]) == tenants["a_id"]
     assert _tenant_from_key(tenants["key_b"]) == tenants["b_id"]
 
 
 def test_tenant_from_key_invalid_key_401(tenants):
     from router_jobs import _tenant_from_key
+
     with pytest.raises(HTTPException) as exc_info:
         _tenant_from_key("nonexistent-key-xyz")
     assert exc_info.value.status_code == 401
@@ -180,6 +192,7 @@ def test_tenant_from_key_invalid_key_401(tenants):
 # ─────────────────────────────────────────────────────────────────────
 # gpu_worker /execute — worker token + execution policy
 # ─────────────────────────────────────────────────────────────────────
+
 
 def test_execute_requires_worker_token(monkeypatch):
     monkeypatch.setattr(gws, "WORKER_TOKEN", "sekret-token")
@@ -257,7 +270,11 @@ def test_execute_rejects_image_outside_allowlist(monkeypatch):
     client = TestClient(gws.app, raise_server_exceptions=False)
     resp = client.post(
         "/execute",
-        json={"job_id": "j1", "command": "python -c 'print(1)'", "image": "alpine:latest"},
+        json={
+            "job_id": "j1",
+            "command": "python -c 'print(1)'",
+            "image": "alpine:latest",
+        },
         headers={"X-Roma-Worker-Token": "sekret-token"},
     )
     assert resp.status_code == 403
@@ -278,13 +295,17 @@ def test_validate_execute_job_allowlist():
 
     # shell metacharacter binary is not in the allowlist → rejected
     with pytest.raises(HTTPException) as e2:
-        gws._validate_execute_job(gws.JobRequest(job_id="j1", command="python; rm -rf /"))
+        gws._validate_execute_job(
+            gws.JobRequest(job_id="j1", command="python; rm -rf /")
+        )
     assert e2.value.status_code == 403
 
     # any mount_paths → rejected
     with pytest.raises(HTTPException) as e3:
         gws._validate_execute_job(
-            gws.JobRequest(job_id="j1", command="python -c 1", mount_paths={"/host": "/c"})
+            gws.JobRequest(
+                job_id="j1", command="python -c 1", mount_paths={"/host": "/c"}
+            )
         )
     assert e3.value.status_code == 403
 
@@ -317,7 +338,8 @@ def test_empty_tenant_id_rejected_401(monkeypatch):
     calls = []
     fake_client = SimpleNamespace(
         config=SimpleNamespace(webhook_secret="wh"),
-        create_order=lambda **kwargs: calls.append(kwargs) or {"Url": "https://example.com"},
+        create_order=lambda **kwargs: calls.append(kwargs)
+        or {"Url": "https://example.com"},
     )
     monkeypatch.setattr(main, "CLOUDPAYMENTS_ENABLED", True)
     monkeypatch.setattr(main, "cloudpayments_client", fake_client)
@@ -338,6 +360,7 @@ def test_worker_run_job_no_shell(monkeypatch):
     import worker
 
     calls = []
+
     def fake_run(argv, **kwargs):
         calls.append((argv, kwargs))
         return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -364,6 +387,7 @@ def test_local_workers_no_shell(monkeypatch):
     import gpu_worker.local_worker as gpu_lw
 
     calls = []
+
     def fake_run(argv, **kwargs):
         calls.append((argv, kwargs))
         return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -384,13 +408,23 @@ def test_slurm_id_metachar_rejected(monkeypatch):
     p.enabled = True
 
     ssh_calls = []
+
     def fake_ssh_exec(cmd, timeout=30):
         ssh_calls.append(cmd)
 
     monkeypatch.setattr(p, "_ssh_exec", fake_ssh_exec)
 
-    for bad in ["123;rm -rf /", "12 && echo", "a|b", "`id`", "$(whoami)",
-                "-uroot", "--x", "-u root", "-1"]:
+    for bad in [
+        "123;rm -rf /",
+        "12 && echo",
+        "a|b",
+        "`id`",
+        "$(whoami)",
+        "-uroot",
+        "--x",
+        "-u root",
+        "-1",
+    ]:
         st = p.get_status(bad)
         assert st["status"] == "error"
         assert "invalid slurm_job_id" in st["message"]

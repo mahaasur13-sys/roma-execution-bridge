@@ -132,13 +132,19 @@ async def beta_apply(request: Request, payload: dict):
     use_case = payload.get("use_case", "")
     source = payload.get("source", "")
     lead_id = db.add_lead(email, company, role, use_case, source)
-    logger.info("beta_lead_created", extra={"lead_id": lead_id, "email": email[:3] + "***"})
-    return {"status": "accepted", "message": "Thank you! We'll reach out to you soon.", "lead_id": lead_id}
+    logger.info(
+        "beta_lead_created", extra={"lead_id": lead_id, "email": email[:3] + "***"}
+    )
+    return {
+        "status": "accepted",
+        "message": "Thank you! We'll reach out to you soon.",
+        "lead_id": lead_id,
+    }
 
 
 @router.get("/beta/leads", dependencies=[Depends(verify_api_key)])
 async def beta_leads(key_info: dict = Depends(verify_api_key)):
-    status = ""  # All leads
+    _status = ""  # All leads
     all_leads = db.list_leads()
     return {"total": len(all_leads), "leads": all_leads}
 
@@ -155,5 +161,8 @@ async def beta_validate_invite(code: str):
     result = validate_invite(code)
     if result is None:
         raise HTTPException(status_code=404, detail="Invalid or expired invite code")
-    return {"valid": True, "max_uses": result.get("invite", {}).get("max_uses", 1),
-            "used_count": result.get("invite", {}).get("used_count", 0)}
+    return {
+        "valid": True,
+        "max_uses": result.get("invite", {}).get("max_uses", 1),
+        "used_count": result.get("invite", {}).get("used_count", 0),
+    }

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """ROMA Auth Engine — API Keys, HMAC signing, tenant identity."""
+
 import hmac
 import hashlib
 import secrets
@@ -9,16 +10,19 @@ from dataclasses import dataclass, field
 from typing import Dict, Optional, List
 from enum import Enum
 
+
 class KeyType(Enum):
-    SERVER = "server"       # server-to-server
-    USER = "user"          # user-facing
-    WEBHOOK = "webhook"    # outbound callbacks
+    SERVER = "server"  # server-to-server
+    USER = "user"  # user-facing
+    WEBHOOK = "webhook"  # outbound callbacks
+
 
 class KeyStatus(Enum):
     ACTIVE = "active"
     EXPIRED = "expired"
     REVOKED = "revoked"
-    PENDING = "pending"    # created but not yet activated
+    PENDING = "pending"  # created but not yet activated
+
 
 @dataclass
 class APIKey:
@@ -26,8 +30,8 @@ class APIKey:
     tenant_id: str
     project_id: str
     key_type: KeyType
-    key_prefix: str        # first 8 chars for identification
-    key_hash: str         # SHA256 of full key
+    key_prefix: str  # first 8 chars for identification
+    key_hash: str  # SHA256 of full key
     status: KeyStatus
     created_at: float
     expires_at: Optional[float]
@@ -35,28 +39,36 @@ class APIKey:
     scopes: List[str]
     description: str
 
+
 @dataclass
 class Tenant:
     tenant_id: str
     name: str
-    plan: str             # FREE | PRO | ENTERPRISE
+    plan: str  # FREE | PRO | ENTERPRISE
     created_at: float
-    api_keys: List[str]   # key_ids
+    api_keys: List[str]  # key_ids
     active: bool = True
     metadata: Dict = field(default_factory=dict)
+
 
 class AuthEngine:
     def __init__(self, secret_key: Optional[str] = None):
         self.secret_key = secret_key or secrets.token_hex(32)
-        self.keys: Dict[str, APIKey] = {}        # key_id → APIKey
-        self.key_index: Dict[str, str] = {}     # key_prefix:key_hash → key_id
-        self.tenants: Dict[str, Tenant] = {}    # tenant_id → Tenant
+        self.keys: Dict[str, APIKey] = {}  # key_id → APIKey
+        self.key_index: Dict[str, str] = {}  # key_prefix:key_hash → key_id
+        self.tenants: Dict[str, Tenant] = {}  # tenant_id → Tenant
         self.hmac_secrets: Dict[str, str] = {}  # tenant_id → HMAC secret
 
     # ── Key Management ──────────────────────────────────────────────────────
-    def create_key(self, tenant_id: str, project_id: str, key_type: KeyType,
-                   description: str, expires_at: Optional[float] = None,
-                   scopes: Optional[List[str]] = None) -> tuple[str, str]:
+    def create_key(
+        self,
+        tenant_id: str,
+        project_id: str,
+        key_type: KeyType,
+        description: str,
+        expires_at: Optional[float] = None,
+        scopes: Optional[List[str]] = None,
+    ) -> tuple[str, str]:
         """Create API key. Returns (key_id, full_secret). Secret shown ONLY once."""
         key_id = f"roma_{uuid.uuid4().hex[:16]}"
         full_secret = f"sk_{secrets.token_bytes(24).hex()}"
@@ -64,12 +76,18 @@ class AuthEngine:
         key_hash = hashlib.sha256(full_secret.encode()).hexdigest()
 
         key = APIKey(
-            key_id=key_id, tenant_id=tenant_id, project_id=project_id,
-            key_type=key_type, key_prefix=prefix, key_hash=key_hash,
-            status=KeyStatus.ACTIVE, created_at=time.time(),
-            expires_at=expires_at, last_used_at=None,
+            key_id=key_id,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            key_type=key_type,
+            key_prefix=prefix,
+            key_hash=key_hash,
+            status=KeyStatus.ACTIVE,
+            created_at=time.time(),
+            expires_at=expires_at,
+            last_used_at=None,
             scopes=scopes or ["submit", "status", "cancel"],
-            description=description
+            description=description,
         )
         self.keys[key_id] = key
         self.key_index[f"{prefix}:{key_hash}"] = key_id
@@ -103,14 +121,30 @@ class AuthEngine:
         """Rotate key: revoke old, create new. Returns (key_id, new_secret)."""
         old = self.keys[key_id]
         self.revoke_key(key_id)
-        return self.create_key(old.tenant_id, old.project_id, old.key_type,
-                              old.description, old.expires_at, old.scopes)
+        return self.create_key(
+            old.tenant_id,
+            old.project_id,
+            old.key_type,
+            old.description,
+            old.expires_at,
+            old.scopes,
+        )
 
     # ── Tenant Management ───────────────────────────────────────────────────
-    def create_tenant(self, tenant_id: str, name: str, plan: str = "FREE",
-                      hmac_secret: Optional[str] = None) -> Tenant:
-        tenant = Tenant(tenant_id=tenant_id, name=name, plan=plan,
-                       created_at=time.time(), api_keys=[])
+    def create_tenant(
+        self,
+        tenant_id: str,
+        name: str,
+        plan: str = "FREE",
+        hmac_secret: Optional[str] = None,
+    ) -> Tenant:
+        tenant = Tenant(
+            tenant_id=tenant_id,
+            name=name,
+            plan=plan,
+            created_at=time.time(),
+            api_keys=[],
+        )
         self.tenants[tenant_id] = tenant
         if hmac_secret:
             self.hmac_secrets[tenant_id] = hmac_secret
@@ -126,18 +160,25 @@ class AuthEngine:
         self.hmac_secrets[tenant_id] = secret
         return secret
 
-    def sign_request(self, tenant_id: str, method: str, path: str, body: str,
-                    timestamp: float) -> str:
+    def sign_request(
+        self, tenant_id: str, method: str, path: str, body: str, timestamp: float
+    ) -> str:
         """Create HMAC signature for request signing."""
         secret = self.hmac_secrets.get(tenant_id)
         if not secret:
             return ""
         msg = f"{method}:{path}:{body}:{timestamp}"
-        return hmac.new(secret.encode(), msg.encode(),
-                       hashlib.sha256).hexdigest()
+        return hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()
 
-    def verify_signature(self, tenant_id: str, method: str, path: str,
-                       body: str, timestamp: float, signature: str) -> bool:
+    def verify_signature(
+        self,
+        tenant_id: str,
+        method: str,
+        path: str,
+        body: str,
+        timestamp: float,
+        signature: str,
+    ) -> bool:
         """Verify HMAC signature. Reject if >5 min old."""
         if abs(time.time() - timestamp) > 300:
             return False
@@ -149,7 +190,9 @@ class AuthEngine:
         """Validate or raise AuthError."""
         key = self.validate_key(full_secret)
         if not key:
-            raise AuthError("invalid_or_expired_key", "API key is invalid, expired, or revoked")
+            raise AuthError(
+                "invalid_or_expired_key", "API key is invalid, expired, or revoked"
+            )
         return key
 
     def require_tenant(self, tenant_id: str) -> Tenant:
@@ -160,6 +203,7 @@ class AuthEngine:
     def require_scope(self, key: APIKey, scope: str):
         if scope not in key.scopes:
             raise AuthError("insufficient_scope", f"Missing required scope: {scope}")
+
 
 class AuthError(Exception):
     def __init__(self, code: str, message: str):
@@ -172,8 +216,13 @@ if __name__ == "__main__":
     # Demo
     auth = AuthEngine()
     t = auth.create_tenant("tenant-acme", "ACME Corp", "PRO")
-    key_id, secret = auth.create_key("tenant-acme", "proj-1", KeyType.SERVER,
-                                    "Production key", scopes=["submit","status","cancel","metering"])
+    key_id, secret = auth.create_key(
+        "tenant-acme",
+        "proj-1",
+        KeyType.SERVER,
+        "Production key",
+        scopes=["submit", "status", "cancel", "metering"],
+    )
     auth.attach_key_to_tenant("tenant-acme", key_id)
     print(f"Tenant: {t.tenant_id} ({t.plan})")
     print(f"Key: {key_id} | Secret: {secret[:20]}...")
@@ -184,8 +233,14 @@ if __name__ == "__main__":
     # HMAC
     hmac_secret = auth.create_hmac_secret("tenant-acme")
     ts = time.time()
-    sig = auth.sign_request("tenant-acme", "POST", "/api/v1/submit", '{"task":"test"}', ts)
-    verify = auth.verify_signature("tenant-acme", "POST", "/api/v1/submit", '{"task":"test"}', ts, sig)
+    sig = auth.sign_request(
+        "tenant-acme", "POST", "/api/v1/submit", '{"task":"test"}', ts
+    )
+    verify = auth.verify_signature(
+        "tenant-acme", "POST", "/api/v1/submit", '{"task":"test"}', ts, sig
+    )
     print(f"HMAC verify: {verify}")
     test_payload = '{"task":"test"}'
-    print(f"Timestamp drift (+10min): {auth.verify_signature('tenant-acme', 'POST', '/api/v1/submit', test_payload, ts - 600, sig)}")
+    print(
+        f"Timestamp drift (+10min): {auth.verify_signature('tenant-acme', 'POST', '/api/v1/submit', test_payload, ts - 600, sig)}"
+    )

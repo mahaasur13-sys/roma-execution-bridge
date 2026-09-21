@@ -17,6 +17,7 @@
   4. A1: пиннит ТЕСТОВЫЙ DSN (roma_test) и падает с exit=90 + маркер A1-REFUSED,
      если прогон пытается пойти против боевой БД; отдельно печатает skip-budget.
 """
+
 from __future__ import annotations
 
 import json
@@ -41,7 +42,9 @@ INVARIANT_FILES = (
     "test_p0_security.py",
 )
 ISSUE_MARK = "issue:"
-EXPIRY_MARK = "expiry:"  # A-3b: рантайм-бюджет требует ту же тройку, что статическая политика
+EXPIRY_MARK = (
+    "expiry:"  # A-3b: рантайм-бюджет требует ту же тройку, что статическая политика
+)
 LEDGER_PATH = Path("/tmp/roma_skip_ledger.json")
 
 _skips: list[dict] = []
@@ -73,7 +76,9 @@ def _apply_test_isolation() -> str | None:
         pytest.exit(str(exc), returncode=_isolation.REFUSED_EXIT_CODE)
 
     if dsn:
-        print(f"[conftest] A1 test isolation: TEST DB pinned ({_isolation.describe(dsn)})")
+        print(
+            f"[conftest] A1 test isolation: TEST DB pinned ({_isolation.describe(dsn)})"
+        )
     else:
         print(
             "[conftest] A1 test isolation: тестовый DSN не найден — "
@@ -109,7 +114,9 @@ def pytest_sessionstart(session) -> None:
 
         loaded = env_loader.load_env()
         if loaded:
-            print(f"[conftest] env loaded explicitly (PG_DSN set: {bool(os.environ.get('PG_DSN'))})")
+            print(
+                f"[conftest] env loaded explicitly (PG_DSN set: {bool(os.environ.get('PG_DSN'))})"
+            )
     except Exception as exc:  # конфиг не критичен для unit-тестов
         print(f"[conftest] env_loader недоступен: {type(exc).__name__}: {exc}")
 
@@ -134,7 +141,9 @@ def pytest_sessionfinish(session, exitstatus) -> None:
         if any(f in s["nodeid"] for f in INVARIANT_FILES)
         and (ISSUE_MARK not in s["reason"] or EXPIRY_MARK not in s["reason"])
     ]
-    invariant_skips = [s for s in _skips if any(f in s["nodeid"] for f in INVARIANT_FILES)]
+    invariant_skips = [
+        s for s in _skips if any(f in s["nodeid"] for f in INVARIANT_FILES)
+    ]
 
     ledger = {
         "skips_total": len(_skips),
@@ -147,7 +156,9 @@ def pytest_sessionfinish(session, exitstatus) -> None:
     except Exception:
         pass
 
-    invariant_files_skipped = sorted({s["nodeid"].split("::")[0] for s in invariant_skips})
+    invariant_files_skipped = sorted(
+        {s["nodeid"].split("::")[0] for s in invariant_skips}
+    )
     print(
         "\n[conftest] skip-budget:"
         f" invariant files skipped: {len(invariant_files_skipped)}"

@@ -1,4 +1,5 @@
 """DecisionOS Crypto Payments — 8 smoke tests."""
+
 from __future__ import annotations
 
 import json
@@ -39,24 +40,32 @@ def settings() -> CryptoSettings:
 @pytest.fixture
 def mock_provider(settings: CryptoSettings) -> NOWPaymentsProvider:
     provider = MagicMock(spec=NOWPaymentsProvider)
-    provider.create_invoice = AsyncMock(return_value={
-        "pay_address": "TXtest123",
-        "invoice_id": "np_inv_1",
-    })
-    provider.get_invoice = AsyncMock(return_value={
-        "payment_status": "pending",
-    })
+    provider.create_invoice = AsyncMock(
+        return_value={
+            "pay_address": "TXtest123",
+            "invoice_id": "np_inv_1",
+        }
+    )
+    provider.get_invoice = AsyncMock(
+        return_value={
+            "payment_status": "pending",
+        }
+    )
     provider.verify_webhook = MagicMock(return_value=True)
     return provider
 
 
 @pytest.fixture
-def service(settings: CryptoSettings, mock_provider: NOWPaymentsProvider) -> CryptoInvoiceService:
+def service(
+    settings: CryptoSettings, mock_provider: NOWPaymentsProvider
+) -> CryptoInvoiceService:
     return CryptoInvoiceService(provider=mock_provider, settings=settings)
 
 
 @pytest.fixture
-def webhook_handler(settings: CryptoSettings, mock_provider: NOWPaymentsProvider) -> CryptoWebhookHandler:
+def webhook_handler(
+    settings: CryptoSettings, mock_provider: NOWPaymentsProvider
+) -> CryptoWebhookHandler:
     svc = CryptoInvoiceService(provider=mock_provider, settings=settings)
     return CryptoWebhookHandler(provider=mock_provider, service=svc)
 
@@ -72,7 +81,9 @@ class TestCreateInvoice:
         assert result.invoice_id is not None
         assert result.invoice_id is not None
 
-    async def test_assigns_unique_invoice_id(self, service: CryptoInvoiceService) -> None:
+    async def test_assigns_unique_invoice_id(
+        self, service: CryptoInvoiceService
+    ) -> None:
         request = CreateInvoiceRequest(
             tenant_id="t1",
             tier=TierName.START,
@@ -96,13 +107,17 @@ class TestGetInvoice:
 
 
 class TestWebhook:
-    async def test_processes_paid_webhook(self, webhook_handler: CryptoWebhookHandler) -> None:
+    async def test_processes_paid_webhook(
+        self, webhook_handler: CryptoWebhookHandler
+    ) -> None:
         inv_id = str(uuid4())
         result = await webhook_handler.handle(
-            payload=json.dumps({
-                "payment_status": "finished",
-                "order_id": inv_id,
-            }).encode(),
+            payload=json.dumps(
+                {
+                    "payment_status": "finished",
+                    "order_id": inv_id,
+                }
+            ).encode(),
             signature="test-sig",
         )
         assert result["status"] == "processed"
@@ -127,18 +142,20 @@ class TestModels:
         assert isinstance(invoice.amount_usd, object)
 
     def test_webhook_event_parsing(self) -> None:
-        raw = json.dumps({
-            "event_id": str(uuid4()),
-            "provider": "nowpayments",
-            "event_type": "payment",
-            "invoice_id": str(uuid4()),
-            "raw_payload": {"payment_status": "finished"},
-            "status": "paid",
-            "tx_hash": "abc123",
-            "currency_paid": "usdt",
-            "received_amount": "49.0",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
+        raw = json.dumps(
+            {
+                "event_id": str(uuid4()),
+                "provider": "nowpayments",
+                "event_type": "payment",
+                "invoice_id": str(uuid4()),
+                "raw_payload": {"payment_status": "finished"},
+                "status": "paid",
+                "tx_hash": "abc123",
+                "currency_paid": "usdt",
+                "received_amount": "49.0",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
         event = CryptoWebhookEvent.model_validate_json(raw)
         assert isinstance(event.event_id, UUID)
 
@@ -158,7 +175,10 @@ class TestPricingLogic:
         assert TIER_PRICES_USD[request.tier] == TIER_PRICES_USD[TierName.START]
 
     def test_network_from_currency(self) -> None:
-        assert CryptoNetwork.from_currency(CryptoCurrency.USDT_TRC20) == CryptoNetwork.TRC20
+        assert (
+            CryptoNetwork.from_currency(CryptoCurrency.USDT_TRC20)
+            == CryptoNetwork.TRC20
+        )
         assert CryptoNetwork.from_currency(CryptoCurrency.BTC) == CryptoNetwork.BTC
 
     def test_status_transitions(self) -> None:

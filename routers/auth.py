@@ -43,13 +43,17 @@ GITHUB_CLIENT_ID = os.environ.get("GITHUB_CLIENT_ID", "")
 GITHUB_CLIENT_SECRET = os.environ.get("GITHUB_CLIENT_SECRET", "")
 OAUTH_ENABLED = bool(GOOGLE_CLIENT_ID or GITHUB_CLIENT_ID)
 OAUTH_REDIRECT_BASE = os.environ.get(
-    "OAUTH_REDIRECT_BASE",
-    "https://roma-execution-bridge-asurdev.zocomputer.io"
+    "OAUTH_REDIRECT_BASE", "https://roma-execution-bridge-asurdev.zocomputer.io"
 )
 
 # ── Email service singleton ────────────────────────────────────────────
 email_service = EmailService(
-    provider=_EmailProvider[os.environ.get("EMAIL_PROVIDER", "console").upper()] if os.environ.get("EMAIL_PROVIDER", "console").upper() in ("SMTP","SENDGRID","RESEND","CONSOLE") else _EmailProvider.CONSOLE,
+    provider=(
+        _EmailProvider[os.environ.get("EMAIL_PROVIDER", "console").upper()]
+        if os.environ.get("EMAIL_PROVIDER", "console").upper()
+        in ("SMTP", "SENDGRID", "RESEND", "CONSOLE")
+        else _EmailProvider.CONSOLE
+    ),
     smtp_host=os.environ.get("EMAIL_SMTP_HOST", "smtp.gmail.com"),
     smtp_port=int(os.environ.get("EMAIL_SMTP_PORT", "587")),
     smtp_user=os.environ.get("EMAIL_SMTP_USER", ""),
@@ -59,8 +63,12 @@ email_service = EmailService(
     sendgrid_api_key=os.environ.get("SENDGRID_API_KEY", ""),
 )
 
-VERIFICATION_TOKEN_EXPIRY_HOURS = int(os.environ.get("VERIFICATION_TOKEN_EXPIRY_HOURS", "24"))
-VERIFICATION_BASE_URL = os.environ.get("VERIFICATION_BASE_URL", "https://roma-execution-bridge-asurdev.zocomputer.io")
+VERIFICATION_TOKEN_EXPIRY_HOURS = int(
+    os.environ.get("VERIFICATION_TOKEN_EXPIRY_HOURS", "24")
+)
+VERIFICATION_BASE_URL = os.environ.get(
+    "VERIFICATION_BASE_URL", "https://roma-execution-bridge-asurdev.zocomputer.io"
+)
 DEMO_API_KEY = os.environ.get("ROMA_DEMO_API_KEY", "YOUR_API_KEY")
 
 LOGIN_PAGE = """<!DOCTYPE html>
@@ -114,7 +122,10 @@ async def login_page(request: Request):
     session_id = request.cookies.get("session_id")
     if session_id and get_session(session_id):
         return RedirectResponse(url="/dashboard", status_code=302)
-    return Response(content=LOGIN_PAGE.replace("{{ demo_key }}", DEMO_API_KEY), media_type="text/html")
+    return Response(
+        content=LOGIN_PAGE.replace("{{ demo_key }}", DEMO_API_KEY),
+        media_type="text/html",
+    )
 
 
 @limiter.limit("15/minute")
@@ -125,11 +136,10 @@ async def login(request: Request):
     api_key = form.get("api_key", "")
     if api_key not in API_KEYS:
         # Show login page with error
-        error_html = (
-            LOGIN_PAGE
-            .replace("</form>", '<div class="error">Invalid API key. Try <code>{{ demo_key }}</code></div></form>')
-            .replace("{{ demo_key }}", DEMO_API_KEY)
-        )
+        error_html = LOGIN_PAGE.replace(
+            "</form>",
+            '<div class="error">Invalid API key. Try <code>{{ demo_key }}</code></div></form>',
+        ).replace("{{ demo_key }}", DEMO_API_KEY)
         return Response(content=error_html, media_type="text/html", status_code=401)
 
     info = API_KEYS[api_key]
@@ -137,8 +147,11 @@ async def login(request: Request):
 
     resp = RedirectResponse(url="/dashboard", status_code=302)
     resp.set_cookie(
-        "session_id", session_id,
-        httponly=True, max_age=3600, samesite="lax",
+        "session_id",
+        session_id,
+        httponly=True,
+        max_age=3600,
+        samesite="lax",
     )
     return resp
 
@@ -158,48 +171,63 @@ async def logout(request: Request):
 async def signup(payload: dict, request: Request):
     """Register new user with email/password. Sends verification email."""
     email = (payload.get("email") or "").strip().lower()
-    password = (payload.get("password") or "")
-    name = (payload.get("name") or email.split("@")[0])
+    password = payload.get("password") or ""
+    name = payload.get("name") or email.split("@")[0]
     plan = payload.get("plan", "free")
-    
+
     if not email or not password:
         raise HTTPException(status_code=400, detail="Email and password are required")
     if len(password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
-    
+        raise HTTPException(
+            status_code=400, detail="Password must be at least 8 characters"
+        )
+
     # Beta capacity check
     if BETA_MODE:
         cap = check_beta_capacity()
         if not cap["allowed"]:
-            raise HTTPException(status_code=423, detail="Beta is currently full. Slots: %d/%d" % (cap["current_users"], cap["max_users"]))
-    
+            raise HTTPException(
+                status_code=423,
+                detail="Beta is currently full. Slots: %d/%d"
+                % (cap["current_users"], cap["max_users"]),
+            )
+
     # Invite code validation (if required)
     invite_code = payload.get("invite_code")
     if BETA_MODE and BETA_REQUIRE_INVITE:
         if not invite_code:
-            raise HTTPException(status_code=400, detail="Invite code is required for beta access")
+            raise HTTPException(
+                status_code=400, detail="Invite code is required for beta access"
+            )
         inv = validate_invite(invite_code)
         if inv is None:
-            raise HTTPException(status_code=400, detail="Invalid or expired invite code")
-    
+            raise HTTPException(
+                status_code=400, detail="Invalid or expired invite code"
+            )
+
     existing = db.get_user_by_email(email)
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
-    
+
     user_id = str(uuid.uuid4())
     tenant_id = f"tenant-{str(uuid.uuid4())[:8]}"
     api_key = f"roma-{str(uuid.uuid4())[:12]}"
     password_hash = hashlib.sha256(password.encode() + user_id.encode()).hexdigest()
-    
+
     from auth.verification import generate_token
+
     token = generate_token()
-    expires_at = (datetime.now(timezone.utc) + timedelta(hours=VERIFICATION_TOKEN_EXPIRY_HOURS)).isoformat()
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(hours=VERIFICATION_TOKEN_EXPIRY_HOURS)
+    ).isoformat()
     verification_url = f"{VERIFICATION_BASE_URL}/auth/verify-email?token={token}"
-    
+
     db.seed_tenants({api_key: {"tenant_id": tenant_id, "plan": plan}})
     API_KEYS[api_key] = {"tenant_id": tenant_id, "plan": plan, "email_verified": False}
-    db.create_user_with_password(user_id, email, name, tenant_id, api_key, password_hash, token, expires_at)
-    
+    db.create_user_with_password(
+        user_id, email, name, tenant_id, api_key, password_hash, token, expires_at
+    )
+
     try:
         email_service.send_verification_email(
             to_email=email,
@@ -208,32 +236,40 @@ async def signup(payload: dict, request: Request):
             brand={"app_name": "ROMA", "primary_color": "#6366f1"},
             expiry_hours=VERIFICATION_TOKEN_EXPIRY_HOURS,
         )
-        logger.info("verification_email_sent", extra={"email": email, "tenant_id": tenant_id})
+        logger.info(
+            "verification_email_sent", extra={"email": email, "tenant_id": tenant_id}
+        )
     except Exception as e:
-        logger.warning("verification_email_failed", extra={"email": email, "error": str(e)})
-    
+        logger.warning(
+            "verification_email_failed", extra={"email": email, "error": str(e)}
+        )
+
     # Mark invite as used
     if invite_code:
         use_invite(invite_code, user_id)
-    
+
     # Apply beta spend-cap
     if BETA_MODE and BETA_DEFAULT_SPEND_CAP > 0:
         try:
             from billing.pg_ledger import _ensure_pool
+
             conn = _ensure_pool()
             if conn:
                 cur = conn.cursor()
                 cur.execute(
                     "INSERT INTO tenant_spend_caps (tenant_id, max_spend_usd) VALUES (%s, %s) "
                     "ON CONFLICT (tenant_id) DO NOTHING",
-                    (tenant_id, BETA_DEFAULT_SPEND_CAP)
+                    (tenant_id, BETA_DEFAULT_SPEND_CAP),
                 )
                 conn.commit()
                 from billing.pg_connection import _return_conn
+
                 _return_conn(conn)
         except Exception as e:
-            logger.warning("beta_spend_cap_failed", extra={"tenant_id": tenant_id, "error": str(e)})
-    
+            logger.warning(
+                "beta_spend_cap_failed", extra={"tenant_id": tenant_id, "error": str(e)}
+            )
+
     return {
         "status": "pending",
         "message": "Account created. Please check your email to verify your address.",
@@ -246,18 +282,20 @@ async def verify_email_endpoint(token: str):
     """Verify email address. Can be called via browser (GET) or API (POST)."""
     result, reason = verify_token(token)
     if reason != "success":
-        raise HTTPException(status_code=400, detail="Invalid or expired verification token")
-    
+        raise HTTPException(
+            status_code=400, detail="Invalid or expired verification token"
+        )
+
     user_id = result["user_id"]
     user = db.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     db.mark_email_verified(user["email"])
     api_key = user.get("api_key", "")
     if api_key and api_key in API_KEYS:
         API_KEYS[api_key]["email_verified"] = True
-    
+
     return {
         "status": "verified",
         "message": "Email verified successfully. Your account is now active.",
@@ -271,17 +309,17 @@ async def resend_verification(payload: dict):
     email = (payload.get("email") or "").strip().lower()
     if not email:
         raise HTTPException(status_code=400, detail="Email is required")
-    
+
     user = db.get_user_by_email(email)
     if not user:
         raise HTTPException(status_code=404, detail="No account found with this email")
     if user.get("email_verified"):
         return {"status": "already_verified", "message": "Email is already verified"}
-    
+
     token, expires_at = create_verification(user["id"])
     verification_url = f"{VERIFICATION_BASE_URL}/auth/verify-email?token={token}"
     db.update_verification_token(user["id"], token, expires_at)
-    
+
     try:
         email_service.send_verification_email(
             to_email=email,
@@ -292,9 +330,14 @@ async def resend_verification(payload: dict):
         )
         logger.info("verification_resent", extra={"email": email})
     except Exception as e:
-        logger.warning("resend_verification_failed", extra={"email": email, "error": str(e)})
-    
-    return {"status": "sent", "message": "Verification email resent. Please check your inbox."}
+        logger.warning(
+            "resend_verification_failed", extra={"email": email, "error": str(e)}
+        )
+
+    return {
+        "status": "sent",
+        "message": "Verification email resent. Please check your inbox.",
+    }
 
 
 @router.get("/oauth/login/{provider}")
@@ -306,7 +349,8 @@ async def oauth_login(provider: str):
                 "OAuth is not configured. Add GOOGLE_CLIENT_ID or GITHUB_CLIENT_ID to .env<br>"
                 "See <a href='https://github.com/mahaasur13-sys/roma-execution-bridge/blob/master/docs/oauth-setup.md'>docs/oauth-setup.md</a>"
             ),
-            media_type="text/html", status_code=503,
+            media_type="text/html",
+            status_code=503,
         )
 
     if provider == "google" and GOOGLE_CLIENT_ID:
@@ -334,7 +378,8 @@ async def oauth_login(provider: str):
 
     return Response(
         content=_error_page(f"OAuth provider '{provider}' is not configured."),
-        media_type="text/html", status_code=400,
+        media_type="text/html",
+        status_code=400,
     )
 
 
@@ -353,7 +398,9 @@ async def _oauth_google_callback(code: str) -> dict:
         )
         token_data = token_resp.json()
         if "error" in token_data:
-            raise ValueError(f"Google token error: {token_data.get('error_description', token_data['error'])}")
+            raise ValueError(
+                f"Google token error: {token_data.get('error_description', token_data['error'])}"
+            )
 
         access_token = token_data["access_token"]
         user_resp = await client.get(
@@ -384,7 +431,9 @@ async def _oauth_github_callback(code: str) -> dict:
         )
         token_data = token_resp.json()
         if "error" in token_data:
-            raise ValueError(f"GitHub token error: {token_data.get('error_description', token_data['error'])}")
+            raise ValueError(
+                f"GitHub token error: {token_data.get('error_description', token_data['error'])}"
+            )
 
         access_token = token_data["access_token"]
         user_resp = await client.get(
@@ -404,7 +453,9 @@ async def _oauth_github_callback(code: str) -> dict:
                 headers={"Authorization": f"Bearer {access_token}"},
             )
             emails = emails_resp.json()
-            primary = next((e for e in emails if e.get("primary")), emails[0] if emails else {})
+            primary = next(
+                (e for e in emails if e.get("primary")), emails[0] if emails else {}
+            )
             email = primary.get("email", "")
 
         return {
@@ -417,22 +468,27 @@ async def _oauth_github_callback(code: str) -> dict:
 
 @limiter.limit("10/minute")
 @router.get("/oauth/callback/{provider}")
-async def oauth_callback(provider: str, code: str = "", error: str = "", request: Request = None):
+async def oauth_callback(
+    provider: str, code: str = "", error: str = "", request: Request = None
+):
     """Handle OAuth callback — exchange code, create/update user, start session."""
     if error:
         return Response(
             content=_error_page(f"OAuth authorization denied: {error}"),
-            media_type="text/html", status_code=400,
+            media_type="text/html",
+            status_code=400,
         )
     if not code:
         return Response(
             content=_error_page("No authorization code received from OAuth provider."),
-            media_type="text/html", status_code=400,
+            media_type="text/html",
+            status_code=400,
         )
     if not OAUTH_ENABLED:
         return Response(
             content=_error_page("OAuth is not configured."),
-            media_type="text/html", status_code=503,
+            media_type="text/html",
+            status_code=503,
         )
 
     try:
@@ -443,13 +499,15 @@ async def oauth_callback(provider: str, code: str = "", error: str = "", request
         else:
             return Response(
                 content=_error_page(f"Unknown OAuth provider: {provider}"),
-                media_type="text/html", status_code=400,
+                media_type="text/html",
+                status_code=400,
             )
     except Exception as e:
         logger.error(f"OAuth callback error ({provider}): {e}")
         return Response(
             content=_error_page(f"OAuth login failed: {str(e)}"),
-            media_type="text/html", status_code=500,
+            media_type="text/html",
+            status_code=500,
         )
 
     user_id = user_info["id"]
@@ -481,11 +539,15 @@ async def oauth_callback(provider: str, code: str = "", error: str = "", request
             "plan": "free",
             "subscription_status": "active",
         }
-        logger.info(f"OAuth login: NEW user {email} → tenant={tenant_id}, api_key={api_key[:8]}***")
+        logger.info(
+            f"OAuth login: NEW user {email} → tenant={tenant_id}, api_key={api_key[:8]}***"
+        )
 
     session_id = create_session(tenant_id, api_key)
     resp = RedirectResponse(url="/dashboard", status_code=302)
-    resp.set_cookie("session_id", session_id, httponly=True, max_age=3600, samesite="lax")
+    resp.set_cookie(
+        "session_id", session_id, httponly=True, max_age=3600, samesite="lax"
+    )
     return resp
 
 

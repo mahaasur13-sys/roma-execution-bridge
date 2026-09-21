@@ -1,27 +1,30 @@
 #!/usr/bin/env python3
 """ROMA Quota Engine — Per-tenant quota tracking and enforcement."""
+
 from typing import Dict
+
 
 class QuotaEngine:
     """
     Tracks per-tenant quota usage against plan limits.
     Enforces GPU-second quotas per billing cycle.
     """
+
     PLAN_QUOTAS = {
-        "FREE":       360_000,    # GPU-seconds / month
-        "PRO":       3_600_000,
+        "FREE": 360_000,  # GPU-seconds / month
+        "PRO": 3_600_000,
         "ENTERPRISE": 36_000_000,
     }
     PLAN_PRIORITY = {
-        "FREE":       1,
-        "PRO":        2,
+        "FREE": 1,
+        "PRO": 2,
         "ENTERPRISE": 3,
     }
 
     def __init__(self, metering_engine=None):
         self.metering = metering_engine
-        self.usage: Dict[str, float] = {}     # tenant_id → GPU-sec used
-        self.cycle_start: Dict[str, float] = {} # tenant_id → cycle start
+        self.usage: Dict[str, float] = {}  # tenant_id → GPU-sec used
+        self.cycle_start: Dict[str, float] = {}  # tenant_id → cycle start
 
     def get_usage(self, tenant_id: str) -> float:
         return self.usage.get(tenant_id, 0.0)
@@ -29,7 +32,9 @@ class QuotaEngine:
     def get_limit(self, tenant_id: str, plan: str = "FREE") -> float:
         return self.PLAN_QUOTAS.get(plan, 0.0)
 
-    def check_quota(self, tenant_id: str, requested: float, plan: str = "FREE") -> tuple[bool, str]:
+    def check_quota(
+        self, tenant_id: str, requested: float, plan: str = "FREE"
+    ) -> tuple[bool, str]:
         used = self.get_usage(tenant_id)
         limit = self.get_limit(tenant_id, plan)
         if used + requested > limit:

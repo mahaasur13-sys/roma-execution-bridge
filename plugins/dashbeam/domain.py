@@ -13,25 +13,27 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 # ────────────────────────────────────────
 # Ticket State Machine
 # ────────────────────────────────────────
 
+
 class TicketState(StrEnum):
     """DashBeam ticket lifecycle."""
-    CREATED = "created"       # Generated, not yet shared
-    PENDING = "pending"       # Shared with recipient, waiting
-    ACCEPTED = "accepted"     # Recipient accepted the ticket
+
+    CREATED = "created"  # Generated, not yet shared
+    PENDING = "pending"  # Shared with recipient, waiting
+    ACCEPTED = "accepted"  # Recipient accepted the ticket
     TRANSFERRING = "transferring"  # P2P transfer in progress
-    COMPLETED = "completed"   # Transfer finished successfully
-    EXPIRED = "expired"       # Ticket expired (TTL exceeded)
-    REVOKED = "revoked"       # Sender revoked the ticket
-    FAILED = "failed"         # Transfer failed
+    COMPLETED = "completed"  # Transfer finished successfully
+    EXPIRED = "expired"  # Ticket expired (TTL exceeded)
+    REVOKED = "revoked"  # Sender revoked the ticket
+    FAILED = "failed"  # Transfer failed
 
 
 class TicketType(StrEnum):
     """Purpose of the DashBeam ticket."""
+
     FILE_TRANSFER = "file_transfer"
     AUDIT_EXPORT = "audit_export"
     WALLET_CONFIG = "wallet_config"  # Monero view-only configs
@@ -40,6 +42,7 @@ class TicketType(StrEnum):
 
 class TicketVisibility(StrEnum):
     """Who can see/use this ticket."""
+
     TENANT_ONLY = "tenant_only"
     SINGLE_RECIPIENT = "single_recipient"
     PUBLIC_LINK = "public_link"
@@ -49,12 +52,14 @@ class TicketVisibility(StrEnum):
 # Domain Entities
 # ────────────────────────────────────────
 
+
 class DashBeamTicket(BaseModel):
     """One-time P2P transfer ticket.
 
     Contains Iroh ticket bytes + metadata. Server stores metadata only;
     the actual Iroh ticket blob is encrypted and opaque to the server.
     """
+
     model_config = ConfigDict(frozen=True)
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -65,7 +70,9 @@ class DashBeamTicket(BaseModel):
     visibility: TicketVisibility = TicketVisibility.SINGLE_RECIPIENT
 
     # Iroh ticket payload (opaque bytes, base64-encoded for storage)
-    iroh_ticket_b64: str = Field(default="", description="Base64-encoded Iroh ticket blob")
+    iroh_ticket_b64: str = Field(
+        default="", description="Base64-encoded Iroh ticket blob"
+    )
     iroh_hash: str = Field(default="", description="SHA-256 hash of the Iroh ticket")
 
     # Metadata (visible to server for audit)
@@ -97,6 +104,7 @@ class DashBeamTicket(BaseModel):
 
 class DashBeamSession(BaseModel):
     """Active P2P transfer session between two devices."""
+
     model_config = ConfigDict(frozen=True)
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -129,6 +137,7 @@ class DashBeamSession(BaseModel):
 
 class DashBeamRelayConfig(BaseModel):
     """Relay server configuration — public or custom."""
+
     model_config = ConfigDict(frozen=True)
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -156,6 +165,7 @@ class DashBeamRelayConfig(BaseModel):
 
 class PairedDevice(BaseModel):
     """A device paired for P2P transfers."""
+
     model_config = ConfigDict(frozen=True)
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -192,7 +202,10 @@ DASHBEAM_TRANSFER_MANIFEST: dict[str, Any] = {
     "config_schema": {
         "type": "object",
         "properties": {
-            "default_relay_url": {"type": "string", "default": "https://relay.dashbeam.io"},
+            "default_relay_url": {
+                "type": "string",
+                "default": "https://relay.dashbeam.io",
+            },
             "default_relay_port": {"type": "integer", "default": 443},
             "ticket_ttl_seconds": {"type": "integer", "default": 3600},
             "max_file_size_bytes": {"type": "integer", "default": 1073741824},

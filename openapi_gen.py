@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """DecisionOS — Generate enhanced OpenAPI schema (Week 4)."""
+
 import json
 import sys
 
@@ -39,8 +40,14 @@ schema["security"] = [{"ApiKeyAuth": []}]
 # Add tags
 tag_order = [
     {"name": "decisions", "description": "Decision lifecycle: create, read, evaluate"},
-    {"name": "jobs", "description": "Execution jobs: retry, cancel, complete, worker acknowledgement"},
-    {"name": "execution", "description": "Job submit, status, listing (backward compatible)"},
+    {
+        "name": "jobs",
+        "description": "Execution jobs: retry, cancel, complete, worker acknowledgement",
+    },
+    {
+        "name": "execution",
+        "description": "Job submit, status, listing (backward compatible)",
+    },
     {"name": "billing", "description": "Usage and Stripe billing"},
     {"name": "health", "description": "System health and connectivity checks"},
     {"name": "ai", "description": "AI assistant with tool calling"},

@@ -60,11 +60,13 @@ def _run(dispatch_result, payload=None):
 
 
 def test_empty_fallback_chain_fails_fast():
-    result, db, status_calls = _run({
-        "status": "failed",
-        "backend": "vastai",
-        "message": "Failed to rent after exhausting chain ['RTX_4090', 'RTX_4080', 'RTX_3090']",
-    })
+    result, db, status_calls = _run(
+        {
+            "status": "failed",
+            "backend": "vastai",
+            "message": "Failed to rent after exhausting chain ['RTX_4090', 'RTX_4080', 'RTX_3090']",
+        }
+    )
 
     assert result["status"] == "failed"
     # No poll loop was entered (would otherwise wait up to 120s).
@@ -77,10 +79,12 @@ def test_empty_fallback_chain_fails_fast():
 
 
 def test_dispatch_error_fails_fast():
-    result, db, status_calls = _run({
-        "status": "error",
-        "message": "Vast.ai not configured: missing VAST_KEY",
-    })
+    result, db, status_calls = _run(
+        {
+            "status": "error",
+            "message": "Vast.ai not configured: missing VAST_KEY",
+        }
+    )
 
     assert result["status"] == "failed"
     assert status_calls == []

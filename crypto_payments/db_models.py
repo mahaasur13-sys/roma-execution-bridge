@@ -1,4 +1,5 @@
 """Crypto Payments — database models (SQLAlchemy 2.0 async)."""
+
 from __future__ import annotations
 
 import uuid
@@ -31,7 +32,9 @@ class CryptoInvoiceORM(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 

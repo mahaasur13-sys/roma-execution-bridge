@@ -1,4 +1,5 @@
-"""Backend registry — selects the right backend (local or vastai)."""
+"""B_active registry — selects the right backend (local or vastai)."""
+
 from __future__ import annotations
 
 import os
@@ -15,7 +16,7 @@ _backend_name: str = ""
 def get_backend(name: str | None = None) -> BaseBackend:
     """Lazy-load and cache the configured backend."""
     global _backend, _backend_name
-    current = (name or os.getenv("ROMA_EXECUTION_BACKEND", "local") or "local")
+    current = name or os.getenv("ROMA_EXECUTION_BACKEND", "local") or "local"
 
     if _backend is not None and _backend_name == current:
         return _backend
@@ -24,6 +25,7 @@ def get_backend(name: str | None = None) -> BaseBackend:
 
     if current == "vastai":
         from backends.vastai import VastaiBackend
+
         _backend = VastaiBackend()
         if not _backend.enabled:
             logger.warning(
@@ -33,6 +35,7 @@ def get_backend(name: str | None = None) -> BaseBackend:
             _backend_name = "local"
     elif current == "gpu_worker":
         from backends.gpu_worker_backend import GpuWorkerBackend
+
         _backend = GpuWorkerBackend()
     else:
         _backend = LocalBackend()
@@ -42,7 +45,7 @@ def get_backend(name: str | None = None) -> BaseBackend:
 
 def list_backends() -> dict:
     """Return status of all available backends."""
-    active = get_backend()
+    _active = get_backend()
     backends = {}
     # local
     local = LocalBackend()
@@ -50,21 +53,36 @@ def list_backends() -> dict:
     # vastai
     try:
         from backends.vastai import VastaiBackend
+
         v = VastaiBackend()
         backends["vastai"] = {"enabled": v.enabled, "active": _backend_name == "vastai"}
     except Exception:
-        backends["vastai"] = {"enabled": False, "active": False, "error": "import failed"}
+        backends["vastai"] = {
+            "enabled": False,
+            "active": False,
+            "error": "import failed",
+        }
     # gpu_worker
     try:
         from backends.gpu_worker_backend import GpuWorkerBackend
+
         gw = GpuWorkerBackend()
-        backends["gpu_worker"] = {"enabled": gw.enabled, "active": _backend_name == "gpu_worker"}
+        backends["gpu_worker"] = {
+            "enabled": gw.enabled,
+            "active": _backend_name == "gpu_worker",
+        }
     except Exception:
-        backends["gpu_worker"] = {"enabled": False, "active": False, "error": "import failed"}
+        backends["gpu_worker"] = {
+            "enabled": False,
+            "active": False,
+            "error": "import failed",
+        }
     return backends
 
 
-async def dispatch_job(job_id: str = "", tenant_id: str = "", payload: dict = None) -> dict:
+async def dispatch_job(
+    job_id: str = "", tenant_id: str = "", payload: dict = None
+) -> dict:
     """Route job to active backend."""
     p = payload or {}
     ctx = JobContext(

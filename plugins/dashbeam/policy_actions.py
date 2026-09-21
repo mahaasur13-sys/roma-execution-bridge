@@ -20,8 +20,8 @@ class DashBeamPolicyAction(StrEnum):
 
 # Per-tier file size limits (bytes)
 TIER_FILE_SIZE_LIMITS: dict[str, int] = {
-    "free": 100 * 1024 * 1024,        # 100 MB
-    "pro": 500 * 1024 * 1024,         # 500 MB
+    "free": 100 * 1024 * 1024,  # 100 MB
+    "pro": 500 * 1024 * 1024,  # 500 MB
     "enterprise": 10 * 1024 * 1024 * 1024,  # 10 GB
 }
 

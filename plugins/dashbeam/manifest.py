@@ -1,4 +1,5 @@
 """dashbeam-transfer plugin manifest for DecisionOS v1.0.0."""
+
 from plugins.domain.plugin import PluginManifest, PluginCategory, PluginTier
 
 MANIFEST = PluginManifest(

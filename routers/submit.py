@@ -2,6 +2,7 @@
 
 Debit happens exactly once at finalize via billing/finalize.py:44 (L2/L3 there).
 """
+
 from __future__ import annotations
 
 import logging
@@ -31,27 +32,40 @@ def _parse_idempotency_key(request: Request) -> Optional[str]:
     if not key:
         raise HTTPException(status_code=400, detail="Idempotency-Key must not be empty")
     if len(key) > 256:
-        raise HTTPException(status_code=400, detail="Idempotency-Key too long (max 256)")
+        raise HTTPException(
+            status_code=400, detail="Idempotency-Key too long (max 256)"
+        )
     return key
 
 
-def _submit_response(job_id: str, tenant_id: str, gpu_required: bool) -> RomaTaskResponse:
+def _submit_response(
+    job_id: str, tenant_id: str, gpu_required: bool
+) -> RomaTaskResponse:
     return RomaTaskResponse(
         status="queued",
         job_id=job_id,
         tenant_id=tenant_id,
         roma_dispatch={"protocol": "rom", "target": f"rom://local/{job_id}"},
         dag=["validate", "dispatch", "execute", "commit"],
-        estimated_resources={"cpu_cores": 2, "memory_mb": 512, "gpu": 1 if gpu_required else 0},
+        estimated_resources={
+            "cpu_cores": 2,
+            "memory_mb": 512,
+            "gpu": 1 if gpu_required else 0,
+        },
         gpu_required=gpu_required,
     )
 
 
 @limiter.limit("30/minute")
-@router.post("/submit", response_model=RomaTaskResponse, status_code=202,
-             dependencies=[Depends(verify_api_key)])
-async def submit_task(payload: RomaTaskInput, request: Request,
-                      key_info: dict = Depends(verify_api_key)):
+@router.post(
+    "/submit",
+    response_model=RomaTaskResponse,
+    status_code=202,
+    dependencies=[Depends(verify_api_key)],
+)
+async def submit_task(
+    payload: RomaTaskInput, request: Request, key_info: dict = Depends(verify_api_key)
+):
     import main  # lazy: queue_depth, _get_gate, metrics (avoid circular import)
 
     tenant_id = key_info["tenant_id"]
@@ -63,8 +77,12 @@ async def submit_task(payload: RomaTaskInput, request: Request,
         if existing_job_id:
             existing = db.get_execution_job(existing_job_id)
             if existing and existing.get("tenant_id") == tenant_id:
-                logger.info("submit.idempotent_replay tenant=%s key=%s job=%s",
-                            tenant_id, idempotency_key[:8], existing_job_id)
+                logger.info(
+                    "submit.idempotent_replay tenant=%s key=%s job=%s",
+                    tenant_id,
+                    idempotency_key[:8],
+                    existing_job_id,
+                )
                 payload = existing.get("payload") or {}
                 if isinstance(payload, str):
                     # SQLite stores `payload` as TEXT; the adapter normally decodes it,
@@ -74,13 +92,14 @@ async def submit_task(payload: RomaTaskInput, request: Request,
                     except ValueError:
                         payload = {}
                 return _submit_response(
-                    existing_job_id, tenant_id,
+                    existing_job_id,
+                    tenant_id,
                     bool(payload.get("gpu_required", False)),
                 )
 
     gate = main._get_gate()
 
-    dreq = DecisionRequest(
+    _dreq = DecisionRequest(
         tenant_id=tenant_id,
         request_type="job_submit",
         payload=payload.model_dump(),
@@ -89,7 +108,9 @@ async def submit_task(payload: RomaTaskInput, request: Request,
 
     decision = gate.evaluate(tenant_id=tenant_id, payload=payload.model_dump())
     if decision.result.value != "allowed":
-        logger.warning("decision.denied tenant=%s reason=%s", tenant_id, decision.reason)
+        logger.warning(
+            "decision.denied tenant=%s reason=%s", tenant_id, decision.reason
+        )
         raise HTTPException(status_code=402, detail=decision.reason)
 
     job_id = str(uuid.uuid4())
@@ -102,8 +123,11 @@ async def submit_task(payload: RomaTaskInput, request: Request,
                 existing = db.get_execution_job(winner_job_id)
                 if existing and existing.get("tenant_id") == tenant_id:
                     return _submit_response(
-                        winner_job_id, tenant_id,
-                        bool((existing.get("payload") or {}).get("gpu_required", False)),
+                        winner_job_id,
+                        tenant_id,
+                        bool(
+                            (existing.get("payload") or {}).get("gpu_required", False)
+                        ),
                     )
 
     main.queue_depth += 1
@@ -122,12 +146,16 @@ async def submit_task(payload: RomaTaskInput, request: Request,
     try:
         on_job_created(tenant_id, job_id, str(uuid.uuid4()))
     except Exception as exc:
-        logger.warning("audit.job_created failed tenant=%s job=%s: %s", tenant_id, job_id, exc)
+        logger.warning(
+            "audit.job_created failed tenant=%s job=%s: %s", tenant_id, job_id, exc
+        )
 
     main.queue_depth -= 1
     main.roma_queue_depth.labels(tenant_id=tenant_id).set(main.queue_depth)
     main.roma_jobs_total.labels(tenant_id=tenant_id).inc()
 
-    main.roma_jobs_active.labels(tenant_id=tenant_id).set(db.count_jobs_active_for_tenant(tenant_id))
+    main.roma_jobs_active.labels(tenant_id=tenant_id).set(
+        db.count_jobs_active_for_tenant(tenant_id)
+    )
 
     return _submit_response(job_id, tenant_id, payload.gpu_required)

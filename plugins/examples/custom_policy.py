@@ -23,8 +23,11 @@ class CustomPolicyPlugin:
 
     def on_enable(self, config: dict[str, Any]) -> None:
         self._config = config
-        logger.info("CustomPolicyPlugin enabled: rate_limit=%s, blocked=%s",
-                     config.get("rate_limit_per_minute"), config.get("blocked_countries"))
+        logger.info(
+            "CustomPolicyPlugin enabled: rate_limit=%s, blocked=%s",
+            config.get("rate_limit_per_minute"),
+            config.get("blocked_countries"),
+        )
 
     def on_disable(self) -> None:
         self._rate_limits.clear()
@@ -50,17 +53,23 @@ class CustomPolicyPlugin:
 
         # Rule 3: 2FA enforcement for Pro+
         if self._config.get("require_2fa", False):
-            if tenant.get("plan") in ("pro", "enterprise") and not tenant.get("2fa_enabled"):
-                results.append({
-                    "rule": "2fa_enforcement",
-                    "action": "block",
-                    "reason": "2FA required for Pro tier and above",
-                })
+            if tenant.get("plan") in ("pro", "enterprise") and not tenant.get(
+                "2fa_enabled"
+            ):
+                results.append(
+                    {
+                        "rule": "2fa_enforcement",
+                        "action": "block",
+                        "reason": "2FA required for Pro tier and above",
+                    }
+                )
 
         return {
             "plugin": self.name,
             "results": results,
-            "overall": "deny" if any(r["action"] == "block" for r in results) else "allow",
+            "overall": (
+                "deny" if any(r["action"] == "block" for r in results) else "allow"
+            ),
         }
 
     def _check_geo(self, country: str) -> dict[str, Any] | None:
@@ -74,6 +83,7 @@ class CustomPolicyPlugin:
 
     def _check_rate_limit(self, tenant_id: str) -> dict[str, Any] | None:
         import time
+
         now = time.time()
         window = self._rate_limits.setdefault(tenant_id, [])
         # Clean old entries

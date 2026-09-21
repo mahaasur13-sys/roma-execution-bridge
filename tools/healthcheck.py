@@ -16,7 +16,9 @@ def main() -> int:
         root / "static" / "index.html",
     ]
 
-    missing = [str(path.relative_to(root)) for path in required_files if not path.exists()]
+    missing = [
+        str(path.relative_to(root)) for path in required_files if not path.exists()
+    ]
 
     if missing:
         print("FAIL: отсутствуют обязательные файлы:", ", ".join(missing))

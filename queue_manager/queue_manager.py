@@ -105,7 +105,7 @@ class QueueManager:
             "queue_depth": len(self.queue),
             "running": len(self.running),
             "completed": len(self.completed),
-            "total": len(self.queue) + len(self.running) + len(self.completed)
+            "total": len(self.queue) + len(self.running) + len(self.completed),
         }
 
 

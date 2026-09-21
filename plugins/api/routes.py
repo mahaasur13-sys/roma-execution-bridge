@@ -29,6 +29,7 @@ router = APIRouter(prefix="/v1/plugins", tags=["plugins"])
 
 # ─── Schemas ───
 
+
 class PluginSummary(BaseModel):
     name: str
     version: str
@@ -68,6 +69,7 @@ class TraceSummary(BaseModel):
 
 
 # ─── Routes ───
+
 
 @router.get("", response_model=list[PluginSummary])
 async def list_plugins(x_api_key: str = Header(..., alias="X-API-Key")):
@@ -115,7 +117,9 @@ async def get_plugin(name: str, x_api_key: str = Header(..., alias="X-API-Key"))
 
 
 @router.post("/{name}/enable")
-async def enable_plugin(name: str, body: EnableRequest, x_api_key: str = Header(..., alias="X-API-Key")):
+async def enable_plugin(
+    name: str, body: EnableRequest, x_api_key: str = Header(..., alias="X-API-Key")
+):
     """Enable a plugin with optional config."""
     mgr = get_plugin_manager()
     try:
@@ -160,15 +164,19 @@ async def list_marketplace(x_api_key: str = Header(..., alias="X-API-Key")):
 
 
 @router.post("/install")
-async def install_plugin(body: InstallRequest, x_api_key: str = Header(..., alias="X-API-Key")):
+async def install_plugin(
+    body: InstallRequest, x_api_key: str = Header(..., alias="X-API-Key")
+):
     """Install a plugin from the marketplace."""
     mgr = get_plugin_manager()
     try:
-        plugin = mgr.get(body.slug)
+        _plugin = mgr.get(body.slug)
         await mgr.enable(body.slug)
         return {"status": "installed", "plugin": body.slug}
     except PluginNotFoundError:
-        raise HTTPException(status_code=404, detail=f"Plugin '{body.slug}' not in marketplace")
+        raise HTTPException(
+            status_code=404, detail=f"Plugin '{body.slug}' not in marketplace"
+        )
     except PluginError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

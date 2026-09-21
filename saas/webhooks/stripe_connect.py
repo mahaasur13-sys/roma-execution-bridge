@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 """Stripe Connect integration — white-label revenue-share"""
+
 import time
 import json
 
@@ -17,6 +18,7 @@ CONFIG = {
     ],
 }
 
+
 def calculate_application_fee(amount_cents: int, fee_percent: float = 15.0) -> dict:
     gross = amount_cents / 100
     application_fee = int(amount_cents * fee_percent / 100)
@@ -27,6 +29,7 @@ def calculate_application_fee(amount_cents: int, fee_percent: float = 15.0) -> d
         "partner_payout_cents": partner_payout,
         "fee_percent": fee_percent,
     }
+
 
 class AsyncWebhookQueue:
     def __init__(self, queue_file="/tmp/roma_webhook_queue.json"):
@@ -39,7 +42,8 @@ class AsyncWebhookQueue:
         try:
             with open(self._queue_file) as f:
                 self._queue = json.load(f)
-        except: pass
+        except Exception:
+            pass
 
     def _save(self):
         with open(self._queue_file, 'w') as f:
@@ -48,7 +52,9 @@ class AsyncWebhookQueue:
     def enqueue(self, event_id: str, payload: dict):
         if event_id in self._processed:
             return "already_queued"
-        self._queue.append({"event_id": event_id, "payload": payload, "enqueued_at": time.time()})
+        self._queue.append(
+            {"event_id": event_id, "payload": payload, "enqueued_at": time.time()}
+        )
         self._save()
         return "queued"
 
@@ -61,6 +67,7 @@ class AsyncWebhookQueue:
                 self._queue.remove(item)
         self._save()
         return processed
+
 
 if __name__ == "__main__":
     print("Stripe Connect: Ready for Standard/Custom accounts")

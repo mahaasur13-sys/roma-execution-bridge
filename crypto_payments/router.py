@@ -1,9 +1,14 @@
 """Crypto Payments — FastAPI router."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from crypto_payments.models import CreateInvoiceRequest, CreateInvoiceResponse, InvoiceStatusResponse
+from crypto_payments.models import (
+    CreateInvoiceRequest,
+    CreateInvoiceResponse,
+    InvoiceStatusResponse,
+)
 from crypto_payments.service import CryptoInvoiceService
 from crypto_payments.settings import CryptoSettings
 from crypto_payments.webhooks import CryptoWebhookHandler

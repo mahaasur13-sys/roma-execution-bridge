@@ -1,4 +1,5 @@
 """ROMA Billing Ledger — PostgreSQL-backed with connection pool, retry, in-memory fallback."""
+
 from __future__ import annotations
 
 import time
@@ -6,7 +7,6 @@ import json
 import logging
 import hashlib
 import zlib
-from typing import Optional
 from uuid import uuid4
 
 from billing.pg_connection import get_pg_manager, PGUnavailableError
@@ -36,8 +36,9 @@ class PGBillingLedger:
         self._pg = get_pg_manager()
         self._entries: list[dict] = []  # in-memory fallback
 
-    def _pg_execute(self, operation: str, query: str, params: tuple = None,
-                    fetch: bool = False) -> list | None:
+    def _pg_execute(
+        self, operation: str, query: str, params: tuple = None, fetch: bool = False
+    ) -> list | None:
         """Execute a PG query with automatic retry + fallback."""
         if not self._pg._ensure_pool():
             raise PGUnavailableError("PG not configured or unavailable")
@@ -59,19 +60,30 @@ class PGBillingLedger:
 
     # ── Public API ───────────────────────────────────────────────
 
-    def append(self, tenant_id: str, entry_type: str, amount: float,
-               currency: str = "USD", metadata: dict = None) -> None:
+    def append(
+        self,
+        tenant_id: str,
+        entry_type: str,
+        amount: float,
+        currency: str = "USD",
+        metadata: dict = None,
+    ) -> None:
         entry_type = entry_type.upper()
         meta_json = json.dumps(metadata or {})
         ledger_id = f"led-{int(time.time() * 1000)}-{hash(tenant_id + entry_type + str(amount)) & 0xFFFFF:05x}"
         # Always mirror into the in-memory ledger (used as a PG-down fallback and
         # for tests); the PG write is best-effort and never drops the entry on failure.
-        self._entries.append({
-            "ledger_id": ledger_id, "timestamp": time.time(),
-            "tenant_id": tenant_id, "type": entry_type,
-            "amount": amount, "currency": currency,
-            "metadata": metadata or {},
-        })
+        self._entries.append(
+            {
+                "ledger_id": ledger_id,
+                "timestamp": time.time(),
+                "tenant_id": tenant_id,
+                "type": entry_type,
+                "amount": amount,
+                "currency": currency,
+                "metadata": metadata or {},
+            }
+        )
         try:
             self._pg_execute(
                 "ledger_append",
@@ -82,10 +94,14 @@ class PGBillingLedger:
         except PGUnavailableError:
             pass
 
-    def credit(self, tenant_id: str, amount: float, currency: str = "USD", **meta) -> None:
+    def credit(
+        self, tenant_id: str, amount: float, currency: str = "USD", **meta
+    ) -> None:
         self.append(tenant_id, "CREDIT", amount, currency, meta)
 
-    def debit(self, tenant_id: str, amount: float, currency: str = "USD", **meta) -> None:
+    def debit(
+        self, tenant_id: str, amount: float, currency: str = "USD", **meta
+    ) -> None:
         self.append(tenant_id, "DEBIT", amount, currency, meta)
 
     def _txn(self, operation, statements, fetch_last=True):
@@ -120,12 +136,15 @@ class PGBillingLedger:
             logger.error("BillingLedger.%s PG error: %s", operation, e)
             raise PGUnavailableError(str(e)) from e
 
-    def debit_if_funds(self, tenant_id, amount, currency="USD",
-                       idempotency_key=None, **meta) -> str | None:
+    def debit_if_funds(
+        self, tenant_id, amount, currency="USD", idempotency_key=None, **meta
+    ) -> str | None:
         if amount < 0:
             raise ValueError("debit amount must be >= 0")
         if idempotency_key:
-            digest = hashlib.sha256(f"{tenant_id}:{idempotency_key}".encode()).hexdigest()
+            digest = hashlib.sha256(
+                f"{tenant_id}:{idempotency_key}".encode()
+            ).hexdigest()
             ledger_id = f"led-{digest[:24]}"
         else:
             ledger_id = f"led-{int(time.time()*1000)}-{uuid4().hex[:12]}"
@@ -135,22 +154,47 @@ class PGBillingLedger:
         meta_json = json.dumps(meta)
         lock_key = zlib.crc32(tenant_id.encode()) & 0x7FFFFFFF
 
-        rows = self._txn("ledger_debit_if_funds", [
-            ("SELECT pg_advisory_xact_lock(%s)", (lock_key,)),
-            (_DEBIT_IF_FUNDS_INSERT_SQL,
-             (tenant_id, ledger_id, tenant_id, amount, currency, meta_json, amount)),
-        ], fetch_last=True)
+        rows = self._txn(
+            "ledger_debit_if_funds",
+            [
+                ("SELECT pg_advisory_xact_lock(%s)", (lock_key,)),
+                (
+                    _DEBIT_IF_FUNDS_INSERT_SQL,
+                    (
+                        tenant_id,
+                        ledger_id,
+                        tenant_id,
+                        amount,
+                        currency,
+                        meta_json,
+                        amount,
+                    ),
+                ),
+            ],
+            fetch_last=True,
+        )
 
         if rows:
             rid = rows[0][0]
-            self._entries.append({"ledger_id": rid, "timestamp": time.time(),
-                "tenant_id": tenant_id, "type": "DEBIT",
-                "amount": amount, "currency": currency, "metadata": meta})
+            self._entries.append(
+                {
+                    "ledger_id": rid,
+                    "timestamp": time.time(),
+                    "tenant_id": tenant_id,
+                    "type": "DEBIT",
+                    "amount": amount,
+                    "currency": currency,
+                    "metadata": meta,
+                }
+            )
             return rid
         if idempotency_key:
-            existing = self._pg_execute("ledger_idem_lookup",
+            existing = self._pg_execute(
+                "ledger_idem_lookup",
                 "SELECT ledger_id FROM ledger_entries WHERE ledger_id = %s AND tenant_id = %s",
-                (ledger_id, tenant_id), fetch=True)
+                (ledger_id, tenant_id),
+                fetch=True,
+            )
             if existing:
                 return existing[0][0]
         return None
@@ -161,20 +205,25 @@ class PGBillingLedger:
                 "ledger_debit_sum",
                 "SELECT COALESCE(SUM(amount), 0) FROM ledger_entries "
                 "WHERE tenant_id = %s AND entry_type = 'DEBIT'",
-                (tenant_id,), fetch=True,
+                (tenant_id,),
+                fetch=True,
             )
             return float(rows[0][0])
         except PGUnavailableError:
             pass
-        return sum(e["amount"] for e in self._entries
-                   if e["tenant_id"] == tenant_id and e["type"] == "DEBIT")
+        return sum(
+            e["amount"]
+            for e in self._entries
+            if e["tenant_id"] == tenant_id and e["type"] == "DEBIT"
+        )
 
     def get_tenant_usage_cost(self, tenant_id: str) -> float:
         try:
             rows = self._pg_execute(
                 "usage_cost_sum",
                 "SELECT COALESCE(SUM(cost_usd), 0) FROM usage_events WHERE tenant_id = %s",
-                (tenant_id,), fetch=True,
+                (tenant_id,),
+                fetch=True,
             )
             return float(rows[0][0])
         except PGUnavailableError:
@@ -187,7 +236,8 @@ class PGBillingLedger:
                 "ledger_balance",
                 """SELECT COALESCE(SUM(CASE WHEN entry_type='CREDIT' THEN amount ELSE -amount END), 0)
                    FROM ledger_entries WHERE tenant_id = %s""",
-                (tenant_id,), fetch=True,
+                (tenant_id,),
+                fetch=True,
             )
             return float(rows[0][0])
         except PGUnavailableError:
@@ -208,12 +258,20 @@ class PGBillingLedger:
                 """SELECT ledger_id, tenant_id, entry_type, amount, currency, metadata, created_at
                    FROM ledger_entries WHERE tenant_id = %s
                    ORDER BY created_at DESC LIMIT %s""",
-                (tenant_id, limit), fetch=True,
+                (tenant_id, limit),
+                fetch=True,
             )
             return [
-                {"ledger_id": r[0], "tenant_id": r[1], "type": r[2],
-                 "amount": r[3], "currency": r[4], "metadata": r[5] or {},
-                 "timestamp": r[6].timestamp()} for r in rows
+                {
+                    "ledger_id": r[0],
+                    "tenant_id": r[1],
+                    "type": r[2],
+                    "amount": r[3],
+                    "currency": r[4],
+                    "metadata": r[5] or {},
+                    "timestamp": r[6].timestamp(),
+                }
+                for r in rows
             ]
         except PGUnavailableError:
             pass
@@ -229,7 +287,9 @@ class PGBillingLedger:
             )
             by_tenant = {}
             for tenant_id, etype, total, cnt in rows:
-                t = by_tenant.setdefault(tenant_id, {"credits": 0.0, "debits": 0.0, "net": 0.0, "entries": 0})
+                t = by_tenant.setdefault(
+                    tenant_id, {"credits": 0.0, "debits": 0.0, "net": 0.0, "entries": 0}
+                )
                 t["entries"] += cnt
                 if etype == "CREDIT":
                     t["credits"] += total
@@ -242,7 +302,10 @@ class PGBillingLedger:
             pass
         by_tenant = {}
         for e in self._entries:
-            t = by_tenant.setdefault(e["tenant_id"], {"credits": 0.0, "debits": 0.0, "net": 0.0, "entries": 0})
+            t = by_tenant.setdefault(
+                e["tenant_id"],
+                {"credits": 0.0, "debits": 0.0, "net": 0.0, "entries": 0},
+            )
             t["entries"] += 1
             if e["type"] == "CREDIT":
                 t["credits"] += e["amount"]
@@ -254,14 +317,17 @@ class PGBillingLedger:
 
     @property
     def is_persistent(self) -> bool:
-        return self._pg._create_pool() if self._pg._pool is None else self._pg.is_connected
+        return (
+            self._pg._create_pool() if self._pg._pool is None else self._pg.is_connected
+        )
 
     def get_tenant_entry_count(self, tenant_id: str) -> int:
         try:
             rows = self._pg_execute(
                 "ledger_count",
                 "SELECT COUNT(*) FROM ledger_entries WHERE tenant_id = %s",
-                (tenant_id,), fetch=True,
+                (tenant_id,),
+                fetch=True,
             )
             return int(rows[0][0])
         except PGUnavailableError:

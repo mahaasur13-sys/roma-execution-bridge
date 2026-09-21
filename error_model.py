@@ -1,4 +1,5 @@
 """DecisionOS — Consistent error model (Week 4 production hardening)."""
+
 from fastapi import HTTPException
 
 MACHINE_READABLE_CODES = {
@@ -28,11 +29,15 @@ class DecisionOSError:
 
     @staticmethod
     def quota_exceeded(msg: str = ""):
-        DecisionOSError.raise_error("quota_exceeded", msg or "Monthly job limit reached")
+        DecisionOSError.raise_error(
+            "quota_exceeded", msg or "Monthly job limit reached"
+        )
 
     @staticmethod
     def cost_over_budget(msg: str = ""):
-        DecisionOSError.raise_error("cost_over_budget", msg or "Estimated cost exceeds budget")
+        DecisionOSError.raise_error(
+            "cost_over_budget", msg or "Estimated cost exceeds budget"
+        )
 
     @staticmethod
     def tenant_not_found(msg: str = ""):
@@ -40,7 +45,10 @@ class DecisionOSError:
 
     @staticmethod
     def transition_denied(msg: str = ""):
-        DecisionOSError.raise_error("transition_denied", msg or "Invalid status transition")
+        DecisionOSError.raise_error(
+            "transition_denied", msg or "Invalid status transition"
+        )
+
 
 CRYPTO_ERROR_CODES: dict[str, tuple[int, str]] = {
     "crypto_network_unsupported": (400, "Unsupported cryptocurrency network"),
@@ -56,9 +64,15 @@ CRYPTO_ERROR_CODES: dict[str, tuple[int, str]] = {
 WALLET_ERROR_CODES: dict[str, tuple[int, str]] = {
     "crypto_wallet_not_found": (404, "Wallet not found"),
     "crypto_wallet_type_unsupported": (400, "Unsupported wallet type"),
-    "crypto_wallet_hot_mode_blocked": (403, "HOT mode not allowed — DecisionOS never stores private keys"),
+    "crypto_wallet_hot_mode_blocked": (
+        403,
+        "HOT mode not allowed — DecisionOS never stores private keys",
+    ),
     "crypto_monero_rpc_unreachable": (502, "Monero wallet RPC unreachable"),
-    "crypto_monero_spend_key_blocked": (403, "Monero spend key storage blocked — view_only only"),
+    "crypto_monero_spend_key_blocked": (
+        403,
+        "Monero spend key storage blocked — view_only only",
+    ),
     "crypto_wallet_compromised": (403, "Wallet is compromised — rotation required"),
     "crypto_wallet_rotation_in_progress": (409, "Wallet rotation already in progress"),
     "crypto_provider_wallet_unreachable": (502, "Provider wallet health check failed"),

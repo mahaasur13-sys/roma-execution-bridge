@@ -5,6 +5,7 @@ Pre-fix behaviour: `PGConnectionManager.health()` short-circuited with
 so `/ready` stayed 503 forever after a PG blip (until an unrelated query
 succeeded).  Post-fix: `health()` re-probes via `_ensure_pool()`.
 """
+
 from __future__ import annotations
 
 import billing.pg_connection as pgc

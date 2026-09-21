@@ -3,17 +3,20 @@
 ROMA Stripe Client — Metered billing integration.
 Maps: ROMA billing events → Stripe usage records → invoice finalization.
 """
+
 from dataclasses import dataclass
 from typing import Callable
 import time
 import hashlib
 import hmac
 
+
 @dataclass
 class StripeConfig:
     api_key: str
     webhook_secret: str
     mode: str = "test"  # test | live
+
 
 @dataclass
 class StripeUsageRecord:
@@ -22,6 +25,7 @@ class StripeUsageRecord:
     unit: str  # "gpu_second" | "request" | etc
     timestamp: float
     idempotency_key: str
+
 
 class StripeBillingClient:
     def __init__(self, config: StripeConfig):
@@ -53,25 +57,29 @@ class StripeBillingClient:
 
     def finalize_invoice(self, customer_id: str, usage_total: float) -> str:
         invoice_id = f"in_{int(time.time())}"
-        print(f"  [Stripe] Invoice {invoice_id} finalized for customer {customer_id} | total=${usage_total:.4f}")
+        print(
+            f"  [Stripe] Invoice {invoice_id} finalized for customer {customer_id} | total=${usage_total:.4f}"
+        )
         return invoice_id
 
     def verify_webhook_signature(self, payload: bytes, sig: str) -> bool:
         if not self._config.webhook_secret:
             return True
         expected = hmac.new(
-            self._config.webhook_secret.encode(),
-            payload, hashlib.sha256
+            self._config.webhook_secret.encode(), payload, hashlib.sha256
         ).hexdigest()
         return hmac.compare_digest(expected, sig)
+
 
 @dataclass
 class WebhookEvent:
     event_type: str
     data: dict
 
+
 class StripeWebhookHandler:
     """Handles Stripe webhook events → ROMA billing state updates."""
+
     def __init__(self, stripe: StripeBillingClient, ledger_callback: Callable):
         self._stripe = stripe
         self._lc = ledger_callback
@@ -81,8 +89,11 @@ class StripeWebhookHandler:
             return {"status": "signature_failed"}
 
         import json
+
         raw = json.loads(payload)
-        event = WebhookEvent(event_type=raw.get("type", ""), data=raw.get("data", {}).get("object", {}))
+        event = WebhookEvent(
+            event_type=raw.get("type", ""), data=raw.get("data", {}).get("object", {})
+        )
         print(f"  [Webhook] Processing: {event.event_type}")
 
         if event.event_type == "invoice.paid":
@@ -98,14 +109,22 @@ class StripeWebhookHandler:
 
         elif event.event_type == "customer.subscription.updated":
             tenant_id = event.data.get("metadata", {}).get("tenant_id", "unknown")
-            plan = event.data.get("items", {}).get("data", [{}])[0].get("price", {}).get("nickname", "unknown")
+            plan = (
+                event.data.get("items", {})
+                .get("data", [{}])[0]
+                .get("price", {})
+                .get("nickname", "unknown")
+            )
             self._lc.debit(tenant_id, 0, source=f"subscription_update_to_{plan}")
             return {"status": "processed", "action": "plan_updated"}
 
         return {"status": "ignored", "event": event.event_type}
 
+
 if __name__ == "__main__":
-    config = StripeConfig(api_key="sk_test_placeholder", webhook_secret="whsec_placeholder")
+    config = StripeConfig(
+        api_key="sk_test_placeholder", webhook_secret="whsec_placeholder"
+    )
     stripe = StripeBillingClient(config)
 
     # Customer + subscription flow
@@ -118,7 +137,7 @@ if __name__ == "__main__":
         quantity=7200.0,  # 2 hours GPU
         unit="gpu_second",
         timestamp=time.time(),
-        idempotency_key="usage-001"
+        idempotency_key="usage-001",
     )
     result = stripe.submit_usage_record(record)
     print(f"  [Stripe] Usage record: {result}")
@@ -128,14 +147,27 @@ if __name__ == "__main__":
     print(f"  [Stripe] Invoice: {inv}")
 
     # Webhook handler
-    from billing.pg_ledger import PGBillingLedger as BillingLedger; ledger = BillingLedger()
+    from billing.pg_ledger import PGBillingLedger as BillingLedger
+
+    ledger = BillingLedger()
     wh = StripeWebhookHandler(stripe, ledger)
 
     import json
-    test_payload = json.dumps({
-        "type": "invoice.paid",
-        "data": {"object": {"id": "in_123", "amount_paid": 1250, "metadata": {"tenant_id": "tenant-abc"}}}
-    }).encode()
+
+    test_payload = json.dumps(
+        {
+            "type": "invoice.paid",
+            "data": {
+                "object": {
+                    "id": "in_123",
+                    "amount_paid": 1250,
+                    "metadata": {"tenant_id": "tenant-abc"},
+                }
+            },
+        }
+    ).encode()
     result = wh.handle(test_payload, "sig_test")
     print(f"  [Webhook] Result: {result}")
-    print(f"  [Ledger] ABC balance after webhook: ${ledger.get_tenant_balance('tenant-abc'):.2f}")
+    print(
+        f"  [Ledger] ABC balance after webhook: ${ledger.get_tenant_balance('tenant-abc'):.2f}"
+    )

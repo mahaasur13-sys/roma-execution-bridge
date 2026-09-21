@@ -12,6 +12,7 @@
 
 Использует `tests/_isolation.py` — ту же логику разбора DSN, что и guard.
 """
+
 from __future__ import annotations
 
 import os
@@ -76,7 +77,9 @@ def ensure_database(dsn: str) -> str:
             cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (TEST_DB_NAME,))
             if cur.fetchone():
                 return "exists"
-            cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(TEST_DB_NAME)))
+            cur.execute(
+                sql.SQL("CREATE DATABASE {}").format(sql.Identifier(TEST_DB_NAME))
+            )
             return "created"
 
 

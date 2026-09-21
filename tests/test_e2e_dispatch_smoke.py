@@ -31,6 +31,7 @@ def _uniq(prefix: str) -> str:
 @pytest.fixture(autouse=True)
 def _disable_background_worker(monkeypatch):
     """Prevent the infinite poll_and_execute loop from running in tests."""
+
     async def _noop():
         return None
 
@@ -93,7 +94,9 @@ def test_submit_status_and_fake_dispatch(tenant, monkeypatch):
     }
     monkeypatch.setattr(main, "finalize_job_billing", lambda *a, **k: "ok")
 
-    result = asyncio.run(ew.execute_and_bill(job_id, tenant["tenant_id"], {"task": "echo hello"}))
+    result = asyncio.run(
+        ew.execute_and_bill(job_id, tenant["tenant_id"], {"task": "echo hello"})
+    )
     assert result["status"] == "completed"
 
     # 4. Status reflects the completed dispatch.
@@ -107,7 +110,9 @@ def test_status_is_tenant_scoped(tenant):
     other_key = _uniq("key-other")
     db.seed_tenants({other_key: {"tenant_id": _uniq("test-other"), "name": "B"}})
 
-    resp = client.post("/submit", json={"task": "echo hi"}, headers={"X-API-Key": tenant["key"]})
+    resp = client.post(
+        "/submit", json={"task": "echo hi"}, headers={"X-API-Key": tenant["key"]}
+    )
     assert resp.status_code == 202
     job_id = resp.json()["job_id"]
 

@@ -40,7 +40,9 @@ def _load_config() -> CloudPaymentsConfig | None:
         public_id=public_id,
         api_secret=api_secret,
         webhook_secret=os.environ.get("CLOUDPAYMENTS_WEBHOOK_SECRET", ""),
-        mode="test" if "test" in os.environ.get("CLOUDPAYMENTS_MODE", "test") else "live",
+        mode=(
+            "test" if "test" in os.environ.get("CLOUDPAYMENTS_MODE", "test") else "live"
+        ),
     )
 
 
@@ -138,7 +140,9 @@ class CloudPaymentsClient:
     # ── refund ─────────────────────────────────────────────────
 
     def refund(self, transaction_id: int, amount: float) -> dict[str, Any]:
-        return self._post("/payments/refund", {"TransactionId": transaction_id, "Amount": amount})
+        return self._post(
+            "/payments/refund", {"TransactionId": transaction_id, "Amount": amount}
+        )
 
     # ── webhook verification ───────────────────────────────────
 

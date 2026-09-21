@@ -45,10 +45,30 @@ ADMIN_IP_ALLOWLIST = os.environ.get(
 billing_ledger = BillingLedger()
 
 PLANS: dict = {
-    "free": {"max_jobs_per_month": 50, "max_gpu_seconds": 300, "spend_cap_usd": 0.50, "overage_rate": 0.0},
-    "start": {"max_jobs_per_month": 50, "max_gpu_seconds": 3600, "spend_cap_usd": 5.00, "overage_rate": 0.000005},
-    "pro": {"max_jobs_per_month": 150, "max_gpu_seconds": 36000, "spend_cap_usd": 50.00, "overage_rate": 0.000003},
-    "enterprise": {"max_jobs_per_month": -1, "max_gpu_seconds": -1, "spend_cap_usd": -1.0, "overage_rate": 0.0},
+    "free": {
+        "max_jobs_per_month": 50,
+        "max_gpu_seconds": 300,
+        "spend_cap_usd": 0.50,
+        "overage_rate": 0.0,
+    },
+    "start": {
+        "max_jobs_per_month": 50,
+        "max_gpu_seconds": 3600,
+        "spend_cap_usd": 5.00,
+        "overage_rate": 0.000005,
+    },
+    "pro": {
+        "max_jobs_per_month": 150,
+        "max_gpu_seconds": 36000,
+        "spend_cap_usd": 50.00,
+        "overage_rate": 0.000003,
+    },
+    "enterprise": {
+        "max_jobs_per_month": -1,
+        "max_gpu_seconds": -1,
+        "spend_cap_usd": -1.0,
+        "overage_rate": 0.0,
+    },
 }
 
 
@@ -77,9 +97,13 @@ def verify_api_key(x_api_key: str = Header(None)) -> dict:
         # of scope for this split). Reading main.is_email_verified at call time
         # keeps the existing monkeypatch in tests/test_p0_security.py effective.
         import main
+
         verif_status = main.is_email_verified(x_api_key)
         if not verif_status:
-            raise HTTPException(status_code=403, detail="Email not verified. Please verify your email first.")
+            raise HTTPException(
+                status_code=403,
+                detail="Email not verified. Please verify your email first.",
+            )
     return tenant
 
 
@@ -142,6 +166,8 @@ def _admin_only(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
     if info.get("tenant_id") != "tenant-demo":
-        raise HTTPException(status_code=403, detail="Admin access requires tenant-demo API key")
+        raise HTTPException(
+            status_code=403, detail="Admin access requires tenant-demo API key"
+        )
 
     return info

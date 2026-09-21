@@ -26,7 +26,6 @@ router = APIRouter(prefix="/billing", tags=["billing"])
 
 
 @limiter.limit("10/minute")
-
 @router.post("/top-up")
 async def top_up_balance(request: Request, payload: dict):
     """Admin-only manual balance credit. Requires admin API key + IP allowlist.
@@ -37,7 +36,9 @@ async def top_up_balance(request: Request, payload: dict):
     admin = _admin_only(request)
     target_tenant_id = (payload.get("tenant_id") or "").strip()
     if not target_tenant_id:
-        raise HTTPException(status_code=400, detail="tenant_id is required for admin top-up")
+        raise HTTPException(
+            status_code=400, detail="tenant_id is required for admin top-up"
+        )
     try:
         amount = float(payload.get("amount", 0))
     except (TypeError, ValueError):
@@ -48,10 +49,27 @@ async def top_up_balance(request: Request, payload: dict):
         target_tenant_id, amount, note=f"Admin top-up by {admin['tenant_id']}"
     )
     try:
-        write_event(admin["tenant_id"], "billing.topup", "tenant", target_tenant_id, {"amount": amount})
+        write_event(
+            admin["tenant_id"],
+            "billing.topup",
+            "tenant",
+            target_tenant_id,
+            {"amount": amount},
+        )
     except Exception as exc:
-        logger.warning("audit.topup_failed admin=%s target=%s: %s", admin["tenant_id"], target_tenant_id, exc)
-    return {"status": "ok", "tenant_id": target_tenant_id, "amount": amount, "entry_id": entry_id}
+        logger.warning(
+            "audit.topup_failed admin=%s target=%s: %s",
+            admin["tenant_id"],
+            target_tenant_id,
+            exc,
+        )
+    return {
+        "status": "ok",
+        "tenant_id": target_tenant_id,
+        "amount": amount,
+        "entry_id": entry_id,
+    }
+
 
 @router.post("/create-checkout-session")
 async def create_checkout_session(
@@ -73,7 +91,12 @@ async def create_checkout_session(
     # Free plan — activate immediately
     if plan_name == "free":
         db.update_tenant_subscription(tenant_id, "", "", "active", "free", None)
-        return {"url": "", "plan": "free", "tenant_id": tenant_id, "message": "Free plan activated"}
+        return {
+            "url": "",
+            "plan": "free",
+            "tenant_id": tenant_id,
+            "message": "Free plan activated",
+        }
 
     if not main.CLOUDPAYMENTS_ENABLED or main.cloudpayments_client is None:
         plan_example = main.CLOUDPAYMENTS_PLANS.get(plan_name, {})
@@ -189,7 +212,11 @@ async def check_spend_cap_endpoint(
         "allowed": allowed,
         "remaining": round(max(0, cap - balance), 6),
         "usage_pct": pct,
-        "reason": "" if allowed else f"Spend cap exceeded: ${balance:.4f}/${cap:.2f} ({pct}%). Job ${estimated_cost_usd:.6f} exceeds cap.",
+        "reason": (
+            ""
+            if allowed
+            else f"Spend cap exceeded: ${balance:.4f}/${cap:.2f} ({pct}%). Job ${estimated_cost_usd:.6f} exceeds cap."
+        ),
     }
 
 

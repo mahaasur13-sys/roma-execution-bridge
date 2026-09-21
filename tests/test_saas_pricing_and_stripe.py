@@ -50,7 +50,9 @@ def test_free_tier_quote_is_quota_only():
 
 
 def test_paid_quote_applies_tier_region_and_load():
-    quote = PricingEngine().quote(3600, "A100", "pro", region_mult=1.2, cluster_load=0.85)
+    quote = PricingEngine().quote(
+        3600, "A100", "pro", region_mult=1.2, cluster_load=0.85
+    )
 
     expected_rate = GPU_RATES["A100"] * 1.0 * 1.5 * 1.2
     assert quote.load_mult == 1.5
@@ -106,8 +108,9 @@ def test_stripe_customer_and_subscription_lifecycle():
 
     subscription = stripe.create_subscription("org_acme", "pro")
     assert subscription.status is SubscriptionStatus.ACTIVE
-    assert subscription.current_period_end - subscription.current_period_start == pytest.approx(
-        30 * 24 * 3600
+    assert (
+        subscription.current_period_end - subscription.current_period_start
+        == pytest.approx(30 * 24 * 3600)
     )
     assert stripe.get_subscription("org_acme") is subscription
 
@@ -121,8 +124,12 @@ def test_stripe_usage_summary_and_invoice_payment():
     stripe = StripeIntegration()
     customer = stripe.create_customer("org_acme", "billing@acme.com")
 
-    stripe.record_usage("org_acme", customer.id[:12], 3600.0, 1.998, "job-1", "ml_training")
-    stripe.record_usage("org_acme", customer.id[:12], 1800.0, 0.999, "job-1", "inference")
+    stripe.record_usage(
+        "org_acme", customer.id[:12], 3600.0, 1.998, "job-1", "ml_training"
+    )
+    stripe.record_usage(
+        "org_acme", customer.id[:12], 1800.0, 0.999, "job-1", "inference"
+    )
     stripe.record_usage("org_acme", customer.id[:12], 600.0, 0.3, "", "")
     stripe.record_usage("org_other", customer.id[:12], 10.0, 0.01, "job-9")
 
@@ -152,7 +159,9 @@ def test_stripe_job_cost_estimation_by_model_and_tier():
     stripe = StripeIntegration()
 
     assert stripe.estimate_job_cost(1000.0, "A100", "pro") == pytest.approx(0.555)
-    assert stripe.estimate_job_cost(1000.0, "A100", "enterprise") == pytest.approx(1.3875)
+    assert stripe.estimate_job_cost(1000.0, "A100", "enterprise") == pytest.approx(
+        1.3875
+    )
     assert stripe.estimate_job_cost(1000.0, "H100", "pro") == pytest.approx(1.389)
     assert stripe.estimate_job_cost(1000.0, "A100", "free") == 0.0
     assert stripe.estimate_job_cost(1000.0, "GTX1080", "pro") == pytest.approx(0.555)

@@ -66,7 +66,9 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def notify(title: str, status: str, rows: list[tuple[str, str, str]]) -> tuple[bool, str]:
+def notify(
+    title: str, status: str, rows: list[tuple[str, str, str]]
+) -> tuple[bool, str]:
     alerts = [
         {
             "status": "firing",
@@ -78,7 +80,10 @@ def notify(title: str, status: str, rows: list[tuple[str, str, str]]) -> tuple[b
     payload = {"title": title, "status": status, "alerts": alerts}
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
-        RELAY_URL, data=data, method="POST", headers={"Content-Type": "application/json"}
+        RELAY_URL,
+        data=data,
+        method="POST",
+        headers={"Content-Type": "application/json"},
     )
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -104,7 +109,10 @@ def save_state(state: dict) -> None:
 def supervisorctl(conf: str, *argv: str) -> tuple[int, str]:
     try:
         proc = subprocess.run(
-            ["supervisorctl", "-c", conf, *argv], capture_output=True, text=True, timeout=25
+            ["supervisorctl", "-c", conf, *argv],
+            capture_output=True,
+            text=True,
+            timeout=25,
         )
         return proc.returncode, (proc.stdout + proc.stderr).strip()
     except Exception as exc:  # noqa: BLE001
@@ -121,11 +129,11 @@ def program_command(conf: str, program: str) -> str | None:
     if start < 0:
         return None
     block: list[str] = []
-    for line in text[start + len(marker):].splitlines():
+    for line in text[start + len(marker) :].splitlines():
         if line.strip().startswith("[") and line.strip().endswith("]"):
             break
         if line.startswith("command="):
-            block.append(line[len("command="):])
+            block.append(line[len("command=") :])
         elif block and line.startswith((" ", "\t")):
             block.append(line.strip())
     return "\n".join(block) if block else None
@@ -133,7 +141,9 @@ def program_command(conf: str, program: str) -> str | None:
 
 def probe_default_password(url: str) -> tuple[bool, str]:
     """POST /api/login с admin/admin. Пароль не логируется; ответ — только код."""
-    if not url.startswith("http://127.0.0.1:") and not url.startswith("http://localhost:"):
+    if not url.startswith("http://127.0.0.1:") and not url.startswith(
+        "http://localhost:"
+    ):
         return False, "refused: проба разрешена только с 127.0.0.1"
     body = json.dumps({"user": "admin", "password": "admin"}).encode("utf-8")
     req = urllib.request.Request(
@@ -173,7 +183,7 @@ def job_block(text: str, job_name: str) -> str | None:
             continue
         indent = len(line) - len(line.lstrip())
         block = [line]
-        for nxt in lines[i + 1:]:
+        for nxt in lines[i + 1 :]:
             if not nxt.strip():
                 block.append(nxt)
                 continue
@@ -184,7 +194,9 @@ def job_block(text: str, job_name: str) -> str | None:
     return None
 
 
-def check_promtail_config(chk: dict, name: str, args: argparse.Namespace) -> list[tuple[str, str, str]]:
+def check_promtail_config(
+    chk: dict, name: str, args: argparse.Namespace
+) -> list[tuple[str, str, str]]:
     """R6: живой платформенный promtail-конфиг против фингерпринта, снапшота и обязательной джобы.
 
     Три независимых признака, потому что регенерация может сохранить один и потерять другой:
@@ -207,19 +219,30 @@ def check_promtail_config(chk: dict, name: str, args: argparse.Namespace) -> lis
 
     if not live.exists():
         if args.ci:
-            print(f"CHECK {name}: SKIP живой платформенный конфиг недоступен (--ci): {live}")
+            print(
+                f"CHECK {name}: SKIP живой платформенный конфиг недоступен (--ci): {live}"
+            )
             return problems
         return fail("LIVE-MISSING", f"живой платформенный конфиг не найден: {live}")
     if not canon.exists():
-        return fail("CANON-MISSING", f"версионированный снапшот отсутствует: {chk['canon_path']}")
+        return fail(
+            "CANON-MISSING",
+            f"версионированный снапшот отсутствует: {chk['canon_path']}",
+        )
     if not sha_file.exists():
-        return fail("FINGERPRINT-MISSING", f"файл фингерпринта отсутствует: {chk['sha256_file']}")
+        return fail(
+            "FINGERPRINT-MISSING",
+            f"файл фингерпринта отсутствует: {chk['sha256_file']}",
+        )
 
     live_sha, canon_sha = sha256(live), sha256(canon)
     recorded = parse_sha_file(sha_file)
 
     if recorded is None:
-        fail("FINGERPRINT-UNPARSABLE", f"не прочитан записанный фингерпринт: {chk['sha256_file']}")
+        fail(
+            "FINGERPRINT-UNPARSABLE",
+            f"не прочитан записанный фингерпринт: {chk['sha256_file']}",
+        )
     elif recorded != live_sha:
         fail(
             "FINGERPRINT-DRIFT",
@@ -257,7 +280,9 @@ def check_promtail_config(chk: dict, name: str, args: argparse.Namespace) -> lis
     return problems
 
 
-def run_pairs(pairs: list[dict], args: argparse.Namespace) -> tuple[list[tuple[str, str, str]], int]:
+def run_pairs(
+    pairs: list[dict], args: argparse.Namespace
+) -> tuple[list[tuple[str, str, str]], int]:
     problems: list[tuple[str, str, str]] = []
     compared = 0
     for pair in pairs:
@@ -266,14 +291,22 @@ def run_pairs(pairs: list[dict], args: argparse.Namespace) -> tuple[list[tuple[s
         executed_path = Path(pair["executed_path"])
 
         if not repo_path.exists():
-            problems.append((name, "REPO-MISSING", f"канон отсутствует: {pair['repo_path']}"))
+            problems.append(
+                (name, "REPO-MISSING", f"канон отсутствует: {pair['repo_path']}")
+            )
             print(f"DRIFT {name}: REPO-MISSING {pair['repo_path']}")
             continue
         if not executed_path.exists():
             kind = "SKIP" if args.ci else "EXEC-MISSING"
             print(f"DRIFT {name}: {kind} executed_path не найден: {executed_path}")
             if not args.ci:
-                problems.append((name, "EXEC-MISSING", f"исполняемый файл не найден: {executed_path}"))
+                problems.append(
+                    (
+                        name,
+                        "EXEC-MISSING",
+                        f"исполняемый файл не найден: {executed_path}",
+                    )
+                )
             continue
 
         repo_sha, exec_sha = sha256(repo_path), sha256(executed_path)
@@ -281,16 +314,22 @@ def run_pairs(pairs: list[dict], args: argparse.Namespace) -> tuple[list[tuple[s
         if repo_sha == exec_sha:
             print(f"DRIFT {name}: OK sha256={repo_sha[:12]}")
         else:
-            print(f"DRIFT {name}: MISMATCH repo={repo_sha[:12]} executed={exec_sha[:12]}")
-            problems.append((
-                name,
-                "MISMATCH",
-                f"repo={repo_sha[:12]} executed={exec_sha[:12]} ({pair['repo_path']} vs {executed_path})",
-            ))
+            print(
+                f"DRIFT {name}: MISMATCH repo={repo_sha[:12]} executed={exec_sha[:12]}"
+            )
+            problems.append(
+                (
+                    name,
+                    "MISMATCH",
+                    f"repo={repo_sha[:12]} executed={exec_sha[:12]} ({pair['repo_path']} vs {executed_path})",
+                )
+            )
     return problems, compared
 
 
-def run_checks(checks: list[dict], args: argparse.Namespace) -> list[tuple[str, str, str]]:
+def run_checks(
+    checks: list[dict], args: argparse.Namespace
+) -> list[tuple[str, str, str]]:
     problems: list[tuple[str, str, str]] = []
     checked = 0
     state = load_state()
@@ -303,7 +342,9 @@ def run_checks(checks: list[dict], args: argparse.Namespace) -> list[tuple[str, 
             problems += check_promtail_config(chk, name, args)
             continue
         if kind != "grafana_fail_closed":
-            problems.append((name, "UNKNOWN-CHECK", f"неизвестный тип проверки: {kind!r}"))
+            problems.append(
+                (name, "UNKNOWN-CHECK", f"неизвестный тип проверки: {kind!r}")
+            )
             continue
         checked += 1
         shim = Path(chk["shim"])
@@ -318,60 +359,96 @@ def run_checks(checks: list[dict], args: argparse.Namespace) -> list[tuple[str, 
             if not os.access(shim, os.X_OK):
                 problems.append((name, "SHIM-NOT-EXECUTABLE", f"{shim} не исполняем"))
             if not canon.exists():
-                problems.append((name, "SHIM-CANON-MISSING", f"канон барьера отсутствует: {chk['shim_canon']}"))
+                problems.append(
+                    (
+                        name,
+                        "SHIM-CANON-MISSING",
+                        f"канон барьера отсутствует: {chk['shim_canon']}",
+                    )
+                )
             elif sha256(shim) != sha256(canon):
-                problems.append((
-                    name,
-                    "SHIM-DRIFT",
-                    f"sha256 {sha256(shim)[:12]} != канон {sha256(canon)[:12]} ({chk['shim_canon']})",
-                ))
+                problems.append(
+                    (
+                        name,
+                        "SHIM-DRIFT",
+                        f"sha256 {sha256(shim)[:12]} != канон {sha256(canon)[:12]} ({chk['shim_canon']})",
+                    )
+                )
 
         resolved = shutil.which("grafana-server")
         if resolved != str(shim):
-            problems.append((
-                name,
-                "PATH-DRIFT",
-                f"command -v grafana-server = {resolved or '<не найден>'} (ожидался {shim}): "
-                "приоритет PATH потерян, барьер не перехватит запуск",
-            ))
+            problems.append(
+                (
+                    name,
+                    "PATH-DRIFT",
+                    f"command -v grafana-server = {resolved or '<не найден>'} (ожидался {shim}): "
+                    "приоритет PATH потерян, барьер не перехватит запуск",
+                )
+            )
 
         command = program_command(conf, program)
         if command is None:
-            problems.append((name, "CONF-PROGRAM-MISSING", f"в {conf} нет секции [program:{program}]"))
+            problems.append(
+                (
+                    name,
+                    "CONF-PROGRAM-MISSING",
+                    f"в {conf} нет секции [program:{program}]",
+                )
+            )
         elif "/usr/sbin/grafana-server" in command:
-            problems.append((name, "CONF-BYPASS", f"[program:{program}] зовёт бинарь напрямую — барьер обойдён"))
+            problems.append(
+                (
+                    name,
+                    "CONF-BYPASS",
+                    f"[program:{program}] зовёт бинарь напрямую — барьер обойдён",
+                )
+            )
         elif "grafana-server" not in command:
-            problems.append((name, "CONF-NO-GRAFANA", f"[program:{program}] не запускает grafana-server"))
+            problems.append(
+                (
+                    name,
+                    "CONF-NO-GRAFANA",
+                    f"[program:{program}] не запускает grafana-server",
+                )
+            )
 
         if not sealed.exists() or sealed.stat().st_size == 0:
-            problems.append((name, "SEALED-MISSING", f"sealed-файл отсутствует или пуст: {sealed}"))
+            problems.append(
+                (name, "SEALED-MISSING", f"sealed-файл отсутствует или пуст: {sealed}")
+            )
 
         platform_sealed = chk.get("platform_sealed")
         if platform_sealed:
             ps = Path(platform_sealed)
             if not ps.exists() or ps.stat().st_size == 0:
-                problems.append((
-                    name,
-                    "PLATFORM-SEALED-MISSING",
-                    f"платформенный путь {platform_sealed} (его читает command супервизора) отсутствует: "
-                    f"Grafana не стартует. Восстановление: ln -sfn {sealed} {platform_sealed}",
-                ))
+                problems.append(
+                    (
+                        name,
+                        "PLATFORM-SEALED-MISSING",
+                        f"платформенный путь {platform_sealed} (его читает command супервизора) отсутствует: "
+                        f"Grafana не стартует. Восстановление: ln -sfn {sealed} {platform_sealed}",
+                    )
+                )
 
         if args.no_probe:
             print(f"CHECK {name}: probe отключена (--no-probe)")
         else:
             weak, detail = probe_default_password(chk["probe_url"])
             if weak:
-                problems.append((
-                    name,
-                    "FAIL-OPEN",
-                    f"admin/admin принят ({detail}) — Grafana стартовала с дефолтным паролем",
-                ))
+                problems.append(
+                    (
+                        name,
+                        "FAIL-OPEN",
+                        f"admin/admin принят ({detail}) — Grafana стартовала с дефолтным паролем",
+                    )
+                )
                 print(f"CHECK {name}: КРИТИЧНО admin/admin принят ({detail})")
                 if not args.no_stop:
                     auto_stop(name, conf, program, state)
             else:
-                print(f"CHECK {name}: probe admin/admin отклонён ({detail}) — барьер работает")
+                print(
+                    f"CHECK {name}: probe admin/admin отклонён ({detail}) — барьер работает"
+                )
                 cstate = state.setdefault("checks", {}).setdefault(name, {})
                 cstate.pop("stopped_at", None)
                 cstate["last_probe_ok_at"] = int(time.time())
@@ -388,22 +465,34 @@ def auto_stop(name: str, conf: str, program: str, state: dict) -> None:
     code, status = supervisorctl(conf, "status", program)
     already_stopped = "STOPPED" in status or "not running" in status
     if already_stopped:
-        print(f"CHECK {name}: сервис уже остановлен ({status.splitlines()[0][:80]}) — повторная остановка не нужна")
+        print(
+            f"CHECK {name}: сервис уже остановлен ({status.splitlines()[0][:80]}) — повторная остановка не нужна"
+        )
         cstate.setdefault("stopped_at", int(time.time()))
         return
 
     stop_code, stop_out = supervisorctl(conf, "stop", program)
     cstate["stopped_at"] = int(time.time())
-    print(f"CHECK {name}: авто-стоп {program} → rc={stop_code} {stop_out.splitlines()[-1][:80] if stop_out else ''}")
+    print(
+        f"CHECK {name}: авто-стоп {program} → rc={stop_code} {stop_out.splitlines()[-1][:80] if stop_out else ''}"
+    )
 
     last_alert = int(cstate.get("last_alert_at") or 0)
     if time.time() - last_alert < ALERT_THROTTLE_S:
-        print(f"CHECK {name}: алерт подавлен троттлингом ({int(time.time() - last_alert)}s с прошлого)")
+        print(
+            f"CHECK {name}: алерт подавлен троттлингом ({int(time.time() - last_alert)}s с прошлого)"
+        )
         return
     ok, info = notify(
         "ROMA A4: Grafana fail-open",
         "firing",
-        [(name, "FAIL-OPEN", f"admin/admin принят на {program}; сервис остановлен автоматически")],
+        [
+            (
+                name,
+                "FAIL-OPEN",
+                f"admin/admin принят на {program}; сервис остановлен автоматически",
+            )
+        ],
     )
     cstate["last_alert_at"] = int(time.time())
     print(f"CHECK {name}: alert_relay={'sent' if ok else 'FAILED'} ({info})")
@@ -412,12 +501,24 @@ def auto_stop(name: str, conf: str, program: str, state: dict) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--manifest", default=str(DEFAULT_MANIFEST))
-    ap.add_argument("--ci", action="store_true", help="отсутствие executed_path — warning, не провал")
-    ap.add_argument("--no-alert", action="store_true", help="не слать алерт (dry-run/CI)")
+    ap.add_argument(
+        "--ci",
+        action="store_true",
+        help="отсутствие executed_path — warning, не провал",
+    )
+    ap.add_argument(
+        "--no-alert", action="store_true", help="не слать алерт (dry-run/CI)"
+    )
     ap.add_argument("--no-probe", action="store_true", help="не пробовать admin/admin")
-    ap.add_argument("--no-stop", action="store_true", help="не останавливать сервис при fail-open")
-    ap.add_argument("--checks", choices=["auto", "only", "skip"], default="auto",
-                    help="auto: проверки A4 выполняются, если среда на месте")
+    ap.add_argument(
+        "--no-stop", action="store_true", help="не останавливать сервис при fail-open"
+    )
+    ap.add_argument(
+        "--checks",
+        choices=["auto", "only", "skip"],
+        default="auto",
+        help="auto: проверки A4 выполняются, если среда на месте",
+    )
     args = ap.parse_args()
 
     manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
@@ -427,18 +528,27 @@ def main() -> int:
     problems, compared = run_pairs(pairs, args)
     if args.checks != "skip":
         problems += run_checks(checks, args)
-    print(f"drift-check: pairs={len(pairs)} compared={compared} checks={len(checks)} problems={len(problems)}")
+    print(
+        f"drift-check: pairs={len(pairs)} compared={compared} checks={len(checks)} problems={len(problems)}"
+    )
 
     if problems and not args.no_alert:
         state = load_state()
         agg = state.setdefault("aggregate", {})
         signature = ";".join(sorted(f"{n}:{k}" for n, k, _ in problems))
         last_alert = int(agg.get("last_alert_at") or 0)
-        if agg.get("signature") == signature and time.time() - last_alert < ALERT_THROTTLE_S:
-            print(f"drift-check: сводный алерт подавлен троттлингом "
-                  f"({int(time.time() - last_alert)}s, набор проблем не изменился)")
+        if (
+            agg.get("signature") == signature
+            and time.time() - last_alert < ALERT_THROTTLE_S
+        ):
+            print(
+                f"drift-check: сводный алерт подавлен троттлингом "
+                f"({int(time.time() - last_alert)}s, набор проблем не изменился)"
+            )
         else:
-            ok, info = notify("ROMA drift-check: канон != исполняемое", "firing", problems)
+            ok, info = notify(
+                "ROMA drift-check: канон != исполняемое", "firing", problems
+            )
             agg["signature"] = signature
             agg["last_alert_at"] = int(time.time())
             print(f"drift-check: alert_relay={'sent' if ok else 'FAILED'} ({info})")

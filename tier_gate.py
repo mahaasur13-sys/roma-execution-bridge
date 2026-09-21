@@ -1,6 +1,8 @@
 """DecisionOS — Tier-aware Gate (Week 4). Extends cost/gate.py with tier limits."""
+
 import db_adapter as db
 from tier_profiles import get_tier, DEFAULT_TIERS
+
 
 def get_tier_limits(tenant_id: str) -> dict:
     """Get effective limits for a tenant based on their tier."""

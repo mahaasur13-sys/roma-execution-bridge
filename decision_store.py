@@ -18,8 +18,9 @@ import db_adapter as db
 logger = logging.getLogger("roma.decision_store")
 
 
-def submit_job_through_gate(tenant_id: str, request_type: str, payload: dict,
-                             idempotency_key: str | None = None) -> dict:
+def submit_job_through_gate(
+    tenant_id: str, request_type: str, payload: dict, idempotency_key: str | None = None
+) -> dict:
     """Full submit flow: request → gate → decision → job.
 
     Returns: {decision_id, result, reason, job_id, estimated_cost, quota_remaining}
@@ -30,7 +31,9 @@ def submit_job_through_gate(tenant_id: str, request_type: str, payload: dict,
     request_id = str(uuid.uuid4())
 
     # 1. Create DecisionRequest
-    db.insert_decision_request(request_id, tenant_id, request_type, payload, idempotency_key)
+    db.insert_decision_request(
+        request_id, tenant_id, request_type, payload, idempotency_key
+    )
 
     # 2. Idempotency check
     if idempotency_key:
@@ -80,20 +83,29 @@ def submit_job_through_gate(tenant_id: str, request_type: str, payload: dict,
 
     # 7. Allow
     from cost.gate import GateResult
+
     decision_id = str(uuid.uuid4())
     db.insert_decision_record(
-        decision_id, request_id, tenant_id,
-        GateResult.ALLOWED.value, "ok",
-        job_count + 1, estimated_cost, policy_name,
+        decision_id,
+        request_id,
+        tenant_id,
+        GateResult.ALLOWED.value,
+        "ok",
+        job_count + 1,
+        estimated_cost,
+        policy_name,
     )
 
     # 8. Create job
     job_id = str(uuid.uuid4())
-    job = db.insert_job(job_id, tenant_id, "queued", decision_id, payload)
+    _job = db.insert_job(job_id, tenant_id, "queued", decision_id, payload)
 
     # 9. Audit
     from audit.event_store import on_decision_allowed, on_job_created
-    on_decision_allowed(tenant_id, decision_id, request_id, job_count + 1, estimated_cost)
+
+    on_decision_allowed(
+        tenant_id, decision_id, request_id, job_count + 1, estimated_cost
+    )
     on_job_created(tenant_id, job_id, decision_id, "job_submit")
 
     # 10. Record usage
@@ -131,7 +143,10 @@ def complete_job(job_id: str, tenant_id: str) -> dict | None:
     if not job:
         return None
     import datetime
-    db.update_job_status(job_id, "completed", completed_at=datetime.datetime.utcnow().isoformat())
+
+    db.update_job_status(
+        job_id, "completed", completed_at=datetime.datetime.utcnow().isoformat()
+    )
     return db.get_job(job_id, tenant_id)
 
 
@@ -150,7 +165,9 @@ def get_tenant_usage(tenant_id: str) -> dict:
         "usage": {"total_jobs": job_count, "total_gpu_seconds": 0},
         "limits": {
             "max_jobs_per_month": max_jobs,
-            "max_jobs_per_month_display": "unlimited" if max_jobs == -1 else str(max_jobs),
+            "max_jobs_per_month_display": (
+                "unlimited" if max_jobs == -1 else str(max_jobs)
+            ),
         },
     }
 
@@ -161,11 +178,13 @@ def count_jobs(tenant_id: str) -> int:
 
 # ── Internals ──────────────────────────────────────────────────
 
+
 def _get_plan_limit(plan_name: str) -> int:
     """Look up max_jobs_per_month from plans.json."""
     try:
         import json
         from pathlib import Path
+
         plans_path = Path(__file__).parent / "plans.json"
         plans = json.loads(plans_path.read_text())
         plan = plans.get(plan_name, plans.get("start", {}))
@@ -179,14 +198,28 @@ def _estimate_cost(payload: dict) -> float:
     return 0.01
 
 
-def _deny(tenant_id: str, request_id: str, reason: str,
-          quota_remaining: int, estimated_cost: float):
+def _deny(
+    tenant_id: str,
+    request_id: str,
+    reason: str,
+    quota_remaining: int,
+    estimated_cost: float,
+):
     """Record a denied decision."""
     from cost.gate import GateResult
     import uuid
+
     did = str(uuid.uuid4())
-    db.insert_decision_record(did, request_id, tenant_id,
-                              GateResult.DENIED.value, reason,
-                              quota_remaining, estimated_cost, "")
+    db.insert_decision_record(
+        did,
+        request_id,
+        tenant_id,
+        GateResult.DENIED.value,
+        reason,
+        quota_remaining,
+        estimated_cost,
+        "",
+    )
     from audit.event_store import on_decision_denied
+
     on_decision_denied(tenant_id, did, request_id, reason)

@@ -21,12 +21,16 @@ from control_plane.job_store import JobStore
 
 class TestCoreModels:
     def test_worker_health_and_free_gpu(self):
-        worker = Worker(id="w1", status=WorkerStatus.HEALTHY, gpu_total=4.0, gpu_used=1.5)
+        worker = Worker(
+            id="w1", status=WorkerStatus.HEALTHY, gpu_total=4.0, gpu_used=1.5
+        )
         assert worker.gpu_free() == pytest.approx(2.5)
         assert worker.is_healthy() is True
 
         worker.gpu_used = 9.0
-        assert worker.gpu_free() == 0.0, "свободная ёмкость не может стать отрицательной"
+        assert (
+            worker.gpu_free() == 0.0
+        ), "свободная ёмкость не может стать отрицательной"
 
         worker.status = WorkerStatus.DEAD
         assert worker.is_healthy() is False
@@ -42,19 +46,37 @@ class TestCoreModels:
         fresh = GPULease(gpu_id="g0", job_id="j1", worker_id="w1", ttl=30.0)
         assert fresh.is_expired() is False
 
-        old = GPULease(gpu_id="g0", job_id="j1", worker_id="w1", ttl=30.0, created_at=time.time() - 31)
+        old = GPULease(
+            gpu_id="g0",
+            job_id="j1",
+            worker_id="w1",
+            ttl=30.0,
+            created_at=time.time() - 31,
+        )
         assert old.is_expired() is True
 
         renewed = GPULease(
-            gpu_id="g0", job_id="j1", worker_id="w1", ttl=10.0, created_at=time.time() - 15, renewed=2
+            gpu_id="g0",
+            job_id="j1",
+            worker_id="w1",
+            ttl=10.0,
+            created_at=time.time() - 15,
+            renewed=2,
         )
-        assert renewed.is_expired() is False, "продление аренды обязано отодвигать срок истечения"
+        assert (
+            renewed.is_expired() is False
+        ), "продление аренды обязано отодвигать срок истечения"
 
     def test_job_terminal_and_retryability(self):
         job = Job(id="j1", plugin="ml_training", payload={})
         assert job.is_terminal() is False
 
-        for status in (JobStatus.COMPLETED, JobStatus.COMMITTED, JobStatus.DEAD, JobStatus.FAILED):
+        for status in (
+            JobStatus.COMPLETED,
+            JobStatus.COMMITTED,
+            JobStatus.DEAD,
+            JobStatus.FAILED,
+        ):
             job.status = status
             assert job.is_terminal() is True
             job.status = JobStatus.SUBMITTED
@@ -74,7 +96,9 @@ class TestJobStoreStateMachine:
         store = JobStore(str(tmp_path / "jobs.json"))
         assert store.stats()[JobStatus.SUBMITTED.value] == 0
 
-        job = store.submit("ml_training", {"batch_size": 4}, gpu=2.0, ttl=120.0, max_retries=1)
+        job = store.submit(
+            "ml_training", {"batch_size": 4}, gpu=2.0, ttl=120.0, max_retries=1
+        )
         assert job.id.startswith("job-00001-")
         assert job.status is JobStatus.SUBMITTED
         assert job.gpu_allocated == pytest.approx(2.0)
@@ -113,7 +137,9 @@ class TestJobStoreStateMachine:
         store = JobStore(str(tmp_path / "jobs.json"))
         job = store.submit("ml_training", {})
 
-        assert store.fail(job.id, "before scheduling") is False, "SUBMITTED — не активное состояние"
+        assert (
+            store.fail(job.id, "before scheduling") is False
+        ), "SUBMITTED — не активное состояние"
         store.schedule(job.id, "w-1")
         assert store.fail(job.id, "cuda oom") is True
         assert job.status is JobStatus.FAILED
@@ -129,7 +155,9 @@ class TestJobStoreStateMachine:
         assert store.requeue(job.id) is True
         assert job.status is JobStatus.PENDING_RETRY
         assert job.retry_count == 1
-        assert job.worker_id is None, "повторная попытка идёт заново к свободному воркеру"
+        assert (
+            job.worker_id is None
+        ), "повторная попытка идёт заново к свободному воркеру"
 
         assert store.advance_pending() == [job]
         assert job.status is JobStatus.SUBMITTED
@@ -168,14 +196,18 @@ class TestJobStoreStateMachine:
         # Логика состояний сравнивает значения (str-Enum), поэтому переходы продолжают
         # работать; расхождение зафиксировано, решение — за владельцем.
         assert restored.status == JobStatus.SCHEDULED
-        assert isinstance(restored.status, str) and not isinstance(restored.status, JobStatus)
+        assert isinstance(restored.status, str) and not isinstance(
+            restored.status, JobStatus
+        )
         assert restarted.stats()[JobStatus.SCHEDULED.value] == 1
         assert restarted.list_pending() == []
         assert restored.worker_id == "w-7"
         assert restored.payload == {"epochs": 2}
 
         next_job = restarted.submit("inference", {})
-        assert next_job.id.startswith("job-00002-"), "нумерация продолжается после перезапуска"
+        assert next_job.id.startswith(
+            "job-00002-"
+        ), "нумерация продолжается после перезапуска"
 
     def test_listing_and_stats_reflect_state(self, tmp_path):
         store = JobStore(str(tmp_path / "jobs.json"))

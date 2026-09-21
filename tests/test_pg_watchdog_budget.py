@@ -11,6 +11,7 @@ PostgreSQL не вызывается вообще (start_cluster вызовов 
 боевого кластера при append-only ledger — риск недоступности и загрязнения данных при
 детерминированной бюджетной логике.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -40,11 +41,20 @@ def _run_cycles(wd, tmp_path, *, recent_minutes: tuple[int, ...]) -> dict:
     state_path = tmp_path / "state.json"
     now = datetime.datetime.now(datetime.timezone.utc)
     recent = [
-        (now - datetime.timedelta(minutes=m)).isoformat(timespec="seconds").replace("+00:00", "Z")
+        (now - datetime.timedelta(minutes=m))
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
         for m in recent_minutes
     ]
     state_path.write_text(
-        json.dumps({"restarts": recent, "restarts_total": 5, "ledger_baseline": 309, "was_down": False}),
+        json.dumps(
+            {
+                "restarts": recent,
+                "restarts_total": 5,
+                "ledger_baseline": 309,
+                "was_down": False,
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -75,7 +85,9 @@ def _run_cycles(wd, tmp_path, *, recent_minutes: tuple[int, ...]) -> dict:
         with pytest.raises(SystemExit):
             wd.main()
 
-    events = [json.loads(line) for line in buf.getvalue().splitlines() if line.startswith("{")]
+    events = [
+        json.loads(line) for line in buf.getvalue().splitlines() if line.startswith("{")
+    ]
     log_path = tmp_path / "watchdog.log"
     return {
         "events": events,
@@ -108,5 +120,7 @@ def test_restart_budget_gate(tmp_path) -> None:
     available_dir = tmp_path / "available"
     available_dir.mkdir()
     ok = _run_cycles(wd, available_dir, recent_minutes=(90,))
-    assert ok["calls"] == ["start_cluster"], f"ожидался подъём кластера, вызовы={ok['calls']}"
+    assert ok["calls"] == [
+        "start_cluster"
+    ], f"ожидался подъём кластера, вызовы={ok['calls']}"
     assert not ok["state"].get("budget_exceeded")

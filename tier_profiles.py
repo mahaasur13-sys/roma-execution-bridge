@@ -1,4 +1,5 @@
 """DecisionOS — Pricing tiers: Start / Pro / Enterprise (Week 4)."""
+
 import json
 from pathlib import Path
 

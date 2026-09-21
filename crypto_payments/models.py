@@ -1,4 +1,5 @@
 """Crypto Payments — Pydantic v2 domain models."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -29,6 +30,7 @@ class CryptoNetwork(StrEnum):
     @classmethod
     def from_currency(cls, currency):
         from crypto_payments.models import CryptoCurrency
+
         mapping = {
             CryptoCurrency.USDT_TRC20: cls.TRC20,
             CryptoCurrency.USDT_ERC20: cls.ERC20,
@@ -39,6 +41,7 @@ class CryptoNetwork(StrEnum):
         }
         return mapping[currency]
 
+
 NETWORK_FOR_CURRENCY: dict[CryptoCurrency, CryptoNetwork] = {
     CryptoCurrency.USDT_TRC20: CryptoNetwork.TRC20,
     CryptoCurrency.USDT_ERC20: CryptoNetwork.ERC20,
@@ -47,8 +50,6 @@ NETWORK_FOR_CURRENCY: dict[CryptoCurrency, CryptoNetwork] = {
     CryptoCurrency.TON: CryptoNetwork.TON,
     CryptoCurrency.SOL: CryptoNetwork.SOL,
 }
-
-
 
 
 class InvoiceStatus(StrEnum):
@@ -98,7 +99,9 @@ class CryptoInvoice(BaseModel):
     def _must_match_tier(cls, v: Decimal, info: Any) -> Decimal:
         tier = (info.data or {}).get("tier")
         if tier and tier in TIER_PRICES_USD and v != TIER_PRICES_USD[tier]:
-            raise ValueError(f"Amount {v} does not match tier price {TIER_PRICES_USD[tier]}")
+            raise ValueError(
+                f"Amount {v} does not match tier price {TIER_PRICES_USD[tier]}"
+            )
         return v
 
 

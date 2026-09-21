@@ -1,6 +1,10 @@
 """ROMA Billing — PostgreSQL Connection Manager (fixed)."""
+
 from __future__ import annotations
-import os, time, threading, logging
+import os
+import time
+import threading
+import logging
 from typing import Optional
 
 logger = logging.getLogger("roma.billing.pg")
@@ -16,15 +20,23 @@ _pg_conn_active = None
 _pg_reconnects_total = None
 _pg_errors_total = None
 
+
 def _init_metrics():
     global _pg_conn_active, _pg_reconnects_total, _pg_errors_total
     if _pg_conn_active is not None:
         return
     try:
         from prometheus_client import Gauge, Counter
-        _pg_conn_active = Gauge("roma_pg_connections_active", "Active PG connections", ["pool"])
-        _pg_reconnects_total = Counter("roma_pg_reconnects_total", "Total PG reconnection attempts", ["pool"])
-        _pg_errors_total = Counter("roma_pg_errors_total", "Total PG query errors", ["pool", "error_type"])
+
+        _pg_conn_active = Gauge(
+            "roma_pg_connections_active", "Active PG connections", ["pool"]
+        )
+        _pg_reconnects_total = Counter(
+            "roma_pg_reconnects_total", "Total PG reconnection attempts", ["pool"]
+        )
+        _pg_errors_total = Counter(
+            "roma_pg_errors_total", "Total PG query errors", ["pool", "error_type"]
+        )
     except ImportError:
         pass
 
@@ -35,11 +47,17 @@ class PGUnavailableError(Exception):
 
 class _PgConnection:
     """Class-based context manager: acquires conn, commits, returns to pool."""
+
     __slots__ = ("_mgr", "_conn", "_returned")
+
     def __init__(self, mgr, conn):
-        self._mgr = mgr; self._conn = conn; self._returned = False
+        self._mgr = mgr
+        self._conn = conn
+        self._returned = False
+
     def __enter__(self):
         return self._conn
+
     def __exit__(self, *a):
         if self._conn and not self._returned:
             try:
@@ -96,18 +114,26 @@ class PGConnectionManager:
             logger.warning("PG pool: PG_DSN not set — billing in-memory")
             return False
         try:
-            import psycopg2, psycopg2.pool
+            import psycopg2
+            import psycopg2.pool
+
             dsn = PG_DSN
             if "connect_timeout" not in dsn:
                 sep = "&" if "?" in dsn else "?"
                 dsn = f"{dsn}{sep}connect_timeout={PG_POOL_TIMEOUT}"
             with self._pool_lock:
                 if self._pool is not None:
-                    try: self._pool.closeall()
-                    except: pass
-                self._pool = psycopg2.pool.ThreadedConnectionPool(self._pool_min, self._pool_max, dsn)
+                    try:
+                        self._pool.closeall()
+                    except Exception:
+                        pass
+                self._pool = psycopg2.pool.ThreadedConnectionPool(
+                    self._pool_min, self._pool_max, dsn
+                )
             self._pg_available = True
-            logger.info("PG pool created: min=%d max=%d", self._pool_min, self._pool_max)
+            logger.info(
+                "PG pool created: min=%d max=%d", self._pool_min, self._pool_max
+            )
             return True
         except Exception as e:
             self._pg_available = False
@@ -139,12 +165,22 @@ class PGConnectionManager:
                 last_error = e
                 self._error_count += 1
                 if _pg_errors_total:
-                    _pg_errors_total.labels(pool="billing", error_type=type(e).__name__).inc()
+                    _pg_errors_total.labels(
+                        pool="billing", error_type=type(e).__name__
+                    ).inc()
                 if attempt == PG_RECONNECT_ATTEMPTS:
-                    logger.error("PG exhausted after %d attempts: %s", PG_RECONNECT_ATTEMPTS, e)
+                    logger.error(
+                        "PG exhausted after %d attempts: %s", PG_RECONNECT_ATTEMPTS, e
+                    )
                     break
-                delay = PG_RETRY_BASE_DELAY * (2 ** attempt)
-                logger.warning("PG retry %d/%d: %s — %.2fs", attempt+1, PG_RECONNECT_ATTEMPTS, e, delay)
+                delay = PG_RETRY_BASE_DELAY * (2**attempt)
+                logger.warning(
+                    "PG retry %d/%d: %s — %.2fs",
+                    attempt + 1,
+                    PG_RECONNECT_ATTEMPTS,
+                    e,
+                    delay,
+                )
                 if _pg_reconnects_total:
                     _pg_reconnects_total.labels(pool="billing").inc()
                 self._reconnect_count += 1
@@ -162,33 +198,45 @@ class PGConnectionManager:
             "error_count": self._error_count,
         }
         if not PG_DSN:
-            info["status"] = "disabled"; return info
+            info["status"] = "disabled"
+            return info
         if self._pg_available is None:
-            info["status"] = "uninitialized"; return info
+            info["status"] = "uninitialized"
+            return info
         if not self._pg_available:
             if not self._ensure_pool():
-                info["status"] = "unavailable"; return info
+                info["status"] = "unavailable"
+                return info
             info["connected"] = True
         try:
             with self.get_connection("health") as conn:
-                cur = conn.cursor(); cur.execute("SELECT version()")
-                ver = cur.fetchone()[0]; cur.close()
+                cur = conn.cursor()
+                cur.execute("SELECT version()")
+                ver = cur.fetchone()[0]
+                cur.close()
             info["status"] = "healthy"
             info["version"] = ver.split(",")[0]
         except PGUnavailableError:
-            info["status"] = "unreachable"; info["connected"] = False
+            info["status"] = "unreachable"
+            info["connected"] = False
         except Exception as e:
-            info["status"] = "degraded"; info["error"] = str(e)[:100]
+            info["status"] = "degraded"
+            info["error"] = str(e)[:100]
         return info
 
     def shutdown(self):
         if self._pool:
-            try: self._pool.closeall(); logger.info("PG pool closed")
-            except Exception as e: logger.warning("PG close err: %s", e)
-        self._pool = None; self._pg_available = None
+            try:
+                self._pool.closeall()
+                logger.info("PG pool closed")
+            except Exception as e:
+                logger.warning("PG close err: %s", e)
+        self._pool = None
+        self._pg_available = None
 
 
 _conn_mgr: Optional[PGConnectionManager] = None
+
 
 def get_pg_manager() -> PGConnectionManager:
     global _conn_mgr
@@ -196,7 +244,13 @@ def get_pg_manager() -> PGConnectionManager:
         _conn_mgr = PGConnectionManager.get_instance()
     return _conn_mgr
 
-def pg_health() -> dict: return get_pg_manager().health()
+
+def pg_health() -> dict:
+    return get_pg_manager().health()
+
+
 def shutdown_pg():
     global _conn_mgr
-    if _conn_mgr: _conn_mgr.shutdown(); _conn_mgr = None
+    if _conn_mgr:
+        _conn_mgr.shutdown()
+        _conn_mgr = None

@@ -1,6 +1,6 @@
 import sys
 import types
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -14,6 +14,7 @@ async def test_get_pool_rejects_empty_dsn(monkeypatch):
     monkeypatch.setitem(sys.modules, "asyncpg", fake)
     sys.modules.pop("db_pg", None)
     import db_pg
+
     db_pg.POOL = None
     monkeypatch.setattr(db_pg, "DEFAULT_DSN", "")
     with pytest.raises(RuntimeError, match="PG_DSN is required"):

@@ -35,7 +35,9 @@ class Event:
     event_type: str = ""
     job_id: Optional[str] = None
     payload: Dict[str, Any] = field(default_factory=dict)
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    timestamp: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
     sequence: int = 0
 
     def to_dict(self) -> dict:
@@ -59,9 +61,15 @@ class EventStore:
     Uses SQLite by default (swap to PostgreSQL via connection_string).
     """
 
-    def __init__(self, db_path: str = "/tmp/roma-events.db", connection_string: Optional[str] = None):
+    def __init__(
+        self,
+        db_path: str = "/tmp/roma-events.db",
+        connection_string: Optional[str] = None,
+    ):
         self.db_path = db_path
-        self.connection_string = connection_string  # Not used yet — PostgreSQL swap possible
+        self.connection_string = (
+            connection_string  # Not used yet — PostgreSQL swap possible
+        )
         self._lock = threading.RLock()
         self._sequence = 0
 
@@ -121,7 +129,12 @@ class EventStore:
 
         return event
 
-    def emit(self, event_type: EventType, job_id: Optional[str] = None, payload: Optional[Dict] = None) -> Event:
+    def emit(
+        self,
+        event_type: EventType,
+        job_id: Optional[str] = None,
+        payload: Optional[Dict] = None,
+    ) -> Event:
         """Convenience method to emit a new event."""
         event = Event(
             event_type=event_type.value,
@@ -130,7 +143,9 @@ class EventStore:
         )
         return self.append(event)
 
-    def replay(self, from_sequence: int = 0, event_filter: Optional[List[str]] = None) -> List[Event]:
+    def replay(
+        self, from_sequence: int = 0, event_filter: Optional[List[str]] = None
+    ) -> List[Event]:
         """
         Replay all events from from_sequence (exclusive) to latest.
         Optionally filter by event types.
@@ -189,7 +204,14 @@ class EventStore:
         }
 
         for event in events:
-            if event.event_type in (EventType.JOB_COMPLETED.value, EventType.JOB_SUCCEEDED.value if hasattr(EventType, 'JOB_SUCCEEDED') else "job.completed"):
+            if event.event_type in (
+                EventType.JOB_COMPLETED.value,
+                (
+                    EventType.JOB_SUCCEEDED.value
+                    if hasattr(EventType, 'JOB_SUCCEEDED')
+                    else "job.completed"
+                ),
+            ):
                 state["status"] = "completed"
             elif event.event_type == EventType.JOB_FAILED.value:
                 state["status"] = "failed"
@@ -224,15 +246,28 @@ class DurabilityLayer:
         self.snapshots = EventStore(db_path.replace(".db", "-snapshots.db"))
         self._snapshots_interval = 100  # snapshot every 100 events
 
-    def record(self, event_type: EventType, job_id: Optional[str] = None, payload: Optional[Dict] = None) -> Event:
+    def record(
+        self,
+        event_type: EventType,
+        job_id: Optional[str] = None,
+        payload: Optional[Dict] = None,
+    ) -> Event:
         """Record an event to the append-only log."""
         return self.events.emit(event_type, job_id, payload)
 
     def record_job_submitted(self, job_id: str, plan: dict, priority: int) -> Event:
-        return self.record(EventType.JOB_SUBMITTED, job_id, {"plan": plan, "priority": priority})
+        return self.record(
+            EventType.JOB_SUBMITTED, job_id, {"plan": plan, "priority": priority}
+        )
 
-    def record_job_dispatched(self, job_id: str, manifest_name: str, execution_mode: str) -> Event:
-        return self.record(EventType.JOB_DISPATCHED, job_id, {"manifest": manifest_name, "mode": execution_mode})
+    def record_job_dispatched(
+        self, job_id: str, manifest_name: str, execution_mode: str
+    ) -> Event:
+        return self.record(
+            EventType.JOB_DISPATCHED,
+            job_id,
+            {"manifest": manifest_name, "mode": execution_mode},
+        )
 
     def record_job_completed(self, job_id: str, result: Optional[Dict] = None) -> Event:
         return self.record(EventType.JOB_COMPLETED, job_id, result or {})

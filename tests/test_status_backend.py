@@ -31,6 +31,7 @@ def _uniq(prefix: str) -> str:
 @pytest.fixture(autouse=True)
 def _disable_background_worker(monkeypatch):
     """Prevent the infinite poll_and_execute loop from running during tests."""
+
     async def _noop():
         return None
 

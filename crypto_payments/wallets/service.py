@@ -1,4 +1,5 @@
 """Crypto Payments — Wallet Management Service."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -40,7 +41,9 @@ class CryptoWalletService:
         if request.wallet_type == WalletType.MONERO and not request.monero_config:
             raise ValueError("Monero wallet requires monero_config")
         if request.mode == WalletMode.HOT:
-            raise ValueError("HOT mode not allowed — DecisionOS never stores private keys")
+            raise ValueError(
+                "HOT mode not allowed — DecisionOS never stores private keys"
+            )
 
         wallet = CryptoWallet(
             tenant_id=request.tenant_id,
@@ -51,7 +54,9 @@ class CryptoWalletService:
             public_address=request.public_address,
             rpc_endpoint=request.rpc_endpoint,
             view_key=request.view_key,
-            metadata=request.monero_config.model_dump() if request.monero_config else {},
+            metadata=(
+                request.monero_config.model_dump() if request.monero_config else {}
+            ),
         )
         wallet_id = str(wallet.wallet_id)
         self._wallets[wallet_id] = wallet
@@ -67,7 +72,12 @@ class CryptoWalletService:
                 raise RuntimeError(f"Provider {request.provider} health check failed")
             self._provider_adapters[wallet_id] = adapter
 
-        logger.info("crypto_wallet_created", wallet_id=wallet_id, tenant_id=request.tenant_id, wallet_type=request.wallet_type.value)
+        logger.info(
+            "crypto_wallet_created",
+            wallet_id=wallet_id,
+            tenant_id=request.tenant_id,
+            wallet_type=request.wallet_type.value,
+        )
         return CreateWalletResponse(
             wallet_id=wallet.wallet_id,
             tenant_id=wallet.tenant_id,
@@ -78,7 +88,9 @@ class CryptoWalletService:
             created_at=wallet.created_at,
         )
 
-    async def generate_address(self, wallet_id: str, request: GenerateAddressRequest) -> GenerateAddressResponse:
+    async def generate_address(
+        self, wallet_id: str, request: GenerateAddressRequest
+    ) -> GenerateAddressResponse:
         wallet = self._wallets.get(wallet_id)
         if not wallet:
             raise ValueError(f"Wallet {wallet_id} not found")
@@ -117,7 +129,11 @@ class CryptoWalletService:
             created_at=subaddress.created_at,
         )
         self._addresses[str(deposit.address_id)] = deposit
-        logger.info("monero_subaddress_generated", wallet_id=wallet_id, index=subaddress.subaddress_index)
+        logger.info(
+            "monero_subaddress_generated",
+            wallet_id=wallet_id,
+            index=subaddress.subaddress_index,
+        )
         return GenerateMoneroSubaddressResponse(
             subaddress_index=subaddress.subaddress_index,
             address=subaddress.address,
@@ -126,7 +142,9 @@ class CryptoWalletService:
             wallet_id=wallet.wallet_id,
         )
 
-    async def rotate_wallet(self, wallet_id: str, request: RotateWalletRequest) -> RotateWalletResponse:
+    async def rotate_wallet(
+        self, wallet_id: str, request: RotateWalletRequest
+    ) -> RotateWalletResponse:
         wallet = self._wallets.get(wallet_id)
         if not wallet:
             raise ValueError(f"Wallet {wallet_id} not found")

@@ -90,16 +90,19 @@ class SpendCapExceeded(Exception):
 #  Example: Full job lifecycle with billing
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def demo_full_lifecycle():
     client = ROMAClient(api_key=os.environ.get("ROMA_API_KEY", "YOUR_API_KEY"))
 
     # 1. Check balance before submitting
     usage = client.get_usage()
-    print(f"Balance: ${usage['balance_usd']:.4f}  "
-          f"Plan: {usage['plan']}  "
-          f"Spend cap: ${usage['spend_cap_usd']:.2f}  "
-          f"GPU used: {usage['total_gpu_seconds']}s  "
-          f"Tokens: {usage['total_input_tokens']} in / {usage['total_output_tokens']} out")
+    print(
+        f"Balance: ${usage['balance_usd']:.4f}  "
+        f"Plan: {usage['plan']}  "
+        f"Spend cap: ${usage['spend_cap_usd']:.2f}  "
+        f"GPU used: {usage['total_gpu_seconds']}s  "
+        f"Tokens: {usage['total_input_tokens']} in / {usage['total_output_tokens']} out"
+    )
 
     # 2. Submit LLM job with token tracking
     try:
@@ -111,9 +114,11 @@ def demo_full_lifecycle():
             output_tokens=2000,
             plan="pro",
         )
-        print(f"Job created: {job['job_id']}  "
-              f"Estimated cost: ${job.get('estimated_cost_usd', 'N/A'):.6f}  "
-              f"Remaining cap: ${job.get('spend_cap_remaining', 'N/A'):.6f}")
+        print(
+            f"Job created: {job['job_id']}  "
+            f"Estimated cost: ${job.get('estimated_cost_usd', 'N/A'):.6f}  "
+            f"Remaining cap: ${job.get('spend_cap_remaining', 'N/A'):.6f}"
+        )
     except SpendCapExceeded as e:
         print(f"❌ SPEND CAP EXCEEDED: {e}")
         print("   Upgrade plan or wait for billing cycle reset.")

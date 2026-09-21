@@ -1,4 +1,5 @@
 """Public job routes extracted from main (A2-2)."""
+
 import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,7 +16,12 @@ logger = logging.getLogger("roma.jobs")
 
 router = APIRouter(tags=["jobs-public"])
 
-@router.get("/status/{job_id}", response_model=RomaStatusResponse, dependencies=[Depends(verify_api_key)])
+
+@router.get(
+    "/status/{job_id}",
+    response_model=RomaStatusResponse,
+    dependencies=[Depends(verify_api_key)],
+)
 async def get_status(job_id: str, key_info: dict = Depends(verify_api_key)):
     tenant_id = key_info["tenant_id"]
     job = db.get_execution_job(job_id)
@@ -41,12 +47,19 @@ async def cancel_job(job_id: str, key_info: dict = Depends(verify_api_key)):
     job = db.get_execution_job(job_id)
     if not job or job.get("tenant_id") != tenant_id:
         raise HTTPException(status_code=404, detail="Job not found")
-    db.update_execution_job(job_id, status="cancelled", completed_at=datetime.now(timezone.utc).isoformat(), tenant_id=tenant_id)
+    db.update_execution_job(
+        job_id,
+        status="cancelled",
+        completed_at=datetime.now(timezone.utc).isoformat(),
+        tenant_id=tenant_id,
+    )
     # Гасим backend-инстанс (Vast.ai destroy и т.п.)
     try:
         await backend_cancel_job(tenant_id=tenant_id, job_id=job_id)
     except Exception as exc:
-        logger.warning("cancel.backend_cleanup_failed tenant=%s job=%s: %s", tenant_id, job_id, exc)
+        logger.warning(
+            "cancel.backend_cleanup_failed tenant=%s job=%s: %s", tenant_id, job_id, exc
+        )
     try:
         write_event(tenant_id, "job.cancelled", "job", job_id, {})
     except Exception:
@@ -70,14 +83,17 @@ async def complete_job(job_id: str, key_info: dict = Depends(verify_api_key)):
             started_dt = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
             if started_dt.tzinfo is None:
                 started_dt = started_dt.replace(tzinfo=timezone.utc)
-            actual_duration_s = (datetime.now(timezone.utc) - started_dt).total_seconds()
+            actual_duration_s = (
+                datetime.now(timezone.utc) - started_dt
+            ).total_seconds()
         except Exception:
             actual_duration_s = 0
     gpu_sec = max(actual_duration_s, 0)
     plan_name = (db.get_tenant(tenant_id) or {}).get("plan", "free")
     try:
-        billing_status = finalize_job_billing(tenant_id, job_id, gpu_sec, plan_name,
-                                              backend=job.get("backend"))
+        billing_status = finalize_job_billing(
+            tenant_id, job_id, gpu_sec, plan_name, backend=job.get("backend")
+        )
     except PGUnavailableError as exc:
         # fail-closed: деньги не списаны — не помечаем completed.
         logger.error("complete.billing_pg_error job=%s: %s", job_id, exc)
@@ -91,10 +107,13 @@ async def complete_job(job_id: str, key_info: dict = Depends(verify_api_key)):
     try:
         await backend_cancel_job(tenant_id=tenant_id, job_id=job_id)
     except Exception as exc:
-        logger.warning("backend.cleanup.failed tenant=%s job=%s: %s", tenant_id, job_id, exc)
+        logger.warning(
+            "backend.cleanup.failed tenant=%s job=%s: %s", tenant_id, job_id, exc
+        )
 
     n = db.update_execution_job(
-        job_id, status="completed",
+        job_id,
+        status="completed",
         completed_at=datetime.now(timezone.utc).isoformat(),
         tenant_id=tenant_id,
         if_status_not_in=("completed", "timeout", "failed", "cancelled"),
@@ -114,7 +133,12 @@ async def list_jobs(key_info: dict = Depends(verify_api_key)):
         "tenant_id": tenant_id,
         "queue": len(my_jobs),
         "jobs": my_jobs[-10:],
-        "execution_modes": ["k8s_job", "k8s_persistent", "atom_cluster", "batch", "vastai", "local"],
+        "execution_modes": [
+            "k8s_job",
+            "k8s_persistent",
+            "atom_cluster",
+            "batch",
+            "vastai",
+            "local",
+        ],
     }
-
-

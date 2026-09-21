@@ -47,7 +47,10 @@ def test_explicit_origins_trimmed(monkeypatch):
 
 def test_nonprod_empty_localhost_default(monkeypatch):
     _non_prod(monkeypatch, cors="")
-    assert main._cors_allowed_origins() == ["http://127.0.0.1:3080", "http://localhost:3080"]
+    assert main._cors_allowed_origins() == [
+        "http://127.0.0.1:3080",
+        "http://localhost:3080",
+    ]
 
 
 def test_allowed_origin_reflected(monkeypatch):

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """ROMA SaaS MVP Architecture — Complete Product Specification."""
+
 print("=== ROMA SaaS MVP Architecture ===")
 print()
 print("PRODUCT LAYER (SaaS-specific, not in core system)")

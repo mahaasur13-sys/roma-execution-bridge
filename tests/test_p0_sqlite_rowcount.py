@@ -55,7 +55,14 @@ def test_update_execution_job_sqlite_rowcount(sqlite_mode):
 
     # Повторный перевод в тот же статус через guard — 0 строк, но без исключения.
     n_same = db._update_execution_job_sqlite(
-        job_id, "running", None, None, "local", None, None, None,
+        job_id,
+        "running",
+        None,
+        None,
+        "local",
+        None,
+        None,
+        None,
         if_status_not_in=["running"],
     )
     assert n_same == 0

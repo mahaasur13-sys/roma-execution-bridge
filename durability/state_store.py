@@ -112,7 +112,9 @@ class StateStore:
         Reconstruct full system state.
         """
         return {
-            "jobs": {job_id: self.get_job_state(job_id) for job_id in self.get_all_jobs()},
+            "jobs": {
+                job_id: self.get_job_state(job_id) for job_id in self.get_all_jobs()
+            },
             "durability": self._event_store.get_latest_sequence(),
         }
 

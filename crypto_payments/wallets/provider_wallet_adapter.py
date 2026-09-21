@@ -1,4 +1,5 @@
 """Crypto Payments — Provider Wallet Adapter (NOWPayments/Heleket/CryptoCloud/BTCPay)."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -17,11 +18,15 @@ class ProviderWalletAdapter:
     Supported providers: NOWPayments, Heleket, CryptoCloud, BTCPay Server.
     """
 
-    SUPPORTED_PROVIDERS: frozenset = frozenset({"nowpayments", "heleket", "cryptocloud", "btcpay"})
+    SUPPORTED_PROVIDERS: frozenset = frozenset(
+        {"nowpayments", "heleket", "cryptocloud", "btcpay"}
+    )
 
     def __init__(self, settings: CryptoSettings, provider: str) -> None:
         if provider not in self.SUPPORTED_PROVIDERS:
-            raise ValueError(f"Unsupported provider: {provider}. Supported: {self.SUPPORTED_PROVIDERS}")
+            raise ValueError(
+                f"Unsupported provider: {provider}. Supported: {self.SUPPORTED_PROVIDERS}"
+            )
         self._provider = provider
         self._settings = settings
         self._http = httpx.AsyncClient(timeout=30)
@@ -37,13 +42,17 @@ class ProviderWalletAdapter:
             if self._provider == "heleket":
                 resp = await self._http.get(
                     f"{self._settings.heleket_api_url}/v1/ping",
-                    headers={"Authorization": f"Bearer {self._settings.heleket_api_key}"},
+                    headers={
+                        "Authorization": f"Bearer {self._settings.heleket_api_key}"
+                    },
                 )
                 return resp.status_code == 200
             if self._provider == "cryptocloud":
                 resp = await self._http.post(
                     f"{self._settings.cryptocloud_api_url}/v2/info/ping",
-                    headers={"Authorization": f"Token {self._settings.cryptocloud_api_key}"},
+                    headers={
+                        "Authorization": f"Token {self._settings.cryptocloud_api_key}"
+                    },
                 )
                 return resp.status_code == 200
             if self._provider == "btcpay":
@@ -53,11 +62,15 @@ class ProviderWalletAdapter:
                 )
                 return resp.status_code == 200
         except Exception:
-            logger.warning("provider_wallet_health_check_failed", provider=self._provider)
+            logger.warning(
+                "provider_wallet_health_check_failed", provider=self._provider
+            )
         return False
 
     async def generate_address(self, currency: str, network: str) -> dict[str, Any]:
-        logger.info("provider_address_generated", provider=self._provider, currency=currency)
+        logger.info(
+            "provider_address_generated", provider=self._provider, currency=currency
+        )
         return {
             "address": f"{self._provider}_{currency}_{network}_addr",
             "currency": currency,

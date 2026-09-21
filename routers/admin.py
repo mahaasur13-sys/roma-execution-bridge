@@ -17,7 +17,12 @@ from pydantic import BaseModel
 from starlette.responses import Response
 
 from alerts import Alert, AlertLevel
-from auth.invites import check_beta_capacity, create_invite, deactivate_invite, list_invites
+from auth.invites import (
+    check_beta_capacity,
+    create_invite,
+    deactivate_invite,
+    list_invites,
+)
 from deps import _admin_only, alert_dispatcher, limiter, logger, verify_api_key
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -25,6 +30,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 class TestAlertRequest(BaseModel):
     """Запрос на тестовую отправку алерта."""
+
     channel: str | None = None  # telegram, discord, email или None = все
     message: str = "🧪 Тестовый алерт ROMA Execution Bridge v2.1.0"
 
@@ -84,15 +90,17 @@ async def admin_deactivate_invite(payload: dict):
 async def admin_page(request: Request):
     """Admin dashboard HTML page."""
     info = _admin_only(request)
-    return Response(content=_render_admin_dashboard(info["tenant_id"]), media_type="text/html")
+    return Response(
+        content=_render_admin_dashboard(info["tenant_id"]), media_type="text/html"
+    )
 
 
 @router.get("/verification-stats")
-
 def get_verification_stats():
     """Return verification statistics for the last 24h."""
     try:
         from db_adapter import _pg_conn, _pg_return
+
         conn = _pg_conn()
         cur = conn.cursor()
         cur.execute("""
@@ -116,13 +124,18 @@ def get_verification_stats():
     except Exception as e:
         logger.warning("verification_stats_failed", extra={"error": str(e)})
         return {"error": str(e), "period": "24h"}
+
+
 async def admin_verification_stats():
     """Return email verification statistics for the last 24 hours."""
     return get_verification_stats()
+
+
 @router.get("/backends", dependencies=[Depends(verify_api_key)])
 async def admin_backends(key_info: dict = Depends(verify_api_key)):
     """List available execution backends and their status."""
     from backends.dispatcher import list_backends
+
     return {
         "active_backend": os.getenv("ROMA_EXECUTION_BACKEND", "local"),
         "backends": list_backends(),
@@ -150,7 +163,9 @@ async def admin_analytics_users(request: Request):
     end_date = request.query_params.get("end_date", "")
     sort_by = request.query_params.get("sort_by", "last_seen")
     try:
-        users = db.get_analytics_users(start_date=start_date, end_date=end_date, sort_by=sort_by)
+        users = db.get_analytics_users(
+            start_date=start_date, end_date=end_date, sort_by=sort_by
+        )
         return {"status": "ok", "users": users}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -168,10 +183,20 @@ async def admin_analytics_events(request: Request):
     to_date = request.query_params.get("to_date", "")
     try:
         items, total = db.get_analytics_events(
-            limit=limit, offset=offset, event_type=event_type,
-            tenant_id=tenant_id, from_date=from_date, to_date=to_date
+            limit=limit,
+            offset=offset,
+            event_type=event_type,
+            tenant_id=tenant_id,
+            from_date=from_date,
+            to_date=to_date,
         )
-        return {"status": "ok", "items": items, "total": total, "limit": limit, "offset": offset}
+        return {
+            "status": "ok",
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -187,10 +212,19 @@ async def admin_feedback(request: Request):
     rating = int(request.query_params.get("rating", "0"))
     try:
         items, total = db.get_feedback(
-            limit=limit, offset=offset, from_date=from_date,
-            to_date=to_date, rating=rating
+            limit=limit,
+            offset=offset,
+            from_date=from_date,
+            to_date=to_date,
+            rating=rating,
         )
-        return {"status": "ok", "items": items, "total": total, "limit": limit, "offset": offset}
+        return {
+            "status": "ok",
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -222,7 +256,12 @@ async def admin_invite(request: Request):
 
     leads = db.list_leads(status="new")
     if not leads:
-        return {"status": "ok", "sent": 0, "dry_run": dry_run, "message": "No new leads to invite"}
+        return {
+            "status": "ok",
+            "sent": 0,
+            "dry_run": dry_run,
+            "message": "No new leads to invite",
+        }
 
     sent = 0
     failed = 0
@@ -258,7 +297,13 @@ async def admin_invite(request: Request):
             pass
 
     logger.info(f"Admin invite: {sent} sent, {failed} failed (dry_run={dry_run})")
-    return {"status": "ok", "sent": sent, "failed": failed, "dry_run": dry_run, "total_leads": len(leads)}
+    return {
+        "status": "ok",
+        "sent": sent,
+        "failed": failed,
+        "dry_run": dry_run,
+        "total_leads": len(leads),
+    }
 
 
 def _render_admin_dashboard(tenant_id: str) -> str:

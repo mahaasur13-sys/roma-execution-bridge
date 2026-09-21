@@ -1,4 +1,5 @@
 """ROMA Metering Engine — PG-backed with connection pool, retry, in-memory fallback."""
+
 from __future__ import annotations
 
 import time
@@ -46,8 +47,9 @@ class PGMeteringEngine:
         self.events: List[UsageEvent] = []
         self.tenant_totals: Dict[str, Dict[str, float]] = {}
 
-    def _pg_execute(self, operation: str, query: str, params: tuple = None,
-                    fetch: bool = False) -> list | None:
+    def _pg_execute(
+        self, operation: str, query: str, params: tuple = None, fetch: bool = False
+    ) -> list | None:
         if not self._pg.enabled or not self._pg.is_connected:
             raise PGUnavailableError("PG not configured or unavailable")
         try:
@@ -63,21 +65,47 @@ class PGMeteringEngine:
             logger.error("MeteringEngine.%s PG error: %s", operation, e)
             raise PGUnavailableError(str(e)) from e
 
-    def record(self, event_type, tenant, job_id="manual", gpu_seconds=0,
-               cpu_seconds=0, gb_seconds=0, plugin_count=0,
-               billed=False, cost_usd=None, value=None) -> UsageEvent:
-        val = value if value is not None else (gpu_seconds or cpu_seconds or gb_seconds or float(plugin_count))
-        ev = UsageEvent(tenant_id=tenant, event_type=event_type, value=val, job_id=job_id)
+    def record(
+        self,
+        event_type,
+        tenant,
+        job_id="manual",
+        gpu_seconds=0,
+        cpu_seconds=0,
+        gb_seconds=0,
+        plugin_count=0,
+        billed=False,
+        cost_usd=None,
+        value=None,
+    ) -> UsageEvent:
+        val = (
+            value
+            if value is not None
+            else (gpu_seconds or cpu_seconds or gb_seconds or float(plugin_count))
+        )
+        ev = UsageEvent(
+            tenant_id=tenant, event_type=event_type, value=val, job_id=job_id
+        )
         # F1: пишем авторитетную (уже округлённую) цену, чтобы usage_events.cost_usd
         # совпадал с DEBIT в лэджере (никаких 0.0012003365080902586…).
-        ev.cost_usd = round(float(cost_usd), 8) if cost_usd is not None else round(ev.cost_usd, 8)
+        ev.cost_usd = (
+            round(float(cost_usd), 8) if cost_usd is not None else round(ev.cost_usd, 8)
+        )
 
         try:
             self._pg_execute(
                 "usage_insert",
                 """INSERT INTO usage_events (tenant_id, event_type, value, cost_usd, job_id, metadata, billed)
                    VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s)""",
-                (tenant, event_type, val, ev.cost_usd, job_id, json.dumps({}), bool(billed)),
+                (
+                    tenant,
+                    event_type,
+                    val,
+                    ev.cost_usd,
+                    job_id,
+                    json.dumps({}),
+                    bool(billed),
+                ),
             )
             self._pg_execute(
                 "usage_totals_upsert",
@@ -89,11 +117,13 @@ class PGMeteringEngine:
                      gb_seconds  = tenant_usage_totals.gb_seconds  + EXCLUDED.gb_seconds,
                      total_cost  = tenant_usage_totals.total_cost  + EXCLUDED.total_cost,
                      updated_at  = NOW()""",
-                (tenant,
-                 gpu_seconds if event_type == "gpu_usage" else 0,
-                 cpu_seconds if event_type == "cpu_usage" else 0,
-                 gb_seconds if event_type == "storage_usage" else 0,
-                 ev.cost_usd),
+                (
+                    tenant,
+                    gpu_seconds if event_type == "gpu_usage" else 0,
+                    cpu_seconds if event_type == "cpu_usage" else 0,
+                    gb_seconds if event_type == "storage_usage" else 0,
+                    ev.cost_usd,
+                ),
             )
             return ev
         except PGUnavailableError:
@@ -101,7 +131,9 @@ class PGMeteringEngine:
 
         # In-memory fallback
         self.events.append(ev)
-        t = self.tenant_totals.setdefault(tenant, {"gpu_s": 0, "cpu_s": 0, "gb_s": 0, "cost": 0.0, "jobs": 0})
+        t = self.tenant_totals.setdefault(
+            tenant, {"gpu_s": 0, "cpu_s": 0, "gb_s": 0, "cost": 0.0, "jobs": 0}
+        )
         if event_type == "gpu_usage":
             t["gpu_s"] += gpu_seconds
         if event_type == "cpu_usage":
@@ -120,28 +152,51 @@ class PGMeteringEngine:
                     "totals_one",
                     """SELECT gpu_seconds, cpu_seconds, gb_seconds, total_cost, jobs_completed
                        FROM tenant_usage_totals WHERE tenant_id = %s""",
-                    (tenant,), fetch=True,
+                    (tenant,),
+                    fetch=True,
                 )
                 if rows:
-                    return {"gpu_s": rows[0][0], "cpu_s": rows[0][1], "gb_s": rows[0][2],
-                            "cost": rows[0][3], "jobs": rows[0][4]}
+                    return {
+                        "gpu_s": rows[0][0],
+                        "cpu_s": rows[0][1],
+                        "gb_s": rows[0][2],
+                        "cost": rows[0][3],
+                        "jobs": rows[0][4],
+                    }
                 return {}
             rows = self._pg_execute(
                 "totals_all",
                 "SELECT tenant_id, gpu_seconds, cpu_seconds, gb_seconds, total_cost, jobs_completed FROM tenant_usage_totals",
                 fetch=True,
             )
-            cnt_rows = self._pg_execute("count_events", "SELECT COUNT(*) FROM usage_events", fetch=True)
+            cnt_rows = self._pg_execute(
+                "count_events", "SELECT COUNT(*) FROM usage_events", fetch=True
+            )
             total_events = cnt_rows[0][0] if cnt_rows else 0
-            tenants = {r[0]: {"gpu_s": r[1], "cpu_s": r[2], "gb_s": r[3], "cost": r[4], "jobs": r[5]} for r in rows}
-            return {"tenants": tenants, "total_events": total_events,
-                    "total_cost": sum(t["cost"] for t in tenants.values())}
+            tenants = {
+                r[0]: {
+                    "gpu_s": r[1],
+                    "cpu_s": r[2],
+                    "gb_s": r[3],
+                    "cost": r[4],
+                    "jobs": r[5],
+                }
+                for r in rows
+            }
+            return {
+                "tenants": tenants,
+                "total_events": total_events,
+                "total_cost": sum(t["cost"] for t in tenants.values()),
+            }
         except PGUnavailableError:
             pass
         if tenant:
             return self.tenant_totals.get(tenant, {})
-        return {"tenants": self.tenant_totals, "total_events": len(self.events),
-                "total_cost": sum(t["cost"] for t in self.tenant_totals.values())}
+        return {
+            "tenants": self.tenant_totals,
+            "total_events": len(self.events),
+            "total_cost": sum(t["cost"] for t in self.tenant_totals.values()),
+        }
 
     @property
     def is_persistent(self) -> bool:

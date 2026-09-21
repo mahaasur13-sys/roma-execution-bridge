@@ -7,6 +7,7 @@
 Регресс-защита: если гейт снова начнёт считать active вместо total, тенант сможет
 обойти месячную квоту, просто не превышая лимит одновременных job'ов.
 """
+
 from __future__ import annotations
 
 import inspect
@@ -34,7 +35,9 @@ class _Counters:
 
 def _patch(monkeypatch, plan: str, total: int, active: int) -> _Counters:
     counters = _Counters(total, active)
-    monkeypatch.setattr(db, "get_tenant", lambda tenant_id: {"tenant_id": tenant_id, "plan": plan})
+    monkeypatch.setattr(
+        db, "get_tenant", lambda tenant_id: {"tenant_id": tenant_id, "plan": plan}
+    )
     monkeypatch.setattr(db, "count_jobs_for_tenant_total", counters.total_fn)
     monkeypatch.setattr(db, "count_jobs_active_for_tenant", counters.active_fn)
     return counters
@@ -47,7 +50,9 @@ def test_gate_denies_on_total_not_active(monkeypatch):
 
     assert decision.result == GateResult.DENIED
     assert "quota exceeded" in decision.reason
-    assert counters.calls == ["total"], f"гейт должен смотреть только total, вызвано: {counters.calls}"
+    assert counters.calls == [
+        "total"
+    ], f"гейт должен смотреть только total, вызвано: {counters.calls}"
 
 
 def test_gate_allows_one_below_total_limit(monkeypatch):
@@ -63,7 +68,9 @@ def test_gate_allows_one_below_total_limit(monkeypatch):
 def test_gate_denies_at_total_boundary(monkeypatch):
     """Ровно на границе (total == max_jobs) → DENIED, семантика >=."""
     _patch(monkeypatch, plan="free", total=50, active=0)
-    assert EnterpriseDecisionGate().evaluate("test-quota", {}).result == GateResult.DENIED
+    assert (
+        EnterpriseDecisionGate().evaluate("test-quota", {}).result == GateResult.DENIED
+    )
 
 
 def test_enterprise_plan_is_unlimited(monkeypatch):
@@ -78,7 +85,9 @@ def test_plans_loaded_from_config_dir():
     """Планы читаются из config/plans.json, а не из несуществующего plans.json."""
     plans = db._load_plans()
 
-    assert "enterprise" in plans, "потеря плана enterprise → тенант уезжает в free-квоту"
+    assert (
+        "enterprise" in plans
+    ), "потеря плана enterprise → тенант уезжает в free-квоту"
     assert plans["enterprise"]["max_jobs"] == -1
     assert plans["free"]["max_jobs"] == 50, "config/plans.json: max_jobs_per_month=50"
 

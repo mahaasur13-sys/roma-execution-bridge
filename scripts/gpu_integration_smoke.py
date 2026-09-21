@@ -33,7 +33,9 @@ def main() -> int:
     print("=== GPU Connector ===")
     print(f"  target URL      : {worker_url()}")
     print(f"  connector avail : {metrics['connector_available']}")
-    print(f"  workers         : {metrics['worker_count']} (доступно {metrics['available_workers']})")
+    print(
+        f"  workers         : {metrics['worker_count']} (доступно {metrics['available_workers']})"
+    )
     for worker in metrics["workers"]:
         print(f"    - {worker['id']}  {worker['url']}  available={worker['available']}")
 
@@ -44,7 +46,9 @@ def main() -> int:
     reachable = metrics["available_workers"] > 0
     print("=== Итог диагностики ===")
     if reachable:
-        print("  воркер доступен — можно проверять живой путь (ROMA_GPU_LIVE=1 pytest -m ops)")
+        print(
+            "  воркер доступен — можно проверять живой путь (ROMA_GPU_LIVE=1 pytest -m ops)"
+        )
     else:
         print("  НЕТ доступного GPU-воркера: пул настроен, но /health не отвечает")
     print("  развёртывание воркера:")

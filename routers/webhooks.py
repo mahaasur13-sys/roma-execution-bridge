@@ -72,25 +72,38 @@ async def cloudpayments_webhook(request: Request):
 
     # Tenant is resolved ONLY from AccountId and must already exist.
     if not tenant_id or not db.get_tenant(tenant_id):
-        logger.warning("cloudpayments_webhook: unknown AccountId invoice=%s", invoice_id)
+        logger.warning(
+            "cloudpayments_webhook: unknown AccountId invoice=%s", invoice_id
+        )
         raise HTTPException(status_code=422, detail="Unknown AccountId")
 
     status = payload.get("Status", "")
 
     try:
-        if event_type in ("Payment", "Pay", "Completed") or status in ("Completed", "Authorized"):
+        if event_type in ("Payment", "Pay", "Completed") or status in (
+            "Completed",
+            "Authorized",
+        ):
             if plan in ("pro", "enterprise"):
-                db.update_tenant_subscription(tenant_id, invoice_id, "", "active", plan, None)
+                db.update_tenant_subscription(
+                    tenant_id, invoice_id, "", "active", plan, None
+                )
                 db.mark_invoice_processed(invoice_id, event_type, tenant_id)
             else:
-                db.mark_invoice_processed(invoice_id, event_type or "payment_no_plan", tenant_id)
+                db.mark_invoice_processed(
+                    invoice_id, event_type or "payment_no_plan", tenant_id
+                )
 
         elif event_type == "Recurrent" and status == "Completed":
             if plan:
-                db.update_tenant_subscription(tenant_id, invoice_id, "", "active", plan, None)
+                db.update_tenant_subscription(
+                    tenant_id, invoice_id, "", "active", plan, None
+                )
                 db.mark_invoice_processed(invoice_id, event_type, tenant_id)
             else:
-                db.mark_invoice_processed(invoice_id, event_type or "recurrent_no_plan", tenant_id)
+                db.mark_invoice_processed(
+                    invoice_id, event_type or "recurrent_no_plan", tenant_id
+                )
 
         elif event_type in ("Fail", "Declined") or status in ("Declined", "Cancelled"):
             db.set_tenant_inactive(tenant_id)

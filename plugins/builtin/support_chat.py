@@ -40,7 +40,9 @@ class SupportChatPlugin:
         else:
             return {"error": f"Unknown action: {action}"}
 
-    async def _handle_message(self, tenant_id: str, message: str, user_name: str) -> dict[str, Any]:
+    async def _handle_message(
+        self, tenant_id: str, message: str, user_name: str
+    ) -> dict[str, Any]:
         """Process a chat message with AI response."""
         logger.info("Chat from %s/%s: %s", tenant_id, user_name, message[:50])
 
@@ -57,7 +59,9 @@ class SupportChatPlugin:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-    async def _create_ticket(self, tenant_id: str, subject: str, description: str) -> dict[str, Any]:
+    async def _create_ticket(
+        self, tenant_id: str, subject: str, description: str
+    ) -> dict[str, Any]:
         """Create a support ticket."""
         ticket_id = f"T-{len(self._tickets):06d}"
         ticket = {

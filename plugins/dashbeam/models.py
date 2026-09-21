@@ -1,4 +1,5 @@
 """SQLAlchemy models for dashbeam-transfer plugin."""
+
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
@@ -22,7 +23,9 @@ class DashBeamTicketRecord(Base):
     mime_type: str = Column(String(128), default="application/octet-stream")
     relay_url: str = Column(String(512), nullable=False)
     peer_node_id: str = Column(String(128), nullable=True)
-    status: str = Column(String(32), default="pending", index=True)  # pending, active, completed, expired, failed
+    status: str = Column(
+        String(32), default="pending", index=True
+    )  # pending, active, completed, expired, failed
     is_one_time: bool = Column(Boolean, default=True)
     expires_at: DateTime = Column(DateTime, nullable=False)
     created_at: DateTime = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -38,8 +41,12 @@ class DashBeamSessionRecord(Base):
     device_name: str = Column(String(256), default="")
     device_fingerprint: str = Column(String(256), nullable=True)
     relay_url: str = Column(String(512), nullable=False)
-    connected_at: DateTime = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    last_heartbeat: DateTime = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    connected_at: DateTime = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    last_heartbeat: DateTime = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
     is_active: bool = Column(Boolean, default=True)
     bytes_transferred: int = Column(Integer, default=0)
     transfer_count: int = Column(Integer, default=0)

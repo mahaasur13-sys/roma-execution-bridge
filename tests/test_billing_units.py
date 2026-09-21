@@ -13,15 +13,27 @@ import pytest
 from billing.aggregator import UsageAggregator, simulate_usage
 from billing.invoicing import InvoicingEngine
 from billing.metering import CPU_RATE, GPU_RATE, RAM_RATE, MeteringEngine, UsageEvent
-from billing.models.billing_events import BillingEvent, BillingEventStore, BillingEventType
+from billing.models.billing_events import (
+    BillingEvent,
+    BillingEventStore,
+    BillingEventType,
+)
 
 
 class TestUsageEventRates:
     def test_cost_is_derived_from_event_type(self):
-        assert UsageEvent("t", "gpu_usage", 1000.0, "j").cost_usd == pytest.approx(1000.0 * GPU_RATE)
-        assert UsageEvent("t", "cpu_usage", 1000.0, "j").cost_usd == pytest.approx(1000.0 * CPU_RATE)
-        assert UsageEvent("t", "storage_usage", 1000.0, "j").cost_usd == pytest.approx(1000.0 * RAM_RATE)
-        assert UsageEvent("t", "plugin_exec", 3, "j").cost_usd == pytest.approx(3 * 0.001)
+        assert UsageEvent("t", "gpu_usage", 1000.0, "j").cost_usd == pytest.approx(
+            1000.0 * GPU_RATE
+        )
+        assert UsageEvent("t", "cpu_usage", 1000.0, "j").cost_usd == pytest.approx(
+            1000.0 * CPU_RATE
+        )
+        assert UsageEvent("t", "storage_usage", 1000.0, "j").cost_usd == pytest.approx(
+            1000.0 * RAM_RATE
+        )
+        assert UsageEvent("t", "plugin_exec", 3, "j").cost_usd == pytest.approx(
+            3 * 0.001
+        )
 
     def test_unknown_event_type_costs_nothing(self):
         assert UsageEvent("t", "mystery_usage", 999.0, "j").cost_usd == 0.0
@@ -41,7 +53,9 @@ class TestMeteringEngine:
         assert totals["cpu_s"] == 3600.0
         assert totals["gb_s"] == 86400.0
         assert totals["jobs"] == 1
-        expected_cost = 120.0 * GPU_RATE + 3600.0 * CPU_RATE + 86400.0 * RAM_RATE + 5 * 0.001
+        expected_cost = (
+            120.0 * GPU_RATE + 3600.0 * CPU_RATE + 86400.0 * RAM_RATE + 5 * 0.001
+        )
         assert totals["cost"] == pytest.approx(expected_cost)
 
     def test_event_value_takes_first_non_zero_dimension(self):
@@ -68,7 +82,10 @@ class TestMeteringEngine:
 class TestInvoicingEngine:
     def test_generate_totals_line_items_with_tax(self):
         engine = InvoicingEngine(tax_rate=0.2)
-        items = [{"desc": "GPU compute", "cost": 0.05}, {"desc": "Plugin exec", "cost": 0.01}]
+        items = [
+            {"desc": "GPU compute", "cost": 0.05},
+            {"desc": "Plugin exec", "cost": 0.01},
+        ]
         inv = engine.generate("tenant-abc", items, period_start=100.0, period_end=200.0)
 
         assert inv.invoice_id.startswith("INV-")
@@ -82,7 +99,9 @@ class TestInvoicingEngine:
 
     def test_zero_tax_tier_and_issue_marks_invoice_issued(self):
         engine = InvoicingEngine(tax_rate=0.0)
-        inv = engine.generate("tenant-xyz", [{"desc": "free tier", "cost": 0.0}], 0.0, 1.0)
+        inv = engine.generate(
+            "tenant-xyz", [{"desc": "free tier", "cost": 0.0}], 0.0, 1.0
+        )
         assert inv.tax == 0.0
         assert inv.total == 0.0
 
@@ -104,9 +123,23 @@ class TestUsageAggregator:
         now = 1_000_000.0
         store = self._store_with(
             [
-                BillingEvent("e1", "t1", BillingEventType.GPU_ALLOCATED, now - 100, gpu_seconds=60.0),
-                BillingEvent("e2", "t1", BillingEventType.JOB_STARTED, now - 10, gpu_seconds=30.0),
-                BillingEvent("e3", "t2", BillingEventType.GPU_ALLOCATED, now - 10, gpu_seconds=999.0),
+                BillingEvent(
+                    "e1",
+                    "t1",
+                    BillingEventType.GPU_ALLOCATED,
+                    now - 100,
+                    gpu_seconds=60.0,
+                ),
+                BillingEvent(
+                    "e2", "t1", BillingEventType.JOB_STARTED, now - 10, gpu_seconds=30.0
+                ),
+                BillingEvent(
+                    "e3",
+                    "t2",
+                    BillingEventType.GPU_ALLOCATED,
+                    now - 10,
+                    gpu_seconds=999.0,
+                ),
             ]
         )
         agg = UsageAggregator(store)
@@ -118,19 +151,32 @@ class TestUsageAggregator:
         now = 2_000_000.0
         store = self._store_with(
             [
-                BillingEvent("e1", "t1", BillingEventType.GPU_ALLOCATED, now, gpu_seconds=10.0),
-                BillingEvent("e2", "t1", BillingEventType.GPU_ALLOCATED, now, gpu_seconds=5.0),
-                BillingEvent("e3", "t1", BillingEventType.JOB_STARTED, now, gpu_seconds=1.0),
+                BillingEvent(
+                    "e1", "t1", BillingEventType.GPU_ALLOCATED, now, gpu_seconds=10.0
+                ),
+                BillingEvent(
+                    "e2", "t1", BillingEventType.GPU_ALLOCATED, now, gpu_seconds=5.0
+                ),
+                BillingEvent(
+                    "e3", "t1", BillingEventType.JOB_STARTED, now, gpu_seconds=1.0
+                ),
             ]
         )
         by_type = UsageAggregator(store).aggregate_by_type("t1", now - 1, now)
-        assert by_type == {"gpu.allocated": pytest.approx(15.0), "job.started": pytest.approx(1.0)}
+        assert by_type == {
+            "gpu.allocated": pytest.approx(15.0),
+            "job.started": pytest.approx(1.0),
+        }
 
     def test_monthly_summary_window_covers_the_month_of_the_timestamp(self):
         store = BillingEventStore()
         agg = UsageAggregator(store)
         mid_month = time.mktime((2026, 5, 15, 12, 0, 0, 0, 0, -1))
-        store.append(BillingEvent("e1", "t1", BillingEventType.GPU_ALLOCATED, mid_month, gpu_seconds=42.0))
+        store.append(
+            BillingEvent(
+                "e1", "t1", BillingEventType.GPU_ALLOCATED, mid_month, gpu_seconds=42.0
+            )
+        )
 
         summary = agg.monthly_summary("t1", mid_month)
         assert summary["gpu_seconds"] == pytest.approx(42.0)
@@ -141,7 +187,11 @@ class TestUsageAggregator:
         store = BillingEventStore()
         agg = UsageAggregator(store)
         december = time.mktime((2026, 12, 20, 12, 0, 0, 0, 0, -1))
-        store.append(BillingEvent("e1", "t1", BillingEventType.GPU_ALLOCATED, december, gpu_seconds=7.0))
+        store.append(
+            BillingEvent(
+                "e1", "t1", BillingEventType.GPU_ALLOCATED, december, gpu_seconds=7.0
+            )
+        )
 
         summary = agg.monthly_summary("t1", december)
         assert summary["gpu_seconds"] == pytest.approx(7.0)
@@ -163,11 +213,16 @@ class TestBillingEventStore:
 
         assert store.get_for_tenant("t1") == [first, second]
         assert store.last_event("t1") is second
-        assert [e.event_id for e in store.get_in_range("t1", 100.0, 200.0)] == ["e1", "e2"]
+        assert [e.event_id for e in store.get_in_range("t1", 100.0, 200.0)] == [
+            "e1",
+            "e2",
+        ]
         assert [e.event_id for e in store.get_in_range("t1", 101.0, 199.0)] == []
 
     def test_event_maps_to_stripe_usage_record(self):
-        ev = BillingEvent("e1", "tenant-abc", BillingEventType.GPU_ALLOCATED, 123.5, gpu_seconds=60.0)
+        ev = BillingEvent(
+            "e1", "tenant-abc", BillingEventType.GPU_ALLOCATED, 123.5, gpu_seconds=60.0
+        )
         assert ev.to_stripe_record() == {
             "name": "gpu.allocated",
             "value": 60.0,

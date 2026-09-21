@@ -9,6 +9,7 @@ integration tests (concurrent "впритык → ровно один", idempote
 
 import pytest
 import sys
+
 sys.path.insert(0, ".")
 
 from main import _increment_usage, metering_engine, billing_ledger
@@ -21,10 +22,14 @@ def mock_billing(monkeypatch):
     record_calls = []
 
     def fake_debit(tenant_id, amount, currency="USD", idempotency_key=None, **meta):
-        debit_calls.append({
-            "tenant_id": tenant_id, "amount": amount,
-            "idempotency_key": idempotency_key, "meta": meta,
-        })
+        debit_calls.append(
+            {
+                "tenant_id": tenant_id,
+                "amount": amount,
+                "idempotency_key": idempotency_key,
+                "meta": meta,
+            }
+        )
         return "led-test"
 
     def fake_record(*args, **kwargs):
@@ -37,7 +42,10 @@ def mock_billing(monkeypatch):
 
 def test_increment_usage_gpu_seconds(mock_billing):
     total_cost, debited = _increment_usage(
-        tenant_id="tenant_test_1", gpu_sec=100.0, plan_name="PRO", job_id="job-123",
+        tenant_id="tenant_test_1",
+        gpu_sec=100.0,
+        plan_name="PRO",
+        job_id="job-123",
     )
     assert total_cost == pytest.approx(0.001)  # 100 * 0.00001
     assert debited is True
@@ -62,9 +70,11 @@ def test_increment_usage_gpu_seconds(mock_billing):
 def test_increment_usage_tokens(mock_billing):
     total_cost, debited = _increment_usage(
         tenant_id="tenant_test_2",
-        input_tokens=1_000_000, output_tokens=500_000, job_id="job-456",
+        input_tokens=1_000_000,
+        output_tokens=500_000,
+        job_id="job-456",
     )
-    expected = 1_000_000 * 0.000001 + 500_000 * 0.000002  # 2.0
+    _expected = 1_000_000 * 0.000001 + 500_000 * 0.000002  # 2.0
     assert total_cost == pytest.approx(2.0)
     assert debited is True
 
@@ -84,7 +94,10 @@ def test_increment_usage_tokens(mock_billing):
 def test_increment_usage_both(mock_billing):
     total_cost, debited = _increment_usage(
         tenant_id="tenant_test_3",
-        gpu_sec=50.0, input_tokens=100_000, output_tokens=50_000, job_id="job-789",
+        gpu_sec=50.0,
+        input_tokens=100_000,
+        output_tokens=50_000,
+        job_id="job-789",
     )
     gpu_cost = 50 * 0.00001
     token_cost = 100_000 * 0.000001 + 50_000 * 0.000002
@@ -119,12 +132,14 @@ def test_increment_usage_no_funds(mock_billing, monkeypatch):
 
     monkeypatch.setattr(billing_ledger, "debit_if_funds", no_funds)
     total_cost, debited = _increment_usage(
-        tenant_id="tenant_test_4", gpu_sec=100.0, job_id="job-no-funds",
+        tenant_id="tenant_test_4",
+        gpu_sec=100.0,
+        job_id="job-no-funds",
     )
     assert total_cost == pytest.approx(0.001)
     assert debited is False
     assert len(mock_billing["debit_calls"]) == 1  # ровно одна попытка дебита
-    assert mock_billing["record_calls"] == []     # usage не пишется
+    assert mock_billing["record_calls"] == []  # usage не пишется
 
 
 def test_increment_usage_pg_error_raises(mock_billing, monkeypatch):
@@ -140,7 +155,10 @@ def test_increment_usage_pg_error_raises(mock_billing, monkeypatch):
 def test_increment_usage_vastai_gpu_execution(mock_billing):
     # Q1: backend="vastai" → event_type="gpu_execution" (не cpu_execution)
     total_cost, debited = _increment_usage(
-        tenant_id="tenant_test_5", gpu_sec=10.0, job_id="job-vastai", backend="vastai",
+        tenant_id="tenant_test_5",
+        gpu_sec=10.0,
+        job_id="job-vastai",
+        backend="vastai",
     )
     assert total_cost == pytest.approx(0.0001)
     assert debited is True

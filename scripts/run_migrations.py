@@ -21,6 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from env_loader import load_env
+
 load_env()
 
 
@@ -36,7 +37,8 @@ def _migration_files() -> list[Path]:
 def _strip_txn_wrappers(sql: str) -> str:
     """Remove standalone BEGIN;/COMMIT; lines so the runner owns the transaction."""
     return "\n".join(
-        line for line in sql.splitlines()
+        line
+        for line in sql.splitlines()
         if line.strip().upper() not in ("BEGIN;", "COMMIT;")
     )
 
@@ -44,7 +46,10 @@ def _strip_txn_wrappers(sql: str) -> str:
 def main() -> int:
     dsn = _dsn()
     if not dsn:
-        print("PG only: PG_DSN / DATABASE_URL not set — no-op (SQLite uses db_adapter)", file=sys.stderr)
+        print(
+            "PG only: PG_DSN / DATABASE_URL not set — no-op (SQLite uses db_adapter)",
+            file=sys.stderr,
+        )
         return 0
 
     import psycopg2
@@ -73,7 +78,9 @@ def main() -> int:
             conn.autocommit = False
             try:
                 cur.execute(body)
-                cur.execute("INSERT INTO schema_migrations (filename) VALUES (%s)", (name,))
+                cur.execute(
+                    "INSERT INTO schema_migrations (filename) VALUES (%s)", (name,)
+                )
                 conn.commit()
             except Exception:
                 conn.rollback()

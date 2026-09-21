@@ -1,4 +1,5 @@
 """DecisionOS — Crypto Payments module."""
+
 from __future__ import annotations
 
 from crypto_payments.models import (

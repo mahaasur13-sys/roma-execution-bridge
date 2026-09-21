@@ -91,9 +91,9 @@ def test_parallel_loads_read_file_once(monkeypatch, tmp_path):
     with ThreadPoolExecutor(max_workers=2) as ex:
         results = list(ex.map(lambda _: env_loader.load_env(), range(2)))
 
-    assert finds["n"] == 1               # exactly one file read
+    assert finds["n"] == 1  # exactly one file read
     assert results.count(env_file) == 1  # one call loaded the file
-    assert results.count(None) == 1      # the other was a no-op
+    assert results.count(None) == 1  # the other was a no-op
     assert os.environ["TEST_C6_THREAD"] == "from_file"
 
 

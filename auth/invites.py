@@ -6,10 +6,13 @@ from datetime import datetime, timedelta, timezone
 
 import db_adapter as db
 
-
 BETA_MODE = os.environ.get("BETA_MODE", "false").lower() in ("1", "true", "yes")
 BETA_MAX_USERS = int(os.environ.get("BETA_MAX_USERS", "100"))
-BETA_REQUIRE_INVITE = os.environ.get("BETA_REQUIRE_INVITE", "true").lower() in ("1", "true", "yes")
+BETA_REQUIRE_INVITE = os.environ.get("BETA_REQUIRE_INVITE", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 BETA_DEFAULT_SPEND_CAP = float(os.environ.get("BETA_DEFAULT_SPEND_CAP", "5.00"))
 
 
@@ -18,13 +21,17 @@ def generate_invite_code(prefix: str = "ROMA") -> str:
     return f"{prefix}-{part[:4]}-{part[4:8]}"
 
 
-def create_invite(max_uses: int = 1, note: str = "", expires_hours: int = 0, created_by: str = "admin") -> dict:
+def create_invite(
+    max_uses: int = 1, note: str = "", expires_hours: int = 0, created_by: str = "admin"
+) -> dict:
     if not BETA_MODE:
         return {"error": "Beta mode is not enabled. Set BETA_MODE=true in .env"}
     code = generate_invite_code()
     expires_at = None
     if expires_hours > 0:
-        expires_at = (datetime.now(timezone.utc) + timedelta(hours=expires_hours)).isoformat()
+        expires_at = (
+            datetime.now(timezone.utc) + timedelta(hours=expires_hours)
+        ).isoformat()
     return db.create_invite_code(code, created_by, max_uses, note, expires_at)
 
 

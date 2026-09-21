@@ -56,7 +56,7 @@ jobs:
       - name: Install ruff
         run: pip install ruff
       - name: Lint
-        run: ruff check . --output-format=full 2>&1 | head -20 || true
+        run: ruff check . --output-format=concise
 
   helm-validate:
     runs-on: ubuntu-latest

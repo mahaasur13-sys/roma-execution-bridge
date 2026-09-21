@@ -2,17 +2,25 @@
 """
 saas/branding/test_branding.py
 """
+
 import sys
+
 sys.path.insert(0, ".")
 
 from saas.branding import (
-    BrandingService, branding_cache,
-    load_default, load_by_tenant_id
+    BrandingService,
+    branding_cache,
+    load_default,
+    load_by_tenant_id,
 )
-from saas.branding.stripe_integration import build_stripe_metadata, build_stripe_invoice_settings
+from saas.branding.stripe_integration import (
+    build_stripe_metadata,
+    build_stripe_invoice_settings,
+)
 
 passed = 0
 failed = 0
+
 
 def check(name, cond):
     global passed, failed
@@ -22,6 +30,7 @@ def check(name, cond):
     else:
         print(f"  ❌ {name}")
         failed += 1
+
 
 print("\n=== Branding: Defaults & Cache ===")
 b = load_default()
@@ -61,7 +70,9 @@ check("stripe_meta app_name", meta["app_name"] == "AcmeAI GPU Cloud")
 check("stripe_meta powered_by", meta["powered_by"] == "mahaasur13-sys")
 
 inv = build_stripe_invoice_settings(b2)
-check("invoice custom_fields[0].name", inv["custom_fields"][0]["name"] == "Cloud Platform")
+check(
+    "invoice custom_fields[0].name", inv["custom_fields"][0]["name"] == "Cloud Platform"
+)
 check("invoice footer", "mahaasur13-sys" in inv["footer"])
 
 print(f"\n{'='*40}")

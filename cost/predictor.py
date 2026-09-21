@@ -1,19 +1,32 @@
 #!/usr/bin/env python3
 """ROMA Cost Predictor — Pre-execution cost estimation engine."""
+
 import sys
+
 sys.path.insert(0, '/home/workspace/roma-execution-bridge')
 from billing.pricing_engine import PricingEngine, PricingTier
+
 
 class CostPredictor:
     """Predicts execution cost BEFORE running task."""
 
     def __init__(self):
         self.pricing = PricingEngine()
-        self.tier_map = {"FREE": PricingTier.FREE, "PRO": PricingTier.PRO, "ENTERPRISE": PricingTier.ENTERPRISE}
+        self.tier_map = {
+            "FREE": PricingTier.FREE,
+            "PRO": PricingTier.PRO,
+            "ENTERPRISE": PricingTier.ENTERPRISE,
+        }
 
-    def predict(self, task: str, gpu_required: bool, plugin_type: str = "default",
-                tenant_tier: str = "FREE", custom_duration: int = None,
-                policy_engine=None) -> dict:
+    def predict(
+        self,
+        task: str,
+        gpu_required: bool,
+        plugin_type: str = "default",
+        tenant_tier: str = "FREE",
+        custom_duration: int = None,
+        policy_engine=None,
+    ) -> dict:
         tier_enum = self.tier_map.get(tenant_tier, PricingTier.FREE)
 
         # Оцениваем длительность (в секундах)
@@ -27,7 +40,9 @@ class CostPredictor:
         cpu_seconds = duration_sec if not gpu_required else 0
         storage_sec = 0  # storage пока не учитываем, но можно передать 0
 
-        cost = self.pricing.calculate(tier_enum, gpu_s=gpu_seconds, cpu_s=cpu_seconds, gb_s=storage_sec)
+        cost = self.pricing.calculate(
+            tier_enum, gpu_s=gpu_seconds, cpu_s=cpu_seconds, gb_s=storage_sec
+        )
         total_cost = cost["total"]
 
         risk_flags = self._assess_risk(duration_sec, tenant_tier, task)
@@ -77,14 +92,20 @@ class CostPredictor:
                 "multiplier": self.pricing.multiplier,
                 "total": round(total_cost, 4),
                 "plugin_type": plugin_type,
-                "gpu_required": gpu_required
+                "gpu_required": gpu_required,
             },
             "risk_flags": risk_flags,
-            "decision": self._decision(total_cost, tenant_tier, risk_flags)
+            "decision": self._decision(total_cost, tenant_tier, risk_flags),
         }
 
     def _estimate_runtime(self, task: str, plugin_type: str, gpu_required: bool) -> int:
-        benchmarks = {"ml_training": 7200, "inference": 1800, "simulation": 3600, "data_processing": 5400, "default": 3600}
+        benchmarks = {
+            "ml_training": 7200,
+            "inference": 1800,
+            "simulation": 3600,
+            "data_processing": 5400,
+            "default": 3600,
+        }
         base = benchmarks.get(plugin_type, 3600)
         if gpu_required:
             base = int(base * 1.1)

@@ -23,7 +23,6 @@ from starlette.testclient import TestClient
 import db_adapter as db
 import main
 
-
 _NEEDS_PG = pytest.mark.skipif(
     not os.environ.get("PG_DSN"),
     reason="дебет L2/L4 идёт только через PG (advisory-lock + CTE); без PG_DSN путь не проверить · issue: P1-C · expiry: 2026-12-31",
@@ -37,6 +36,7 @@ def _uniq(prefix: str) -> str:
 @pytest.fixture(autouse=True)
 def _disable_background_worker(monkeypatch):
     """Prevent startup from launching the infinite poll_and_execute loop."""
+
     async def _noop():
         return None
 
@@ -58,6 +58,7 @@ def tenant(monkeypatch):
 def _count_debits(tenant_id: str, job_id: str) -> int:
     """Count DEBIT ledger entries attributed to a specific job_id."""
     import json
+
     n = 0
     for entry in main.billing_ledger.get_tenant_entries(tenant_id):
         meta = entry.get("metadata") or {}
@@ -72,8 +73,11 @@ def _seed_running_job(tenant_id: str) -> str:
     """Insert a job and move it to running with started_at set in the past."""
     jid = _uniq("job")
     db.insert_execution_job(
-        job_id=jid, decision_id=_uniq("dec"),
-        tenant_id=tenant_id, status="queued", payload={},
+        job_id=jid,
+        decision_id=_uniq("dec"),
+        tenant_id=tenant_id,
+        status="queued",
+        payload={},
     )
     db.update_execution_job(jid, status="running")  # sets started_at = now()
     time.sleep(1.1)  # ensure actual duration > 0 so a debit is applied
@@ -137,4 +141,3 @@ def test_complete_without_funds_returns_402(monkeypatch):
     assert _count_debits(tenant_id, job_id) == 0
     job = db.get_execution_job(job_id)
     assert job["status"] == "running"
-

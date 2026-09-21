@@ -12,6 +12,7 @@ Env:
   TELEGRAM_CHAT_ID — chat id получателя (тот же fallback)
   RELAY_PORT      — порт (default 8099), слушает только 127.0.0.1
 """
+
 from __future__ import annotations
 
 import json
@@ -29,7 +30,10 @@ LOG_PATH = Path("/dev/shm/alert-relay.log")
 def log(event: str, **kw) -> None:
     import datetime
 
-    rec = {"ts": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), "event": event}
+    rec = {
+        "ts": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "event": event,
+    }
     rec.update(kw)
     line = json.dumps(rec, ensure_ascii=False)
     print(line, flush=True)
@@ -62,7 +66,7 @@ def send_telegram(token: str, chat_id: str, text: str) -> tuple[bool, str]:
     req = urllib.request.Request(url, data=data, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            body = resp.read().decode("utf-8", "replace")
+            _body = resp.read().decode("utf-8", "replace")
             return resp.status == 200, f"http={resp.status}"
     except Exception as exc:  # noqa: BLE001
         detail = ""
@@ -122,12 +126,22 @@ class Handler(BaseHTTPRequestHandler):
         token = read_env("IDIA_BOT_TOKEN") or read_env("TELEGRAM_BOT_TOKEN")
         chat_id = read_env("TELEGRAM_CHAT_ID") or read_env("TELEGRAM_CHAT")
         if not token or not chat_id:
-            log("relay_missing_secret", bot_token_present=bool(token), chat_present=bool(chat_id))
+            log(
+                "relay_missing_secret",
+                bot_token_present=bool(token),
+                chat_present=bool(chat_id),
+            )
             self._reply(500, "missing secret")
             return
 
         ok, info = send_telegram(token, chat_id, format_payload(payload))
-        log("relay_delivery", ok=ok, detail=info, chat_len=len(chat_id), token_len=len(token))
+        log(
+            "relay_delivery",
+            ok=ok,
+            detail=info,
+            chat_len=len(chat_id),
+            token_len=len(token),
+        )
         self._reply(200 if ok else 502, "sent" if ok else "telegram error")
 
     def log_message(self, fmt: str, *args) -> None:  # silence default stderr spam

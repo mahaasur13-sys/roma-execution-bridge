@@ -1,4 +1,5 @@
 """Worker Registry — Source of Truth"""
+
 import time
 import threading
 import logging
@@ -6,6 +7,7 @@ from typing import Optional, List, Dict, Any
 from .core_models import Worker, WorkerStatus
 
 log = logging.getLogger("registry")
+
 
 class WorkerRegistry:
     def __init__(self, heartbeat_timeout: float = 15.0):
@@ -15,12 +17,20 @@ class WorkerRegistry:
 
     def register(self, wid: str, gpu: float = 1.0, tags=None, addr: str = "") -> Worker:
         with self._lock:
-            w = Worker(id=wid, gpu_total=gpu, status=WorkerStatus.HEALTHY, tags=tags or {}, addr=addr)
+            w = Worker(
+                id=wid,
+                gpu_total=gpu,
+                status=WorkerStatus.HEALTHY,
+                tags=tags or {},
+                addr=addr,
+            )
             self._w[wid] = w
             log.info(f"Registered {wid} ({gpu} GPU)")
             return w
 
-    def heartbeat(self, wid: str, gpu_used: float = 0.0, active_jobs: int = 0) -> Optional[Worker]:
+    def heartbeat(
+        self, wid: str, gpu_used: float = 0.0, active_jobs: int = 0
+    ) -> Optional[Worker]:
         with self._lock:
             w = self._w.get(wid)
             if w:
@@ -43,8 +53,11 @@ class WorkerRegistry:
 
     def list_healthy(self) -> List[Worker]:
         with self._lock:
-            return [w for w in self._w.values()
-                    if w.is_healthy() and (time.time() - w.last_heartbeat) < self._ht]
+            return [
+                w
+                for w in self._w.values()
+                if w.is_healthy() and (time.time() - w.last_heartbeat) < self._ht
+            ]
 
     def list_all(self) -> List[Worker]:
         with self._lock:
@@ -62,7 +75,9 @@ class WorkerRegistry:
             healthy = sum(1 for w in self._w.values() if w.is_healthy())
             dead = sum(1 for w in self._w.values() if w.status == WorkerStatus.DEAD)
             return {
-                "total": total, "healthy": healthy, "dead": dead,
+                "total": total,
+                "healthy": healthy,
+                "dead": dead,
                 "gpu_total": sum(w.gpu_total for w in self._w.values()),
-                "gpu_used": sum(w.gpu_used for w in self._w.values())
+                "gpu_used": sum(w.gpu_used for w in self._w.values()),
             }

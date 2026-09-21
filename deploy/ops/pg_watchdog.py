@@ -11,6 +11,7 @@ Runs as a Zo user service (mode=process). Every INTERVAL seconds:
 No DDL/DML is ever executed against the database: the only SQL is a read-only
 SELECT count(*) FROM ledger_entries.
 """
+
 from __future__ import annotations
 
 import datetime
@@ -31,12 +32,28 @@ STATE_DIR = "/var/lib/pg-watchdog"
 STATE_PATH = os.path.join(STATE_DIR, "state.json")
 LOG_PATH = os.path.join(STATE_DIR, "watchdog.log")  # журнал событий, с ротацией
 LOG_MAX_BYTES = 1_000_000  # 1 MB → watchdog.log.1
-PSQL = ["/usr/sbin/runuser", "-u", "postgres", "--", "/usr/bin/psql",
-        "-h", "/var/run/postgresql", "-p", str(PORT), "-d", "roma", "-tAc"]
+PSQL = [
+    "/usr/sbin/runuser",
+    "-u",
+    "postgres",
+    "--",
+    "/usr/bin/psql",
+    "-h",
+    "/var/run/postgresql",
+    "-p",
+    str(PORT),
+    "-d",
+    "roma",
+    "-tAc",
+]
 
 
 def now_iso() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return (
+        datetime.datetime.now(datetime.timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
 
 
 def emit(**fields) -> None:
@@ -49,16 +66,28 @@ def emit(**fields) -> None:
         with open(LOG_PATH, "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
     except Exception as exc:  # журнал не должен ронять супервизию
-        print(json.dumps({"ts": now_iso(), "event": "log_write_failed",
-                          "error": type(exc).__name__}), flush=True)
+        print(
+            json.dumps(
+                {
+                    "ts": now_iso(),
+                    "event": "log_write_failed",
+                    "error": type(exc).__name__,
+                }
+            ),
+            flush=True,
+        )
 
 
 def pg_is_ready() -> bool:
     try:
-        return subprocess.run(
-            ["/usr/bin/pg_isready", "-h", "127.0.0.1", "-p", str(PORT), "-q"],
-            capture_output=True, timeout=15,
-        ).returncode == 0
+        return (
+            subprocess.run(
+                ["/usr/bin/pg_isready", "-h", "127.0.0.1", "-p", str(PORT), "-q"],
+                capture_output=True,
+                timeout=15,
+            ).returncode
+            == 0
+        )
     except Exception:
         return False
 
@@ -94,7 +123,11 @@ def prune_restarts(restarts: list[str]) -> list[str]:
 
 def ledger_rows() -> int | None:
     try:
-        out = subprocess.run(PSQL + ["SELECT count(*) FROM ledger_entries"], capture_output=True, timeout=20)
+        out = subprocess.run(
+            PSQL + ["SELECT count(*) FROM ledger_entries"],
+            capture_output=True,
+            timeout=20,
+        )
         if out.returncode != 0:
             return None
         return int(out.stdout.decode().strip())
@@ -104,7 +137,11 @@ def ledger_rows() -> int | None:
 
 def start_cluster() -> bool:
     try:
-        res = subprocess.run(["/usr/bin/pg_ctlcluster", CLUSTER, "main", "start"], capture_output=True, timeout=120)
+        res = subprocess.run(
+            ["/usr/bin/pg_ctlcluster", CLUSTER, "main", "start"],
+            capture_output=True,
+            timeout=120,
+        )
         return res.returncode == 0
     except Exception:
         return False
@@ -125,8 +162,14 @@ def main() -> int:
     state.setdefault("restarts_total", 0)
     if "ledger_baseline" not in state:
         state["ledger_baseline"] = ledger_rows()
-    emit(event="watchdog_start", pid=os.getpid(), port=PORT, interval_s=INTERVAL,
-         budget_per_hour=RESTART_BUDGET_PER_HOUR, ledger_baseline=state["ledger_baseline"])
+    emit(
+        event="watchdog_start",
+        pid=os.getpid(),
+        port=PORT,
+        interval_s=INTERVAL,
+        budget_per_hour=RESTART_BUDGET_PER_HOUR,
+        ledger_baseline=state["ledger_baseline"],
+    )
 
     while True:
         state["restarts"] = prune_restarts(state.get("restarts", []))
@@ -138,13 +181,21 @@ def main() -> int:
         if up:
             if state.get("was_down"):
                 state["was_down"] = False
-                emit(event="pg_recovered", pg_up=1, restarts_last_hour=len(state["restarts"]))
+                emit(
+                    event="pg_recovered",
+                    pg_up=1,
+                    restarts_last_hour=len(state["restarts"]),
+                )
         else:
             state["was_down"] = True
             if len(state["restarts"]) >= RESTART_BUDGET_PER_HOUR:
                 state["budget_exceeded"] = True
-                emit(event="pg_down_budget_exceeded", pg_up=0,
-                     restarts_last_hour=len(state["restarts"]), action="none")
+                emit(
+                    event="pg_down_budget_exceeded",
+                    pg_up=0,
+                    restarts_last_hour=len(state["restarts"]),
+                    action="none",
+                )
             else:
                 emit(event="pg_down", pg_up=0, action="pg_ctlcluster_start")
                 t0 = time.monotonic()
@@ -156,14 +207,23 @@ def main() -> int:
                     state["last_restart_at"] = now_iso()
                     state["last_recovery_s"] = recovery
                     state["budget_exceeded"] = False
-                    emit(event="pg_restart_ok", pg_up=1, started=started,
-                         recovery_s=round(time.monotonic() - t0, 2),
-                         restarts_total=state["restarts_total"],
-                         restarts_last_hour=len(state["restarts"]))
+                    emit(
+                        event="pg_restart_ok",
+                        pg_up=1,
+                        started=started,
+                        recovery_s=round(time.monotonic() - t0, 2),
+                        restarts_total=state["restarts_total"],
+                        restarts_last_hour=len(state["restarts"]),
+                    )
                 else:
-                    emit(event="pg_restart_failed", pg_up=0, started=started,
-                         timeout_s=READY_TIMEOUT_S, action="pg_ctlcluster_start",
-                         recovery_s=None)
+                    emit(
+                        event="pg_restart_failed",
+                        pg_up=0,
+                        started=started,
+                        timeout_s=READY_TIMEOUT_S,
+                        action="pg_ctlcluster_start",
+                        recovery_s=None,
+                    )
 
         rows = ledger_rows()
         if rows is not None:
@@ -172,8 +232,12 @@ def main() -> int:
             if baseline is None:
                 state["ledger_baseline"] = rows
             elif rows < baseline:
-                emit(event="ledger_integrity_violation", pg_up=int(state["pg_up"]),
-                     ledger_rows=rows, ledger_baseline=baseline)
+                emit(
+                    event="ledger_integrity_violation",
+                    pg_up=int(state["pg_up"]),
+                    ledger_rows=rows,
+                    ledger_baseline=baseline,
+                )
             else:
                 state["ledger_baseline"] = max(baseline, rows)
 

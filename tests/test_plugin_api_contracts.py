@@ -42,8 +42,12 @@ class FakeContext:
     tick: int = 7
 
 
-def _task(payload: dict, task_id: str = "task-1", plugin: str = "ml_training") -> ROMATask:
-    return ROMATask(task_id=task_id, plugin_name=plugin, payload=payload, metadata={"tenant": "t-1"})
+def _task(
+    payload: dict, task_id: str = "task-1", plugin: str = "ml_training"
+) -> ROMATask:
+    return ROMATask(
+        task_id=task_id, plugin_name=plugin, payload=payload, metadata={"tenant": "t-1"}
+    )
 
 
 def test_task_fingerprint_is_stable_for_equal_payload():
@@ -71,14 +75,22 @@ def test_plugin_result_to_dict_reports_timestamp_and_defaults():
 
 
 def test_registry_exposes_builtin_plugins_with_declared_capabilities():
-    assert set(PLUGIN_REGISTRY) == {"ml_training", "inference", "etl_pipeline", "simulation"}
+    assert set(PLUGIN_REGISTRY) == {
+        "ml_training",
+        "inference",
+        "etl_pipeline",
+        "simulation",
+    }
 
     ml = get_plugin("ml_training")
     assert isinstance(ml, MLTrainingPlugin)
     assert ml.name == "ml_training"
     assert ml.version == "1.0.0"
     assert ml.priority is PluginPriority.HIGH
-    assert ml.capabilities == [PluginCapability.GPU_ENABLED, PluginCapability.DISTRIBUTED]
+    assert ml.capabilities == [
+        PluginCapability.GPU_ENABLED,
+        PluginCapability.DISTRIBUTED,
+    ]
 
     inference = get_plugin("inference")
     assert inference.priority is PluginPriority.CRITICAL
@@ -97,7 +109,9 @@ def test_ml_plugin_validation_requires_mandatory_payload_fields():
 
     invalid = asyncio.run(plugin.on_validate(_task({"epochs": 3})))
     valid = asyncio.run(
-        plugin.on_validate(_task({"model_type": "yolo", "dataset": "coco", "batch_size": 8}))
+        plugin.on_validate(
+            _task({"model_type": "yolo", "dataset": "coco", "batch_size": 8})
+        )
     )
 
     assert invalid.valid is False
@@ -132,14 +146,26 @@ def test_reference_plugins_return_their_own_output_shapes():
     etl = ETLPipelinePlugin()
     simulation = SimulationPlugin()
 
-    inference_out = asyncio.run(inference.on_execute(_task({"model": "llama"}, plugin="inference"), FakeContext()))
+    inference_out = asyncio.run(
+        inference.on_execute(
+            _task({"model": "llama"}, plugin="inference"), FakeContext()
+        )
+    )
     assert inference_out.success is True
-    assert inference_out.output == {"inference_id": "task-1", "model": "llama", "node": "gpu-node-1"}
+    assert inference_out.output == {
+        "inference_id": "task-1",
+        "model": "llama",
+        "node": "gpu-node-1",
+    }
 
-    etl_out = asyncio.run(etl.on_execute(_task({}, plugin="etl_pipeline"), FakeContext()))
+    etl_out = asyncio.run(
+        etl.on_execute(_task({}, plugin="etl_pipeline"), FakeContext())
+    )
     assert etl_out.output == {"pipeline_id": "task-1", "stage": "completed"}
 
-    sim_out = asyncio.run(simulation.on_execute(_task({}, plugin="simulation"), FakeContext()))
+    sim_out = asyncio.run(
+        simulation.on_execute(_task({}, plugin="simulation"), FakeContext())
+    )
     assert sim_out.output == {"sim_id": "task-1"}
 
     assert asyncio.run(inference.on_cleanup()) is None

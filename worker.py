@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """ROMA Local Worker — простой воркер для выполнения задач из очереди API"""
+
 import time
 import json
 import os
@@ -28,22 +29,32 @@ def _argv_from_command(task_cmd):
         return None, f"command not allowed: {argv[0] if argv else ''}"
     return argv, None
 
+
 def api_get(path):
     req = urllib.request.Request(f"{API_BASE}{path}", headers={"X-API-Key": API_KEY})
     with urllib.request.urlopen(req, timeout=10) as resp:
         return json.loads(resp.read().decode())
+
 
 def run_job(task_cmd):
     try:
         argv, err = _argv_from_command(task_cmd)
         if err:
             return {"success": False, "error": err}
-        result = subprocess.run(argv, shell=False, capture_output=True, text=True, timeout=300)
-        return {"success": result.returncode == 0, "stdout": result.stdout, "stderr": result.stderr, "returncode": result.returncode}
+        result = subprocess.run(
+            argv, shell=False, capture_output=True, text=True, timeout=300
+        )
+        return {
+            "success": result.returncode == 0,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "returncode": result.returncode,
+        }
     except subprocess.TimeoutExpired:
         return {"success": False, "error": "Timeout after 300s"}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
 
 def main():
     print("ROMA Local Worker launched")
@@ -71,6 +82,7 @@ def main():
         except Exception as e:
             print(f"Worker error: {e}")
         time.sleep(POLL_INTERVAL)
+
 
 if __name__ == "__main__":
     main()

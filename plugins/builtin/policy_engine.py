@@ -124,8 +124,10 @@ class PolicyEnginePlugin:
 
         if self._trace_collector and trace_id:
             self._trace_collector.add_step(
-                trace_id, f"Evaluating {len(self._rules)} policy rules for tenant {tenant_id}",
-                data={"tenant": tenant}, confidence=1.0,
+                trace_id,
+                f"Evaluating {len(self._rules)} policy rules for tenant {tenant_id}",
+                data={"tenant": tenant},
+                confidence=1.0,
             )
 
         for rule in self._rules:
@@ -140,11 +142,15 @@ class PolicyEnginePlugin:
                     self._trace_collector.add_step(
                         trace_id,
                         f"Rule '{rule.__name__}' returned {result.action}: {result.reason}",
-                        data=result.metadata, confidence=result.confidence,
+                        data=result.metadata,
+                        confidence=result.confidence,
                     )
                 logger.info(
                     "Policy decision for %s: %s by %s — %s",
-                    tenant_id, result.action, rule.__name__, result.reason,
+                    tenant_id,
+                    result.action,
+                    rule.__name__,
+                    result.reason,
                 )
                 return result
 
@@ -159,7 +165,8 @@ class PolicyEnginePlugin:
             self._trace_collector.add_step(
                 trace_id,
                 f"All rules passed. Final: {final.action}",
-                data=final.metadata, confidence=final.confidence,
+                data=final.metadata,
+                confidence=final.confidence,
             )
 
         return final

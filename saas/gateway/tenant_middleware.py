@@ -1,4 +1,5 @@
 """Tenant detection + routing middleware."""
+
 from typing import Optional, Callable
 from fastapi import Request, HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -12,7 +13,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
     2. Subdomain (tenant.roma.ai)
     3. Path prefix (/t/{tenant_id}/...)
     4. API Key (looked up async)
-    
+
     Injects tenant config into request.state.
     """
 
@@ -36,6 +37,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
 
             if not tenant_id and self.require_tenant:
                 from starlette.responses import JSONResponse
+
                 return JSONResponse({"detail": "Tenant ID required"}, status_code=400)
 
             request.state.tenant_id = tenant_id or self.DEFAULT_TENANT

@@ -15,4 +15,3 @@ def test_running_is_ready():
 
 def test_provisioning_is_ready():
     assert dispatch_is_ready("vastai", "provisioning") is True
-

@@ -24,7 +24,9 @@ class SupportAIAgentPlugin:
 
     def on_enable(self, config: dict[str, Any]) -> None:
         self._config = config
-        self._models = config.get("models", ["ollama:llama3", "openrouter:claude-haiku"])
+        self._models = config.get(
+            "models", ["ollama:llama3", "openrouter:claude-haiku"]
+        )
 
     async def run(self, action: str, **kwargs: Any) -> dict[str, Any]:
         if action == "chat":
@@ -41,7 +43,12 @@ class SupportAIAgentPlugin:
         complexity = self._estimate_complexity(message)
         model = self._models[0] if complexity == "simple" else self._models[-1]
 
-        logger.info("Support AI: complexity=%s, model=%s, msg=%s", complexity, model, message[:50])
+        logger.info(
+            "Support AI: complexity=%s, model=%s, msg=%s",
+            complexity,
+            model,
+            message[:50],
+        )
 
         response = self._generate_response(complexity, message)
 
@@ -59,7 +66,14 @@ class SupportAIAgentPlugin:
 
     async def _classify(self, message: str) -> dict[str, Any]:
         """Classify message intent."""
-        categories = ["billing", "technical", "onboarding", "bug_report", "feature_request", "general"]
+        _categories = [
+            "billing",
+            "technical",
+            "onboarding",
+            "bug_report",
+            "feature_request",
+            "general",
+        ]
         msg = message.lower()
 
         if any(w in msg for w in ("bill", "invoice", "payment", "crypto")):

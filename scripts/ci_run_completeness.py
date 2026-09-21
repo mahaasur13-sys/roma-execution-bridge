@@ -46,31 +46,43 @@ class CompletenessError(Exception):
 
 def load_manifest(path: pathlib.Path) -> tuple[dict, str]:
     if not path.exists():
-        raise CompletenessError(f"манифест канона не найден: {path} (источник точных чисел набора)")
+        raise CompletenessError(
+            f"манифест канона не найден: {path} (источник точных чисел набора)"
+        )
     raw = path.read_bytes()
     try:
         data = json.loads(raw.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise CompletenessError(f"{type(exc).__name__} в манифесте {path}: {exc}") from exc
+        raise CompletenessError(
+            f"{type(exc).__name__} в манифесте {path}: {exc}"
+        ) from exc
     canon = data.get("canon")
     if not isinstance(canon, dict):
-        raise CompletenessError(f"манифест {path}: нет объекта 'canon' с точными числами")
+        raise CompletenessError(
+            f"манифест {path}: нет объекта 'canon' с точными числами"
+        )
     for key in REQUIRED_KEYS:
         value = canon.get(key)
         if isinstance(value, bool) or not isinstance(value, int):
-            raise CompletenessError(f"манифест {path}: canon['{key}'] не целое число: {value!r}")
+            raise CompletenessError(
+                f"манифест {path}: canon['{key}'] не целое число: {value!r}"
+            )
     return data, hashlib.sha256(raw).hexdigest()
 
 
 def parse_junit(path: pathlib.Path) -> tuple[int, dict]:
     if not path.exists():
-        raise CompletenessError(f"junitxml не найден: {path} (числа обязаны быть машинными)")
+        raise CompletenessError(
+            f"junitxml не найден: {path} (числа обязаны быть машинными)"
+        )
     if path.stat().st_size == 0:
         raise CompletenessError(f"junitxml пуст: {path} (прогон не записал результат)")
     try:
         root = ET.parse(path).getroot()
     except ET.ParseError as exc:
-        raise CompletenessError(f"junitxml не читается ({type(exc).__name__}): {exc}") from exc
+        raise CompletenessError(
+            f"junitxml не читается ({type(exc).__name__}): {exc}"
+        ) from exc
 
     suites = [root] if root.tag == "testsuite" else [s for s in root.iter("testsuite")]
     if not suites:
@@ -110,7 +122,9 @@ def print_block(
     print("=== RUN COMPLETENESS (A-6: collected == executed) ===")
     print(f"JUNIT         : {junit}")
     print(f"COLLECTED     : {declared}  (объявлено pytest в junitxml)")
-    print(f"EXECUTED      : {observed['recorded']}  (элементов <testcase> в том же файле)")
+    print(
+        f"EXECUTED      : {observed['recorded']}  (элементов <testcase> в том же файле)"
+    )
     print(
         f"OUTCOMES      : {observed['passed']} passed · {observed['failures']} failed · "
         f"{observed['errors']} errors · {observed['skipped']} skipped = {executed}"
@@ -123,7 +137,9 @@ def print_block(
     )
     print(f"RUN MODE      : {mode}")
     if mode == "narrow":
-        print("             канон НЕ применяется (локальный/негативный прогон) — область сужена явно")
+        print(
+            "             канон НЕ применяется (локальный/негативный прогон) — область сужена явно"
+        )
     print("=" * 56)
 
 
@@ -183,11 +199,19 @@ def check(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="A-6: полнота набора тестов (fail-closed)")
-    parser.add_argument("--junit", default="/tmp/roma_junit.xml", help="junitxml одного прогона")
+    parser = argparse.ArgumentParser(
+        description="A-6: полнота набора тестов (fail-closed)"
+    )
+    parser.add_argument(
+        "--junit", default="/tmp/roma_junit.xml", help="junitxml одного прогона"
+    )
     parser.add_argument(
         "--manifest",
-        default=str(pathlib.Path(__file__).resolve().parents[1] / ".ci" / "run-completeness.json"),
+        default=str(
+            pathlib.Path(__file__).resolve().parents[1]
+            / ".ci"
+            / "run-completeness.json"
+        ),
         help="манифест канона (точные числа последнего repo-wide прогона)",
     )
     parser.add_argument("--mode", choices=("repo-wide", "narrow"), default="repo-wide")

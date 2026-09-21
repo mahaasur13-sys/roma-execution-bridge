@@ -9,14 +9,37 @@ logger = logging.getLogger("roma.plugin.tier_toggle")
 
 FEATURE_MATRIX: dict[str, set[str]] = {
     "free": {"basic_api", "community_support", "public_docs"},
-    "pro": {"basic_api", "community_support", "public_docs",
-            "full_api", "webhooks", "crypto_payments", "priority_support",
-            "plugin_marketplace", "api_rate_boost", "extended_history"},
-    "enterprise": {"basic_api", "community_support", "public_docs",
-                   "full_api", "webhooks", "crypto_payments", "priority_support",
-                   "plugin_marketplace", "api_rate_boost", "extended_history",
-                   "custom_plugins", "private_monero", "dedicated_cluster",
-                   "sla_99_9", "custom_billing", "audit_export", "sso"},
+    "pro": {
+        "basic_api",
+        "community_support",
+        "public_docs",
+        "full_api",
+        "webhooks",
+        "crypto_payments",
+        "priority_support",
+        "plugin_marketplace",
+        "api_rate_boost",
+        "extended_history",
+    },
+    "enterprise": {
+        "basic_api",
+        "community_support",
+        "public_docs",
+        "full_api",
+        "webhooks",
+        "crypto_payments",
+        "priority_support",
+        "plugin_marketplace",
+        "api_rate_boost",
+        "extended_history",
+        "custom_plugins",
+        "private_monero",
+        "dedicated_cluster",
+        "sla_99_9",
+        "custom_billing",
+        "audit_export",
+        "sso",
+    },
 }
 
 
@@ -65,7 +88,11 @@ class TierFeatureTogglePlugin:
             "plan": plan,
             "feature": feature,
             "enabled": enabled,
-            "reason": "Feature available in your tier" if enabled else f"Upgrade to unlock '{feature}'",
+            "reason": (
+                "Feature available in your tier"
+                if enabled
+                else f"Upgrade to unlock '{feature}'"
+            ),
         }
 
     def _compare_tiers(self) -> dict[str, Any]:

@@ -36,6 +36,7 @@
   ROMA_TEST_PG_DSN / TEST_PG_DSN — явный тестовый DSN (приоритет выше всего)
   ROMA_PROD_PG_DSN               — явное указание боевого DSN для сравнения
 """
+
 from __future__ import annotations
 
 import os
@@ -273,7 +274,11 @@ def foreign_db_keys() -> list[str]:
 def sweep_summary() -> str:
     findings, problems = sweep_db_keys()
     summary = " · ".join(f"{k}={v or '<unset>'}" for k, v in findings.items())
-    suffix = " · violations: none" if not problems else " · violations: " + "; ".join(problems)
+    suffix = (
+        " · violations: none"
+        if not problems
+        else " · violations: " + "; ".join(problems)
+    )
     return summary + suffix
 
 
@@ -308,7 +313,11 @@ def resolve(*, strict: bool = True, require_test_db: bool = True) -> str | None:
 
     if not dsn:
         os.environ.pop("PG_DSN", None)
-        source = _env_or_none(EXPLICIT_DSN_VARS[0]) or _env_or_none(EXPLICIT_DSN_VARS[1]) or prod_dsn()
+        source = (
+            _env_or_none(EXPLICIT_DSN_VARS[0])
+            or _env_or_none(EXPLICIT_DSN_VARS[1])
+            or prod_dsn()
+        )
         if not source:
             return None
         dsn = derive_test_dsn(source)
@@ -328,7 +337,9 @@ def resolve(*, strict: bool = True, require_test_db: bool = True) -> str | None:
 
     dbname = identity(dsn)[2]
     if dbname not in ALLOWED_DB_NAMES:
-        raise _refusal(dsn, f"dbname={dbname!r} не входит в разрешённые {sorted(ALLOWED_DB_NAMES)}")
+        raise _refusal(
+            dsn, f"dbname={dbname!r} не входит в разрешённые {sorted(ALLOWED_DB_NAMES)}"
+        )
 
     if require_test_db and not test_db_exists(dsn):
         raise IsolationRefused(
@@ -343,7 +354,9 @@ def resolve(*, strict: bool = True, require_test_db: bool = True) -> str | None:
     if strict:
         _findings, problems = sweep_db_keys()
         if problems:
-            raise _refusal(dsn, "после resolve остались ключи на боевую БД: " + "; ".join(problems))
+            raise _refusal(
+                dsn, "после resolve остались ключи на боевую БД: " + "; ".join(problems)
+            )
 
     return dsn
 

@@ -18,6 +18,7 @@ PROJECT_DIR = SCRIPT_DIR.parent
 sys.path.insert(0, str(PROJECT_DIR))
 
 from env_loader import load_env
+
 load_env()
 
 # --- Config ---
@@ -38,10 +39,12 @@ logger.setLevel(logging.DEBUG)
 
 fh = logging.FileHandler(LOG_DIR / "invitations.log", encoding="utf-8")
 fh.setLevel(logging.DEBUG)
-fh.setFormatter(logging.Formatter(
-    "%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%dT%H:%M:%S",
-))
+fh.setFormatter(
+    logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
+)
 
 ch = logging.StreamHandler(sys.stdout)
 ch.setLevel(logging.INFO)
@@ -123,15 +126,21 @@ PLAIN_TEXT_TEMPLATE = """Здравствуйте, {{ name }}!
 # HELPERS
 # ============================================
 
-def _render(template: str, name: str, email: str, invitation_link: str, demo_key: str) -> str:
-    return template \
-        .replace("{{ name }}", name or "Valued Tester") \
-        .replace("{{ email }}", email) \
-        .replace("{{ invitation_link }}", invitation_link) \
+
+def _render(
+    template: str, name: str, email: str, invitation_link: str, demo_key: str
+) -> str:
+    return (
+        template.replace("{{ name }}", name or "Valued Tester")
+        .replace("{{ email }}", email)
+        .replace("{{ invitation_link }}", invitation_link)
         .replace("{{ demo_key }}", demo_key)
+    )
 
 
-def generate_email_content(recipient_name: str, email: str, invitation_link: str, demo_key: str = "") -> tuple[str, str]:
+def generate_email_content(
+    recipient_name: str, email: str, invitation_link: str, demo_key: str = ""
+) -> tuple[str, str]:
     """Return (html_body, plain_text_body)."""
     name = recipient_name or "Valued Tester"
     html = _render(HTML_TEMPLATE, name, email, invitation_link, demo_key)
@@ -141,6 +150,7 @@ def generate_email_content(recipient_name: str, email: str, invitation_link: str
 
 def load_leads_from_db(limit: int = 0):
     import db
+
     db.init_db()
     leads = db.list_leads(status="new")
     if limit and len(leads) > limit:
@@ -153,19 +163,22 @@ def load_leads_from_csv(csv_path: str):
     with open(csv_path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            leads.append({
-                "id": None,
-                "email": row.get("email", "").strip(),
-                "company": row.get("company", "").strip(),
-                "role": row.get("role", "").strip(),
-                "use_case": row.get("use_case", "").strip(),
-            })
+            leads.append(
+                {
+                    "id": None,
+                    "email": row.get("email", "").strip(),
+                    "company": row.get("company", "").strip(),
+                    "role": row.get("role", "").strip(),
+                    "use_case": row.get("use_case", "").strip(),
+                }
+            )
     return leads
 
 
 # ============================================
 # SENDGRID SENDER
 # ============================================
+
 
 def send_email_via_sendgrid(to_email: str, to_name: str, html_content: str) -> dict:
     """Send via SendGrid API with exponential backoff."""
@@ -176,7 +189,10 @@ def send_email_via_sendgrid(to_email: str, to_name: str, html_content: str) -> d
         from sendgrid import SendGridAPIClient
         from sendgrid.helpers.mail import Mail, Email, To, Content
     except ImportError:
-        return {"success": False, "error": "sendgrid package not installed (pip install sendgrid)"}
+        return {
+            "success": False,
+            "error": "sendgrid package not installed (pip install sendgrid)",
+        }
 
     sg = SendGridAPIClient(SENDGRID_API_KEY)
     message = Mail(
@@ -193,12 +209,16 @@ def send_email_via_sendgrid(to_email: str, to_name: str, html_content: str) -> d
             if response.status_code in (200, 201, 202):
                 logger.debug(f"SendGrid OK: {to_email} (attempt {attempt})")
                 return {"success": True}
-            logger.warning(f"SendGrid HTTP {response.status_code} for {to_email} (attempt {attempt})")
+            logger.warning(
+                f"SendGrid HTTP {response.status_code} for {to_email} (attempt {attempt})"
+            )
         except Exception as e:
-            logger.warning(f"SendGrid attempt {attempt}/{MAX_RETRIES} failed for {to_email}: {e}")
+            logger.warning(
+                f"SendGrid attempt {attempt}/{MAX_RETRIES} failed for {to_email}: {e}"
+            )
 
         if attempt < MAX_RETRIES:
-            backoff = 2 ** attempt
+            backoff = 2**attempt
             logger.debug(f"Retrying in {backoff}s...")
             time.sleep(backoff)
 
@@ -209,15 +229,25 @@ def send_email_via_sendgrid(to_email: str, to_name: str, html_content: str) -> d
 # MAIN
 # ============================================
 
+
 def main():
     parser = argparse.ArgumentParser(description="ROMA Beta Invitation Sender")
-    parser.add_argument("--limit", type=int, default=0, help="Max emails to send (0 = all)")
-    parser.add_argument("--dry-run", action="store_true", default=False,
-                        help="Simulate without sending real emails")
-    parser.add_argument("--csv", type=str, default="", help="Load leads from CSV instead of DB")
+    parser.add_argument(
+        "--limit", type=int, default=0, help="Max emails to send (0 = all)"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Simulate without sending real emails",
+    )
+    parser.add_argument(
+        "--csv", type=str, default="", help="Load leads from CSV instead of DB"
+    )
     args = parser.parse_args()
 
     import db
+
     db.init_db()
 
     # Determine mode
@@ -232,7 +262,9 @@ def main():
         sys.exit(1)
 
     if not DEMO_API_KEY:
-        logger.warning("⚠ ROMA_DEMO_API_KEY is not set — invitation links will not include a demo key")
+        logger.warning(
+            "⚠ ROMA_DEMO_API_KEY is not set — invitation links will not include a demo key"
+        )
 
     # Load leads
     if args.csv:
@@ -321,9 +353,11 @@ def main():
     # Stats
     try:
         stats = db.get_email_stats()
-        logger.info(f"  DB stats: sent={stats.get('sent', 0)}, "
-                     f"opened={stats.get('opened', 0)}, "
-                     f"clicked={stats.get('clicked', 0)}")
+        logger.info(
+            f"  DB stats: sent={stats.get('sent', 0)}, "
+            f"opened={stats.get('opened', 0)}, "
+            f"clicked={stats.get('clicked', 0)}"
+        )
     except Exception as e:
         logger.warning(f"Could not retrieve email stats: {e}")
 

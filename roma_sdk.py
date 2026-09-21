@@ -8,13 +8,15 @@ Usage:
 """
 
 import requests
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 from dataclasses import dataclass
 
 API_BASE = "http://localhost:8000"
 
+
 class ROMAException(Exception):
     pass
+
 
 class ATOMClusterJob:
     """Handle of a job submitted in ATOMCluster managed mode.
@@ -45,25 +47,33 @@ class ROMAJob:
     dag: list
     estimated_resources: dict
 
+
 class ROMAClient:
     def __init__(self, base_url: str = API_BASE):
         self.base_url = base_url.rstrip("/")
 
-    def submit(self, task: str, *, gpu_required: bool = False,
-               priority: int = 5, execution_mode: str = "k8s_job") -> ROMAJob:
+    def submit(
+        self,
+        task: str,
+        *,
+        gpu_required: bool = False,
+        priority: int = 5,
+        execution_mode: str = "k8s_job",
+    ) -> ROMAJob:
         if not task or not task.strip():
-            resp = requests.post(f"{self.base_url}/submit",
-                                json={"task": ""})
+            resp = requests.post(f"{self.base_url}/submit", json={"task": ""})
             if resp.status_code == 400:
                 data = resp.json()
-                raise ROMAException(f"REJECTED: {data['error']['code']} — {data['error']['message']}")
+                raise ROMAException(
+                    f"REJECTED: {data['error']['code']} — {data['error']['message']}"
+                )
             resp.raise_for_status()
 
         payload = {
             "task": task,
             "gpu_required": gpu_required,
             "priority": priority,
-            "execution_mode": execution_mode
+            "execution_mode": execution_mode,
         }
         resp = requests.post(f"{self.base_url}/submit", json=payload)
         if resp.status_code == 429:
@@ -76,7 +86,7 @@ class ROMAClient:
             status=data["status"],
             queue_priority=data["roma_dispatch"]["queue_priority"],
             dag=data["dag"],
-            estimated_resources=data["estimated_resources"]
+            estimated_resources=data["estimated_resources"],
         )
 
     def status(self, job_id: str) -> Dict[str, Any]:
@@ -97,11 +107,14 @@ class ROMAClient:
 
     def submit_atom_cluster(self, task: str, cluster_spec: dict) -> ATOMClusterJob:
         """Submit execution as ATOMCluster managed job."""
-        resp = requests.post(f"{self.base_url}/submit", json={
-            "task": task,
-            "execution_mode": "atom_cluster",
-            "cluster_spec": cluster_spec,
-        })
+        resp = requests.post(
+            f"{self.base_url}/submit",
+            json={
+                "task": task,
+                "execution_mode": "atom_cluster",
+                "cluster_spec": cluster_spec,
+            },
+        )
         if resp.status_code >= 400:
             raise ROMAException(f"HTTP {resp.status_code}: {resp.text}")
         return ATOMClusterJob(resp.json())

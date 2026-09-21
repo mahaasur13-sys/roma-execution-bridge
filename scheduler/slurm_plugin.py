@@ -40,6 +40,7 @@ class SlurmPlugin:
             return
         try:
             import paramiko
+
             self._ssh_client = paramiko.SSHClient()
             # Никакого AutoAddPolicy: непроверенный ключ хоста = MITM на кластер.
             # Доверяем только known_hosts (системный + ~/.ssh/known_hosts).
@@ -56,7 +57,9 @@ class SlurmPlugin:
             self._ssh_client.connect(self.head_node, **connect_kwargs)
             logger.info("Slurm SSH connected to %s", self.head_node)
         except Exception as e:
-            logger.error("Failed to connect to Slurm head node %s: %s", self.head_node, e)
+            logger.error(
+                "Failed to connect to Slurm head node %s: %s", self.head_node, e
+            )
             raise RuntimeError(f"Slurm SSH unavailable: {e}")
 
     def _ssh_exec(self, cmd: str, timeout: int = 30) -> tuple[int, str, str]:
@@ -66,9 +69,12 @@ class SlurmPlugin:
         exit_code = stdout.channel.recv_exit_status()
         return exit_code, stdout.read().decode().strip(), stderr.read().decode().strip()
 
-    def _rest_call(self, endpoint: str, method: str = "GET", data: dict | None = None) -> dict:
+    def _rest_call(
+        self, endpoint: str, method: str = "GET", data: dict | None = None
+    ) -> dict:
         """Call Slurm REST API if configured."""
         import requests as _r
+
         url = f"{self.rest_api.rstrip('/')}/{endpoint.lstrip('/')}"
         headers = {"X-SLURM-USER-NAME": self.user, "Content-Type": "application/json"}
         resp = _r.request(method, url, json=data, headers=headers, timeout=10)
@@ -101,18 +107,29 @@ class SlurmPlugin:
     def execute(self, job: dict) -> dict:
         """Submit job to Slurm. Returns dict with slurm_job_id."""
         if not self.enabled:
-            return {"slurm_job_id": None, "status": "local_emulation", "message": "Slurm disabled — running locally"}
+            return {
+                "slurm_job_id": None,
+                "status": "local_emulation",
+                "message": "Slurm disabled — running locally",
+            }
 
         try:
             script = self._generate_sbatch_script(job)
             # Write script to temp file, scp to cluster, and sbatch
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False, prefix="roma-") as f:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".sh", delete=False, prefix="roma-"
+            ) as f:
                 f.write(script)
                 f.flush()
                 script_path = f.name
 
             sftp = self._ssh_client.open_sftp()
-            safe_job_id = re.sub(r"[^A-Za-z0-9._-]", "_", str(job.get("job_id", "tmp"))[:8]).lstrip("._-") or "job"
+            safe_job_id = (
+                re.sub(
+                    r"[^A-Za-z0-9._-]", "_", str(job.get("job_id", "tmp"))[:8]
+                ).lstrip("._-")
+                or "job"
+            )
             remote_path = f"/tmp/roma-{safe_job_id}.sh"
             sftp.put(script_path, remote_path)
             sftp.close()
@@ -129,7 +146,11 @@ class SlurmPlugin:
             slurm_job_id = match.group(1) if match else None
 
             logger.info("Slurm job submitted: %s → %s", job.get("job_id"), slurm_job_id)
-            return {"slurm_job_id": slurm_job_id, "status": "submitted", "message": stdout}
+            return {
+                "slurm_job_id": slurm_job_id,
+                "status": "submitted",
+                "message": stdout,
+            }
 
         except RuntimeError:
             raise
@@ -140,22 +161,46 @@ class SlurmPlugin:
     def get_status(self, slurm_job_id: str) -> dict:
         """Query job status from Slurm via sacct or squeue."""
         if not self.enabled:
-            return {"slurm_job_id": slurm_job_id, "status": "unknown", "message": "Slurm disabled"}
+            return {
+                "slurm_job_id": slurm_job_id,
+                "status": "unknown",
+                "message": "Slurm disabled",
+            }
         if not _SLURM_ID_RE.match(str(slurm_job_id)):
-            return {"slurm_job_id": slurm_job_id, "status": "error", "message": "invalid slurm_job_id"}
+            return {
+                "slurm_job_id": slurm_job_id,
+                "status": "error",
+                "message": "invalid slurm_job_id",
+            }
 
         try:
             # Try squeue first (running/pending), then sacct (completed)
-            _, stdout, _ = self._ssh_exec(f"squeue -j {slurm_job_id} -o '%T' --noheader", timeout=10)
+            _, stdout, _ = self._ssh_exec(
+                f"squeue -j {slurm_job_id} -o '%T' --noheader", timeout=10
+            )
             if stdout:
-                return {"slurm_job_id": slurm_job_id, "status": stdout.strip().lower(), "source": "squeue"}
+                return {
+                    "slurm_job_id": slurm_job_id,
+                    "status": stdout.strip().lower(),
+                    "source": "squeue",
+                }
 
-            _, stdout, _ = self._ssh_exec(f"sacct -j {slurm_job_id} -o 'State' --noheader -P", timeout=10)
+            _, stdout, _ = self._ssh_exec(
+                f"sacct -j {slurm_job_id} -o 'State' --noheader -P", timeout=10
+            )
             if stdout:
                 status = stdout.strip().split("\n")[0].lower()
-                return {"slurm_job_id": slurm_job_id, "status": status, "source": "sacct"}
+                return {
+                    "slurm_job_id": slurm_job_id,
+                    "status": status,
+                    "source": "sacct",
+                }
 
-            return {"slurm_job_id": slurm_job_id, "status": "not_found", "source": "none"}
+            return {
+                "slurm_job_id": slurm_job_id,
+                "status": "not_found",
+                "source": "none",
+            }
 
         except Exception as e:
             logger.error("Slurm status error for %s: %s", slurm_job_id, e)
@@ -164,15 +209,29 @@ class SlurmPlugin:
     def cancel(self, slurm_job_id: str) -> dict:
         """Cancel a Slurm job via scancel."""
         if not self.enabled:
-            return {"slurm_job_id": slurm_job_id, "status": "not_cancelled", "message": "Slurm disabled"}
+            return {
+                "slurm_job_id": slurm_job_id,
+                "status": "not_cancelled",
+                "message": "Slurm disabled",
+            }
         if not _SLURM_ID_RE.match(str(slurm_job_id)):
-            return {"slurm_job_id": slurm_job_id, "status": "error", "message": "invalid slurm_job_id"}
+            return {
+                "slurm_job_id": slurm_job_id,
+                "status": "error",
+                "message": "invalid slurm_job_id",
+            }
 
         try:
-            exit_code, stdout, stderr = self._ssh_exec(f"scancel {slurm_job_id}", timeout=10)
+            exit_code, stdout, stderr = self._ssh_exec(
+                f"scancel {slurm_job_id}", timeout=10
+            )
             if exit_code == 0:
                 logger.info("Slurm job cancelled: %s", slurm_job_id)
-                return {"slurm_job_id": slurm_job_id, "status": "cancelled", "message": stdout}
+                return {
+                    "slurm_job_id": slurm_job_id,
+                    "status": "cancelled",
+                    "message": stdout,
+                }
             return {"slurm_job_id": slurm_job_id, "status": "error", "message": stderr}
         except Exception as e:
             logger.error("Slurm cancel error for %s: %s", slurm_job_id, e)

@@ -1,4 +1,5 @@
 """DecisionOS — White-label branding per tenant (Week 4)."""
+
 import db_adapter as db
 
 DEFAULT_BRANDING = {
@@ -34,10 +35,20 @@ def get_branding(tenant_id: str) -> dict:
 
     branding = dict(DEFAULT_BRANDING)
     if tier_profile.get("white_label"):
-        branding["product_title"] = tenant.get("company_name") or tenant.get("name") or DEFAULT_BRANDING["product_title"]
-        branding["company_name"] = tenant.get("company_name") or tenant.get("name") or DEFAULT_BRANDING["company_name"]
+        branding["product_title"] = (
+            tenant.get("company_name")
+            or tenant.get("name")
+            or DEFAULT_BRANDING["product_title"]
+        )
+        branding["company_name"] = (
+            tenant.get("company_name")
+            or tenant.get("name")
+            or DEFAULT_BRANDING["company_name"]
+        )
         branding["logo_url"] = tenant.get("logo_url") or DEFAULT_BRANDING["logo_url"]
-        branding["theme_color"] = tenant.get("theme_color") or DEFAULT_BRANDING["theme_color"]
+        branding["theme_color"] = (
+            tenant.get("theme_color") or DEFAULT_BRANDING["theme_color"]
+        )
         branding["footer_text"] = f"Powered by {branding['company_name']}"
     return branding
 

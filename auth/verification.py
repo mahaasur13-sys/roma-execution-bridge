@@ -30,8 +30,10 @@ def verify_token(token: str) -> tuple:
     """
     user = db.find_user_by_verification_token(token)
     if not user:
-        logger.warning("verification_token_invalid",
-                       extra={"token_prefix": token[:8] if token else ""})
+        logger.warning(
+            "verification_token_invalid",
+            extra={"token_prefix": token[:8] if token else ""},
+        )
         return None, "invalid"
 
     expires_at = user.get("verification_token_expires_at")
@@ -39,10 +41,14 @@ def verify_token(token: str) -> tuple:
         if isinstance(expires_at, str):
             expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
         if expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
-            logger.warning("verification_token_expired",
-                           extra={"user_id": user["id"],
-                                  "email": user.get("email", ""),
-                                  "expires_at": str(expires_at)})
+            logger.warning(
+                "verification_token_expired",
+                extra={
+                    "user_id": user["id"],
+                    "email": user.get("email", ""),
+                    "expires_at": str(expires_at),
+                },
+            )
             return None, "expired"
 
     return {"user_id": user["id"], "email": user.get("email")}, "success"

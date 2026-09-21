@@ -13,13 +13,14 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 # ────────────────────────────────────────
 # Plugin Lifecycle State
 # ────────────────────────────────────────
 
+
 class PluginState(StrEnum):
     """Plugin lifecycle states (Cordis-inspired)."""
+
     REGISTERED = "registered"
     LOADED = "loaded"
     ENABLED = "enabled"
@@ -31,6 +32,7 @@ class PluginState(StrEnum):
 
 class PluginCategory(StrEnum):
     """Plugin categories for the marketplace."""
+
     POLICY = "policy"
     DECISION = "decision"
     CRYPTO = "crypto"
@@ -45,6 +47,7 @@ class PluginCategory(StrEnum):
 
 class PluginTier(StrEnum):
     """Which plan tiers can see/use this plugin."""
+
     FREE = "free"
     PRO = "pro"
     ENTERPRISE = "enterprise"
@@ -54,25 +57,39 @@ class PluginTier(StrEnum):
 # Plugin Manifest
 # ────────────────────────────────────────
 
+
 class PluginManifest(BaseModel):
     """Plugin manifest — metadata for discovery and loading.
 
     Analogous to package.json / pyproject.toml for plugins.
     """
+
     model_config = ConfigDict(frozen=True)
 
-    name: str = Field(..., min_length=1, max_length=128, description="Unique plugin slug (kebab-case)")
+    name: str = Field(
+        ..., min_length=1, max_length=128, description="Unique plugin slug (kebab-case)"
+    )
     version: str = Field(default="1.0.0", pattern=r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$")
     display_name: str = Field(..., max_length=256)
     description: str = Field(default="", max_length=1024)
     author: str = Field(default="ROMA Community")
     category: PluginCategory = PluginCategory.CUSTOM
-    entry_point: str = Field(..., description="Fully qualified Python path: pkg.module:Class")
-    dependencies: tuple[str, ...] = Field(default_factory=tuple, description="Other plugin names required")
+    entry_point: str = Field(
+        ..., description="Fully qualified Python path: pkg.module:Class"
+    )
+    dependencies: tuple[str, ...] = Field(
+        default_factory=tuple, description="Other plugin names required"
+    )
     minimum_tier: PluginTier = PluginTier.FREE
-    config_schema: dict[str, Any] = Field(default_factory=dict, description="JSON Schema for plugin config")
-    permissions: tuple[str, ...] = Field(default_factory=tuple, description="Requested permissions: db,network,fs")
-    sandbox_policy: str = Field(default="restricted", description="sandbox profile: restricted | network | full")
+    config_schema: dict[str, Any] = Field(
+        default_factory=dict, description="JSON Schema for plugin config"
+    )
+    permissions: tuple[str, ...] = Field(
+        default_factory=tuple, description="Requested permissions: db,network,fs"
+    )
+    sandbox_policy: str = Field(
+        default="restricted", description="sandbox profile: restricted | network | full"
+    )
     tags: tuple[str, ...] = Field(default_factory=tuple)
 
 
@@ -80,8 +97,10 @@ class PluginManifest(BaseModel):
 # Plugin Instance (runtime)
 # ────────────────────────────────────────
 
+
 class PluginInstance(BaseModel):
     """Runtime plugin instance — wraps a loaded plugin object."""
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -99,22 +118,28 @@ class PluginInstance(BaseModel):
     def is_available(self, tier: str) -> bool:
         """Check if plugin is visible to given tier."""
         tier_order = {"free": 0, "pro": 1, "enterprise": 2}
-        return tier_order.get(tier, 0) >= tier_order.get(self.manifest.minimum_tier.value, 0)
+        return tier_order.get(tier, 0) >= tier_order.get(
+            self.manifest.minimum_tier.value, 0
+        )
 
 
 # ────────────────────────────────────────
 # Thought Trace — agent reasoning log
 # ────────────────────────────────────────
 
+
 class ThoughtStep(BaseModel):
     """Single step in an agent's reasoning chain."""
+
     model_config = ConfigDict(frozen=True)
 
     step_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     agent: str = Field(..., description="Plugin/agent name")
     thought: str = Field(..., description="Natural language reasoning step")
-    data: dict[str, Any] = Field(default_factory=dict, description="Structured data for this step")
+    data: dict[str, Any] = Field(
+        default_factory=dict, description="Structured data for this step"
+    )
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     parent_step_id: str | None = None
 
@@ -124,6 +149,7 @@ class ThoughtTrace(BaseModel):
 
     Analogous to LangChain trace but PluginManager-owned.
     """
+
     model_config = ConfigDict(frozen=True)
 
     trace_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -140,8 +166,10 @@ class ThoughtTrace(BaseModel):
 # Marketplace Item
 # ────────────────────────────────────────
 
+
 class PluginMarketplaceItem(BaseModel):
     """A plugin listing in the internal marketplace."""
+
     model_config = ConfigDict(frozen=True)
 
     slug: str = Field(..., description="Unique marketplace slug")

@@ -54,7 +54,9 @@ def _api_post(path: str, payload: dict) -> dict:
     """POST-запрос к API, возвращает JSON-ответ."""
     url = f"{API_BASE}{path}"
     data = json.dumps(payload).encode()
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(
+        url, data=data, headers={"Content-Type": "application/json"}
+    )
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             return json.loads(resp.read().decode())
@@ -93,14 +95,17 @@ class ROMA_CLI:
 
         # Предсказание стоимости
         prediction = self.predictor.predict(
-            task,
-            gpu_required=("gpu" in task.lower() or "train" in task.lower())
+            task, gpu_required=("gpu" in task.lower() or "train" in task.lower())
         )
 
         # Вывод базовой информации
         print(f"\n💰 Ожидаемая стоимость: ${prediction['estimated_cost']:.2f}")
-        print(f"⏱  Расчётная длительность: ~{self._format_duration(prediction.get('estimated_duration_minutes', 0))}")
-        print(f"🖥  GPU: {prediction.get('gpu_node', 'cpu-cluster')} (×{prediction.get('gpu_count', 0)})")
+        print(
+            f"⏱  Расчётная длительность: ~{self._format_duration(prediction.get('estimated_duration_minutes', 0))}"
+        )
+        print(
+            f"🖥  GPU: {prediction.get('gpu_node', 'cpu-cluster')} (×{prediction.get('gpu_count', 0)})"
+        )
         print(f"⚠️  Уровень риска: {prediction.get('risk_level', 'LOW')}\n")
         print(self._breakdown_str(prediction.get('breakdown', {})))
 
@@ -110,7 +115,7 @@ class ROMA_CLI:
             plugin_type="default",
             gpu_required=prediction.get("gpu_required", False),
             tenant_id="default-tenant",
-            **prediction
+            **prediction,
         )
 
         if decision['action'] == "REJECTED":
@@ -118,7 +123,9 @@ class ROMA_CLI:
             return 1
 
         if decision['action'] == "REQUIRES_CONFIRMATION":
-            print(f"\n⚠️  Предупреждение: стоимость ${decision['final_cost']:.2f} — подтвердите?")
+            print(
+                f"\n⚠️  Предупреждение: стоимость ${decision['final_cost']:.2f} — подтвердите?"
+            )
             print(self.PROMPT_OPTIONS)
             choice = input("\n> ").strip().lower()
             if choice in ("cancel", "c"):
@@ -129,7 +136,9 @@ class ROMA_CLI:
                 return self.cmd_run(task)
 
         # Отправка задачи на сервер
-        print(f"\n✅ {decision['action']}: ${decision.get('final_cost', prediction['estimated_cost']):.2f}")
+        print(
+            f"\n✅ {decision['action']}: ${decision.get('final_cost', prediction['estimated_cost']):.2f}"
+        )
         print("\n🚀 Отправляю задачу на сервер...")
         job_id = self._submit_job(task, prediction)
 
@@ -156,7 +165,9 @@ class ROMA_CLI:
         if explanation.get('alternatives'):
             print("\n💡 БОЛЕЕ ДЕШЁВЫЕ АЛЬТЕРНАТИВЫ")
             for alt in explanation['alternatives']:
-                print(f"  • {alt['description']} → ${alt['cost']:.2f} (экономия {alt['savings']}%)")
+                print(
+                    f"  • {alt['description']} → ${alt['cost']:.2f} (экономия {alt['savings']}%)"
+                )
         print("\n🔍 ПОЧЕМУ ТАКОЕ РЕШЕНИЕ")
         for reason in explanation['decision_reasons']:
             print(f"  • {reason}")
@@ -166,15 +177,14 @@ class ROMA_CLI:
         """Быстрый расчёт стоимости."""
         print(f"\n💰 Оценка стоимости: {task}\n")
         prediction = self.predictor.predict(
-            task,
-            gpu_required=("gpu" in task.lower() or "train" in task.lower())
+            task, gpu_required=("gpu" in task.lower() or "train" in task.lower())
         )
         # Выводим только ключевые цифры
         result = {
             "estimated_cost": round(prediction['estimated_cost'], 4),
             "duration_minutes": prediction.get('estimated_duration_minutes', 0),
             "gpu_node": prediction.get('gpu_node', 'cpu-cluster'),
-            "risk": prediction.get('risk_level', 'LOW')
+            "risk": prediction.get('risk_level', 'LOW'),
         }
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return 0
@@ -227,7 +237,7 @@ class ROMA_CLI:
             "task": task,
             "gpu_required": prediction.get("gpu_required", False),
             "priority": 5,
-            "execution_mode": "k8s_job"
+            "execution_mode": "k8s_job",
         }
         result = _api_post("/submit", payload)
         return result.get("job_id")
@@ -237,7 +247,9 @@ class ROMA_CLI:
         print("\n💡 АЛЬТЕРНАТИВЫ:")
         if explanation.get('alternatives'):
             for alt in explanation['alternatives']:
-                print(f"  • {alt['description']} → ${alt['cost']:.2f} (экономия {alt['savings']}%)")
+                print(
+                    f"  • {alt['description']} → ${alt['cost']:.2f} (экономия {alt['savings']}%)"
+                )
         else:
             print("  (дешёвых альтернатив не найдено)")
 

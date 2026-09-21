@@ -13,6 +13,7 @@
 Живые данные не затрагиваются: junit-файлы синтетические либо записаны во временный
 каталог pytest; PostgreSQL вложенным прогоном не загрязняется (conftest пиннит тестовую БД).
 """
+
 from __future__ import annotations
 
 import json
@@ -52,7 +53,9 @@ def _write_junit(
     elements: int | None = None,
 ) -> pathlib.Path:
     """Синтетический junit: `declared` (атрибут tests) можно развести с числом элементов."""
-    total_elements = elements if elements is not None else passed + failures + errors + skipped
+    total_elements = (
+        elements if elements is not None else passed + failures + errors + skipped
+    )
     cases = []
     for index in range(total_elements):
         if index < failures:
@@ -63,7 +66,9 @@ def _write_junit(
             outcome = '<skipped message="synthetic" />'
         else:
             outcome = ""
-        cases.append(f'<testcase classname="synthetic.Case" name="test_{index}">{outcome}</testcase>')
+        cases.append(
+            f'<testcase classname="synthetic.Case" name="test_{index}">{outcome}</testcase>'
+        )
     path.write_text(
         '<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests">'
         f'<testsuite name="pytest" errors="{errors}" failures="{failures}" '
@@ -111,7 +116,9 @@ def test_checker_rejects_legacy_threshold_run(tmp_path: pathlib.Path) -> None:
     assert f"collected: {LEGACY_THRESHOLD} != канон" in result.stderr
 
 
-def test_checker_rejects_narrowed_run_still_above_legacy_threshold(tmp_path: pathlib.Path) -> None:
+def test_checker_rejects_narrowed_run_still_above_legacy_threshold(
+    tmp_path: pathlib.Path,
+) -> None:
     """РЕАЛЬНЫЙ суженный прогон: два файла сняты --deselect, счётчик всё ещё >= 244."""
     if os.environ.get(NESTED_ENV) == "1":
         pytest.fail(
@@ -157,7 +164,9 @@ def test_checker_rejects_narrowed_run_still_above_legacy_threshold(tmp_path: pat
         f"получено {recorded} — иначе негатив не про прежний порог"
     )
     result = _run_checker(junit=junit)
-    assert result.returncode != 0, "суженный прогон выше прежнего порога обязан ронять проверку"
+    assert (
+        result.returncode != 0
+    ), "суженный прогон выше прежнего порога обязан ронять проверку"
     assert f"collected: {recorded} != канон {canon['collected']}" in result.stderr
 
 
@@ -178,7 +187,10 @@ def test_checker_rejects_declared_executed_mismatch(tmp_path: pathlib.Path) -> N
 
 def test_checker_rejects_unparsable_junit(tmp_path: pathlib.Path) -> None:
     junit = tmp_path / "broken.xml"
-    junit.write_text('<?xml version="1.0"?><testsuites><testsuite name="pytest" tests="3">', encoding="utf-8")
+    junit.write_text(
+        '<?xml version="1.0"?><testsuites><testsuite name="pytest" tests="3">',
+        encoding="utf-8",
+    )
     result = _run_checker(junit=junit)
     assert result.returncode != 0
     assert "не читается" in result.stderr
@@ -199,8 +211,10 @@ def test_gate_and_ci_wrapper_use_single_checker() -> None:
     gate = GATE.read_text(encoding="utf-8")
     wrapper = SMOKE_WRAPPER.read_text(encoding="utf-8")
     assert "ci_run_completeness.py" in gate
-    assert "MIN_COLLECTED" not in gate and "collected>=" not in gate, (
-        "в гейте снова свой порог — проверка полноты обязана быть одна"
-    )
+    assert (
+        "MIN_COLLECTED" not in gate and "collected>=" not in gate
+    ), "в гейте снова свой порог — проверка полноты обязана быть одна"
     assert "ci_run_completeness.py" in wrapper
-    assert re.search(r"^\s*CANON_MIN\s*=", wrapper, re.M) is None, "в CI-обёртке снова свой порог"
+    assert (
+        re.search(r"^\s*CANON_MIN\s*=", wrapper, re.M) is None
+    ), "в CI-обёртке снова свой порог"

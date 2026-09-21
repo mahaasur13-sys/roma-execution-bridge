@@ -14,6 +14,7 @@ P-LEASE-3 (ревизии №18/№19): право перезахвата воз
 повреждённом heartbeat, оставляя аренду и маркеры побайтово неизменными; протухшая аренда
 даёт ровно один успешный захват с token+1.
 """
+
 from __future__ import annotations
 
 import datetime
@@ -42,11 +43,15 @@ lease = load_lease_module()
 
 
 def iso_minutes_ago(minutes: int) -> str:
-    ts = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=minutes)
+    ts = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
+        minutes=minutes
+    )
     return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def write_marker_file(sessions: pathlib.Path, instance_id: str, last_seen: str) -> pathlib.Path:
+def write_marker_file(
+    sessions: pathlib.Path, instance_id: str, last_seen: str
+) -> pathlib.Path:
     sessions.mkdir(parents=True, exist_ok=True)
     path = sessions / f"{instance_id}.json"
     path.write_text(
@@ -250,13 +255,19 @@ def test_cli_guard_exits_3_on_collision(tmp_path: pathlib.Path) -> None:
 def test_real_sessions_dir_has_at_most_one_fresh_marker() -> None:
     """Интеграционная проверка реального каталога: живой писатель должен быть один."""
     if not REAL_SESSIONS.is_dir():
-        pytest.skip("issue: A-0 · expiry: 2026-12-31 · нет каталога .sessions — проверка неприменима")
+        pytest.skip(
+            "issue: A-0 · expiry: 2026-12-31 · нет каталога .sessions — проверка неприменима"
+        )
     fresh = lease.fresh_markers(REAL_SESSIONS, 15)
     assert len(fresh) <= 1, f"свежих маркеров больше одного: {sorted(fresh)}"
 
 
-@pytest.mark.parametrize("broken", ["not-a-timestamp", "", "2026-13-45T99:00:00Z", None])
-def test_capture_fails_closed_on_broken_heartbeat(tmp_path: pathlib.Path, broken) -> None:
+@pytest.mark.parametrize(
+    "broken", ["not-a-timestamp", "", "2026-13-45T99:00:00Z", None]
+)
+def test_capture_fails_closed_on_broken_heartbeat(
+    tmp_path: pathlib.Path, broken
+) -> None:
     """НЕГАТИВ P-LEASE-3: битый heartbeat → отказ (не «протух»), аренда не перезаписывается."""
     write_lease_file(tmp_path, instance_id="instance-a", heartbeat_at=broken)
     write_marker_file(tmp_path / ".sessions", "instance-a", iso_minutes_ago(40))
@@ -273,7 +284,9 @@ def test_capture_fails_closed_on_broken_heartbeat(tmp_path: pathlib.Path, broken
 
 def test_capture_refused_on_fresh_foreign_marker(tmp_path: pathlib.Path) -> None:
     """НЕГАТИВ P-LEASE-3: аренда протухла, но живой чужой маркер → отказ."""
-    write_lease_file(tmp_path, instance_id="instance-dead", heartbeat_at=iso_minutes_ago(40))
+    write_lease_file(
+        tmp_path, instance_id="instance-dead", heartbeat_at=iso_minutes_ago(40)
+    )
     write_marker_file(tmp_path / ".sessions", "instance-dead", iso_minutes_ago(40))
     write_marker_file(tmp_path / ".sessions", "instance-alive", lease.iso())
     before = state_snapshot(tmp_path)
@@ -285,7 +298,9 @@ def test_capture_refused_on_fresh_foreign_marker(tmp_path: pathlib.Path) -> None
     assert not (tmp_path / ".sessions" / "instance-c.json").exists()
 
 
-def test_capture_after_ttl_succeeds_once_with_token_plus_one(tmp_path: pathlib.Path) -> None:
+def test_capture_after_ttl_succeeds_once_with_token_plus_one(
+    tmp_path: pathlib.Path,
+) -> None:
     """Протухшая аренда: ровно один успешный capture, token+1, старый маркер сохранён."""
     lease_obj = lease.Lease(tmp_path, ttl_min=15)
     lease_obj.capture("instance-a")

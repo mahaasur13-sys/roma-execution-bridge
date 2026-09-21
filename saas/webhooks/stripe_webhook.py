@@ -1,4 +1,5 @@
 """ROMA SaaS — Stripe Webhook Handler + Revenue-Share."""
+
 from fastapi import APIRouter, Request, HTTPException, Header
 from pydantic import BaseModel
 from typing import Optional
@@ -19,17 +20,21 @@ logger = logging.getLogger("roma.saas.stripe_webhook")
 _redis = None
 try:
     import redis
+
     _redis = redis.from_url(REDIS_URL, decode_responses=True)
     _redis.ping()
 except Exception:
     pass
 
+
 def _dup(event_id: str) -> bool:
     return _redis is not None and _redis.exists(f"stripe:event:{event_id}") > 0
+
 
 def _mark(event_id: str) -> None:
     if _redis:
         _redis.setex(f"stripe:event:{event_id}", 86400, str(time.time()))
+
 
 def _verify(payload: bytes, sig: str, secret: str) -> bool:
     if not sig or not secret:
@@ -37,20 +42,18 @@ def _verify(payload: bytes, sig: str, secret: str) -> bool:
     try:
         parts = dict(p.split("=") for p in sig.split(","))
         signed = f"{parts['t']}.{payload.decode()}"
-        actual = hmac.new(
-            secret.encode(),
-            signed.encode(),
-            hashlib.sha256
-        ).hexdigest()
+        actual = hmac.new(secret.encode(), signed.encode(), hashlib.sha256).hexdigest()
         return hmac.compare_digest(actual, parts.get("v1", ""))
     except Exception:
         return False
+
 
 class Response(BaseModel):
     received: bool
     event_id: Optional[str] = None
     processed: bool = False
     error: Optional[str] = None
+
 
 @router.post("/stripe", response_model=Response)
 async def stripe_webhook(
@@ -67,7 +70,7 @@ async def stripe_webhook(
     except Exception:
         raise HTTPException(400, "Invalid JSON")
 
-    eid, etype = event.get("id", ""), event.get("type", "")
+    eid, _etype = event.get("id", ""), event.get("type", "")
 
     if _dup(eid):
         return Response(received=True, event_id=eid, processed=False)
@@ -77,5 +80,7 @@ async def stripe_webhook(
     # to call (record_usage / record_revenue_share) do not exist on
     # PGBillingLedger, so we never credit here and never report the event as
     # processed.
-    logger.warning("legacy stripe_webhook handler disabled; live handler is deploy/stripe-webhook/app/main.py")
+    logger.warning(
+        "legacy stripe_webhook handler disabled; live handler is deploy/stripe-webhook/app/main.py"
+    )
     return Response(received=True, event_id=eid, processed=False)

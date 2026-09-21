@@ -98,7 +98,9 @@ class TraceCollector:
         self._completed[trace_id] = trace
         logger.info(
             "Trace finished: %s — %d steps, %.1fms",
-            trace_id, len(steps), total_ms,
+            trace_id,
+            len(steps),
+            total_ms,
         )
         return trace
 

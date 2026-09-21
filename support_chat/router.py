@@ -1,14 +1,29 @@
 """Support Chat — FastAPI REST + WebSocket router."""
+
 from __future__ import annotations
 
 import json
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 
 from support_chat.models import (
-    AssignTicketRequest, CreateMessageRequest, CreateTicketRequest, CreateTicketResponse,
-    CsatSubmitRequest, MessageType, ParticipantRole, TicketListResponse, TicketDetailResponse,
+    AssignTicketRequest,
+    CreateMessageRequest,
+    CreateTicketRequest,
+    CreateTicketResponse,
+    CsatSubmitRequest,
+    MessageType,
+    ParticipantRole,
+    TicketListResponse,
+    TicketDetailResponse,
     TicketStatus,
 )
 from support_chat.service import SupportTicketService
@@ -37,7 +52,9 @@ async def _get_user_role(request: Request) -> str:
 
 
 @router.post("/tickets", response_model=CreateTicketResponse, status_code=201)
-async def create_ticket(request: CreateTicketRequest, user_id: str = Depends(_get_user_id)):
+async def create_ticket(
+    request: CreateTicketRequest, user_id: str = Depends(_get_user_id)
+):
     try:
         return await _service.create_ticket(request, user_id)
     except ValueError as e:
@@ -52,7 +69,9 @@ async def list_tickets(
     page_size: int = 20,
 ):
     ticket_status = TicketStatus(status) if status else None
-    return _service.list_tickets(tenant_id, status=ticket_status, page=page, page_size=page_size)
+    return _service.list_tickets(
+        tenant_id, status=ticket_status, page=page, page_size=page_size
+    )
 
 
 @router.get("/tickets/{ticket_id}", response_model=TicketDetailResponse)
@@ -93,7 +112,9 @@ async def transition_status(ticket_id: str, status: str):
 
 
 @router.post("/tickets/{ticket_id}/csat")
-async def submit_csat(ticket_id: str, request: CsatSubmitRequest, user_id: str = Depends(_get_user_id)):
+async def submit_csat(
+    ticket_id: str, request: CsatSubmitRequest, user_id: str = Depends(_get_user_id)
+):
     try:
         return await _service.submit_csat(ticket_id, request, user_id)
     except ValueError as e:
@@ -110,13 +131,17 @@ async def support_websocket(ws: WebSocket, ticket_id: str):
         while True:
             raw = await ws.receive_text()
             data = json.loads(raw)
-            msg = await _service.add_message(CreateMessageRequest(
-                ticket_id=data.get("ticket_id", ticket_id),
-                body=data.get("body", ""),
-                sender_id=user_id,
-                sender_role=ParticipantRole(data.get("role", ParticipantRole.TENANT_USER.value)),
-                message_type=MessageType(data.get("type", "text")),
-            ))
+            msg = await _service.add_message(
+                CreateMessageRequest(
+                    ticket_id=data.get("ticket_id", ticket_id),
+                    body=data.get("body", ""),
+                    sender_id=user_id,
+                    sender_role=ParticipantRole(
+                        data.get("role", ParticipantRole.TENANT_USER.value)
+                    ),
+                    message_type=MessageType(data.get("type", "text")),
+                )
+            )
             await ws.send_json({"type": "ack", "message_id": str(msg.message_id)})
     except WebSocketDisconnect:
         await _chat_svc.ws_manager.disconnect(ticket_id, user_id)

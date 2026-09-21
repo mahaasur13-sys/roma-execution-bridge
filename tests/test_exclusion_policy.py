@@ -35,7 +35,13 @@ def _pyproject() -> dict:
 
 
 def _declared_ignores() -> list[str]:
-    addopts = _pyproject().get("tool", {}).get("pytest", {}).get("ini_options", {}).get("addopts", "")
+    addopts = (
+        _pyproject()
+        .get("tool", {})
+        .get("pytest", {})
+        .get("ini_options", {})
+        .get("addopts", "")
+    )
     return IGNORE_RE.findall(addopts)
 
 
@@ -51,8 +57,10 @@ def test_every_ignore_has_reason_issue_expiry() -> None:
             value = entry.get(field)
             if not isinstance(value, str) or not value.strip():
                 missing.append(f"{path}: пустое/отсутствующее поле {field}")
-    assert not missing, (
-        "исключения без тройки reason·issue·expiry (слепой ignore):\n  " + "\n  ".join(missing)
+    assert (
+        not missing
+    ), "исключения без тройки reason·issue·expiry (слепой ignore):\n  " + "\n  ".join(
+        missing
     )
 
 
@@ -89,6 +97,7 @@ def test_exclusions_are_not_expired() -> None:
             )
     assert not expired, "\n  ".join(["просроченные исключения:"] + expired)
 
+
 # ---------------------------------------------------------------------------
 # A-3 (N7c/N7d): политика исключений обязана покрывать не только --ignore,
 # но и xfail. Иначе зелёный CI скрывает сломанную функциональность ровно так же,
@@ -105,7 +114,9 @@ def audit_xfail_blocks(text: str) -> list[str]:
     """Проверяет ОДИН блок xfail. Вынесено отдельно, чтобы негатив мог её вызвать."""
     problems = []
     if "strict=True" not in text:
-        problems.append("xfail без strict=True: при починке молча станет XPASS и дефект потеряется")
+        problems.append(
+            "xfail без strict=True: при починке молча станет XPASS и дефект потеряется"
+        )
     if not re.search(r"issue:\s*\S+", text):
         problems.append("xfail без issue-id")
     m = re.search(r"expiry:\s*(\d{4}-\d{2}-\d{2})", text)
@@ -114,7 +125,9 @@ def audit_xfail_blocks(text: str) -> list[str]:
     else:
         try:
             if dt.date.fromisoformat(m.group(1)) <= dt.date.today():
-                problems.append(f"xfail просрочен (expiry={m.group(1)}) — починить или продлить осознанно")
+                problems.append(
+                    f"xfail просрочен (expiry={m.group(1)}) — починить или продлить осознанно"
+                )
         except ValueError:
             problems.append(f"xfail expiry не дата: {m.group(1)!r}")
     return problems
@@ -126,16 +139,25 @@ def test_every_xfail_has_issue_expiry_and_strict() -> None:
         for block in XFAIL_RE.finditer(path.read_text(encoding="utf-8")):
             for problem in audit_xfail_blocks(block.group("body")):
                 offenders.append(f"{path.relative_to(REPO_ROOT)}: {problem}")
-    assert not offenders, "xfail без тройки reason·issue·expiry или без strict:\n  " + "\n  ".join(offenders)
+    assert (
+        not offenders
+    ), "xfail без тройки reason·issue·expiry или без strict:\n  " + "\n  ".join(
+        offenders
+    )
 
 
 def test_xfail_policy_can_actually_fail() -> None:
     """НЕГАТИВ (доктрина: у каждого детектора есть негативный тест, иначе его не существует)."""
     bad = 'reason=("R-5: что-то сломано", ),'
     problems = audit_xfail_blocks(bad)
-    assert len(problems) >= 3, f"детектор xfail не сработал на заведомо плохом блоке: {problems}"
+    assert (
+        len(problems) >= 3
+    ), f"детектор xfail не сработал на заведомо плохом блоке: {problems}"
     good = 'strict=True, reason=("issue: P1-A · expiry: 2099-01-01 · причина",)'
-    assert audit_xfail_blocks(good) == [], "детектор xfail ложно краснеет на корректном блоке"
+    assert (
+        audit_xfail_blocks(good) == []
+    ), "детектор xfail ложно краснеет на корректном блоке"
+
 
 # ---------------------------------------------------------------------------
 # A-3b: политика исключений обязана покрывать skip-механизмы.
@@ -215,7 +237,9 @@ def find_skip_sites(text: str) -> list[tuple[int, str, str]]:
 def skip_files() -> list[Path]:
     """Все тест-файлы дерева (включая вложенные наборы и сам файл политики)."""
     found = {p for glob in SKIP_GLOBS for p in REPO_ROOT.rglob(glob)}
-    return sorted(p for p in found if ".venv" not in p.parts and "__pycache__" not in p.parts)
+    return sorted(
+        p for p in found if ".venv" not in p.parts and "__pycache__" not in p.parts
+    )
 
 
 def test_every_skip_has_issue_and_expiry() -> None:
@@ -223,7 +247,9 @@ def test_every_skip_has_issue_and_expiry() -> None:
     for path in skip_files():
         for line, kind, window in find_skip_sites(path.read_text(encoding="utf-8")):
             for problem in audit_skip_block(window, kind):
-                offenders.append(f"{path.relative_to(REPO_ROOT)}:{line} ({kind}): {problem}")
+                offenders.append(
+                    f"{path.relative_to(REPO_ROOT)}:{line} ({kind}): {problem}"
+                )
     assert not offenders, (
         "места skip-механизмов без тройки reason·issue·expiry (невидимое исключение):\n  "
         + "\n  ".join(offenders)
@@ -238,18 +264,29 @@ def test_skip_policy_can_actually_fail() -> None:
     """
     bare = "pytest." + 'skip("PG недоступен")'
     problems = audit_skip_block(bare, "skip")
-    assert len(problems) >= 2, f"детектор skip не сработал на заведомо плохом блоке: {problems}"
+    assert (
+        len(problems) >= 2
+    ), f"детектор skip не сработал на заведомо плохом блоке: {problems}"
 
-    good = "pytest." + 'skip("PG недоступен — только живой PG; issue: P1-C · expiry: 2099-01-01")'
-    assert audit_skip_block(good, "skip") == [], "детектор skip ложно краснеет на корректном блоке"
+    good = (
+        "pytest."
+        + 'skip("PG недоступен — только живой PG; issue: P1-C · expiry: 2099-01-01")'
+    )
+    assert (
+        audit_skip_block(good, "skip") == []
+    ), "детектор skip ложно краснеет на корректном блоке"
 
     bad_marker = "@pytest.mark." + "skipif(True)"
-    assert audit_skip_block(bad_marker, "skipif-маркер"), "skipif без тройки обязан падать"
+    assert audit_skip_block(
+        bad_marker, "skipif-маркер"
+    ), "skipif без тройки обязан падать"
 
     good_marker = "@pytest.mark." + (
         'skipif(True, reason="ждём живой PG · issue: P1-C · expiry: 2099-01-01")'
     )
-    assert audit_skip_block(good_marker, "skipif-маркер") == [], "корректный skipif ложно краснеет"
+    assert (
+        audit_skip_block(good_marker, "skipif-маркер") == []
+    ), "корректный skipif ложно краснеет"
 
 
 def test_skip_scanner_covers_synthetic_file_and_itself() -> None:
@@ -257,12 +294,13 @@ def test_skip_scanner_covers_synthetic_file_and_itself() -> None:
     synthetic = "def test_x():\n    pytest." + 'skip("просто так")\n'
     sites = find_skip_sites(synthetic)
     assert sites, "сканер не увидел голый skip в синтетическом тексте"
-    assert any(audit_skip_block(window, kind) for _, kind, window in sites), (
-        "голый skip в синтетическом тексте не распознан как нарушение"
-    )
-    assert any(p.name == "test_exclusion_policy.py" for p in skip_files()), (
-        "файл политики исключён из собственного скана — дыра в правиле"
-    )
+    assert any(
+        audit_skip_block(window, kind) for _, kind, window in sites
+    ), "голый skip в синтетическом тексте не распознан как нарушение"
+    assert any(
+        p.name == "test_exclusion_policy.py" for p in skip_files()
+    ), "файл политики исключён из собственного скана — дыра в правиле"
+
 
 def test_runtime_skip_budget_requires_issue_and_expiry() -> None:
     """Рантайм-бюджет скипов (conftest) обязан требовать ту же тройку, что и статическая политика.
@@ -274,8 +312,6 @@ def test_runtime_skip_budget_requires_issue_and_expiry() -> None:
     conftest = (REPO_ROOT / "tests" / "conftest.py").read_text(encoding="utf-8")
     assert "EXPIRY_MARK" in conftest, "рантайм-бюджет скипов не знает про expiry"
     budget = conftest.split("def pytest_sessionfinish", 1)[-1]
-    assert "ISSUE_MARK" in budget and "EXPIRY_MARK" in budget, (
-        "рантайм-бюджет скипов проверяет не всю тройку issue+expiry"
-    )
-
-
+    assert (
+        "ISSUE_MARK" in budget and "EXPIRY_MARK" in budget
+    ), "рантайм-бюджет скипов проверяет не всю тройку issue+expiry"

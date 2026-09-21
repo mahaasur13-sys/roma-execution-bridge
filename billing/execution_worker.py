@@ -1,4 +1,4 @@
-"""Background execution worker + billing loop for ROMA Execution Bridge.
+"""Backg_price_per_hourn worker + billing loop for ROMA Execution Bridge.
 
 Цикл после submit: dispatch → wait → bill → cleanup.
 Работает асинхронно после возврата 202 от submit.
@@ -21,13 +21,14 @@ _db_adapter = None
 _backend_manager = None
 
 
-
 _INFLIGHT = set()
+
 
 def _track(task):
     _INFLIGHT.add(task)
     task.add_done_callback(_INFLIGHT.discard)
     return task
+
 
 async def drain_inflight(grace_s: float = 15.0):
     pending = [t for t in list(_INFLIGHT) if not t.done()]
@@ -39,6 +40,7 @@ async def drain_inflight(grace_s: float = 15.0):
     if still:
         await asyncio.gather(*still, return_exceptions=True)
 
+
 def init_worker():
     """Вызывается один раз при старте приложения. Устанавливает ссылки на компоненты."""
     global _billing_ledger, _db_adapter, _backend_manager
@@ -48,7 +50,11 @@ def init_worker():
 
     _billing_ledger = BL()
     _db_adapter = db
-    _backend_manager = {"dispatch": dispatch_job, "cancel": backend_cancel_job, "status": get_job_status}
+    _backend_manager = {
+        "dispatch": dispatch_job,
+        "cancel": backend_cancel_job,
+        "status": get_job_status,
+    }
     logger.info("execution_worker initialized")
 
 
@@ -104,7 +110,7 @@ async def _execute_and_bill_impl(
         # is the *requested* backend (kept in the log below) and must not decide
         # failed-vs-running nor be persisted as the actual backend.
         backend_name = result.get("backend")
-        price_per_hour = result.get("price_per_hour", 0.0)
+        _price_per_hour = result.get("price_per_hour", 0.0)
         contract_id = result.get("contract_id")
         status = result.get("status")
 
@@ -114,7 +120,9 @@ async def _execute_and_bill_impl(
         if status in ("failed", "error") or not backend_name:
             logger.warning(
                 "execute_and_bill.dispatch_failed job=%s requested_backend=%s: %s",
-                job_id, payload.get("backend"), result.get("message", ""),
+                job_id,
+                payload.get("backend"),
+                result.get("message", ""),
             )
             _db_adapter.update_execution_job(
                 job_id,
@@ -124,7 +132,11 @@ async def _execute_and_bill_impl(
                 error=str(result.get("message", "dispatch failed"))[:500],
                 tenant_id=tenant_id,
             )
-            return {"status": "failed", "job_id": job_id, "error": result.get("message", "")}
+            return {
+                "status": "failed",
+                "job_id": job_id,
+                "error": result.get("message", ""),
+            }
 
         # Only mark "running" and poll when dispatch actually accepted the job.
         # queued/timeout/unknown are not ready — don't burn 120s polling them.
@@ -132,7 +144,9 @@ async def _execute_and_bill_impl(
         if not ready:
             logger.warning(
                 "execute_and_bill.dispatch_not_ready job=%s backend=%s status=%s",
-                job_id, backend_name, status,
+                job_id,
+                backend_name,
+                status,
             )
             _db_adapter.update_execution_job(
                 job_id,
@@ -142,7 +156,11 @@ async def _execute_and_bill_impl(
                 error=f"dispatch not ready (status={status})",
                 tenant_id=tenant_id,
             )
-            return {"status": "failed", "job_id": job_id, "error": f"dispatch not ready (status={status})"}
+            return {
+                "status": "failed",
+                "job_id": job_id,
+                "error": f"dispatch not ready (status={status})",
+            }
 
         # Overwrite the client-requested backend with the actually-dispatched one so
         # downstream (poll loop / _execute_command) never sees payload["backend"].
@@ -153,11 +171,22 @@ async def _execute_and_bill_impl(
         if backend_job_id is not None:
             payload["backend_job_id"] = backend_job_id
 
-        _db_adapter.update_execution_job(job_id, status="running", backend=backend_name,
-                                          backend_job_id=backend_job_id, tenant_id=tenant_id)
+        _db_adapter.update_execution_job(
+            job_id,
+            status="running",
+            backend=backend_name,
+            backend_job_id=backend_job_id,
+            tenant_id=tenant_id,
+        )
     except Exception as exc:
         logger.error("execute_and_bill.dispatch_failed job=%s: %s", job_id, exc)
-        _db_adapter.update_execution_job(job_id, status="failed", completed_at=datetime.now(timezone.utc).isoformat(), error=str(exc)[:500], tenant_id=tenant_id)
+        _db_adapter.update_execution_job(
+            job_id,
+            status="failed",
+            completed_at=datetime.now(timezone.utc).isoformat(),
+            error=str(exc)[:500],
+            tenant_id=tenant_id,
+        )
         return {"status": "failed", "error": str(exc)}
 
     # Шаг 2: Poll до завершения (макс 10 мин для GPU, 2 мин для local)
@@ -171,7 +200,14 @@ async def _execute_and_bill_impl(
             status_info = await _backend_manager["status"](job_id, backend_job_id)
             status = status_info.get("status", "unknown")
 
-            if status in ("completed", "failed", "error", "stopped", "cancelled", "destroyed"):
+            if status in (
+                "completed",
+                "failed",
+                "error",
+                "stopped",
+                "cancelled",
+                "destroyed",
+            ):
                 break
 
             # Если инстанс запущен — пытаемся выполнить команду
@@ -179,7 +215,11 @@ async def _execute_and_bill_impl(
                 ssh_host = status_info.get("ssh_host", status_info.get("host", ""))
                 if ssh_host:
                     cmd_result = await _execute_command(job_id, payload, tenant_id)
-                    status = "completed" if cmd_result.get("status") == "completed" else "failed"
+                    status = (
+                        "completed"
+                        if cmd_result.get("status") == "completed"
+                        else "failed"
+                    )
                     break
 
         except Exception as exc:
@@ -200,12 +240,21 @@ async def _execute_and_bill_impl(
     billing_status = "skip"
     try:
         from main import finalize_job_billing
+
         billing_status = finalize_job_billing(
-            tenant_id, job_id, gpu_sec=elapsed,
-            plan_name="free", backend=backend_name,
+            tenant_id,
+            job_id,
+            gpu_sec=elapsed,
+            plan_name="free",
+            backend=backend_name,
         )
-        logger.info("execute_and_bill.finalized tenant=%s job=%s gpu_sec=%.1f status=%s",
-                    tenant_id, job_id, elapsed, billing_status)
+        logger.info(
+            "execute_and_bill.finalized tenant=%s job=%s gpu_sec=%.1f status=%s",
+            tenant_id,
+            job_id,
+            elapsed,
+            billing_status,
+        )
     except PGUnavailableError as exc:
         # fail-closed: деньги НЕ сохранились — не помечаем billed, не зануляем молча.
         logger.error("execute_and_bill.billing_pg_error job=%s: %s", job_id, exc)
@@ -220,7 +269,9 @@ async def _execute_and_bill_impl(
         write_status = "billing_pending"
 
     _db_adapter.update_execution_job(
-        job_id, status=write_status, completed_at=now_iso,
+        job_id,
+        status=write_status,
+        completed_at=now_iso,
         cost_usd=cost_usd if billed_ok else 0.0,
         duration_seconds=round(elapsed, 2),
         error="" if billed_ok else f"billing:{billing_status}",
@@ -252,9 +303,11 @@ async def execute_and_bill(job_id: str, tenant_id: str, payload: dict) -> dict:
         logger.warning("execute_and_bill.cancelled job=%s tenant=%s", job_id, tenant_id)
         try:
             _db_adapter.update_execution_job(
-                job_id, status="cancelled",
+                job_id,
+                status="cancelled",
                 completed_at=datetime.now(timezone.utc).isoformat(),
-                error="cancelled by drain_inflight", tenant_id=tenant_id,
+                error="cancelled by drain_inflight",
+                tenant_id=tenant_id,
             )
         except Exception:
             pass
@@ -271,8 +324,10 @@ async def _execute_command(job_id: str, payload: dict, tenant_id: str) -> dict:
     cmd = payload.get("task", payload.get("command", "echo OK"))
     try:
         from backends.dispatcher import get_backend
+
         backend = get_backend(payload.get("backend"))
         from backends.base import JobContext
+
         ctx = JobContext(job_id=job_id, tenant_id=tenant_id, payload=payload)
         result = await backend.run_command(ctx, cmd, timeout=300)
         return result

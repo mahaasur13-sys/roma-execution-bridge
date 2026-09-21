@@ -22,8 +22,13 @@ from starlette.testclient import TestClient
 import main
 
 
-def _payload(account_id=None, invoice_id="inv-1", plan="pro",
-             operation="Payment", status="Completed"):
+def _payload(
+    account_id=None,
+    invoice_id="inv-1",
+    plan="pro",
+    operation="Payment",
+    status="Completed",
+):
     body = {
         "OperationType": operation,
         "Status": status,
@@ -44,12 +49,15 @@ def cp(monkeypatch):
     )
     monkeypatch.setattr(main, "CLOUDPAYMENTS_ENABLED", True)
     monkeypatch.setattr(main, "cloudpayments_client", fake)
-    monkeypatch.setattr(main.db, "update_tenant_subscription",
-                        lambda *a, **k: calls["sub"].append(a))
-    monkeypatch.setattr(main.db, "mark_invoice_processed",
-                        lambda *a, **k: calls["mark"].append(a))
-    monkeypatch.setattr(main.db, "set_tenant_inactive",
-                        lambda *a, **k: calls["inactive"].append(a))
+    monkeypatch.setattr(
+        main.db, "update_tenant_subscription", lambda *a, **k: calls["sub"].append(a)
+    )
+    monkeypatch.setattr(
+        main.db, "mark_invoice_processed", lambda *a, **k: calls["mark"].append(a)
+    )
+    monkeypatch.setattr(
+        main.db, "set_tenant_inactive", lambda *a, **k: calls["inactive"].append(a)
+    )
     monkeypatch.setattr(main.db, "is_invoice_processed", lambda invoice_id: False)
     return {"calls": calls, "fake": fake}
 
@@ -73,8 +81,9 @@ def test_invalid_signature_no_credit(cp, monkeypatch):
 
 def test_valid_signature_credits_a_not_b(cp, monkeypatch):
     monkeypatch.setattr(cp["fake"], "verify_webhook", lambda body, sig: True)
-    monkeypatch.setattr(main.db, "get_tenant",
-                        lambda tid: {"id": tid} if tid == "tenant-a" else None)
+    monkeypatch.setattr(
+        main.db, "get_tenant", lambda tid: {"id": tid} if tid == "tenant-a" else None
+    )
     client = TestClient(main.app, raise_server_exceptions=False)
     resp = _post(client, _payload(account_id="tenant-a", invoice_id="inv-1"))
     assert resp.status_code == 200
@@ -126,7 +135,10 @@ def test_webhook_secret_unset_fail_closed(cp, monkeypatch):
 
 def test_verify_webhook_never_falls_back_to_api_secret():
     from billing.cloudpayments_client import CloudPaymentsConfig, CloudPaymentsClient
-    cfg = CloudPaymentsConfig(public_id="p", api_secret="api-secret-xyz", webhook_secret="")
+
+    cfg = CloudPaymentsConfig(
+        public_id="p", api_secret="api-secret-xyz", webhook_secret=""
+    )
     client = CloudPaymentsClient(cfg)
     body = b"{}"
     # HMAC computed with the API secret must NOT be accepted.
@@ -136,30 +148,37 @@ def test_verify_webhook_never_falls_back_to_api_secret():
 
 def test_create_order_requires_nonempty_account_id():
     from billing.cloudpayments_client import CloudPaymentsConfig, CloudPaymentsClient
+
     client = CloudPaymentsClient(
         CloudPaymentsConfig(public_id="p", api_secret="s", webhook_secret="wh")
     )
     calls = []
-    client._post = lambda path, payload: calls.append((path, payload)) or {"Url": "https://example.com"}
+    client._post = lambda path, payload: calls.append((path, payload)) or {
+        "Url": "https://example.com"
+    }
 
     # Empty / whitespace account_id -> ValueError, no HTTP call.
     with pytest.raises(ValueError):
         client.create_order(amount=100, currency="RUB", description="d", account_id="")
     with pytest.raises(ValueError):
-        client.create_order(amount=100, currency="RUB", description="d", account_id="   ")
+        client.create_order(
+            amount=100, currency="RUB", description="d", account_id="   "
+        )
     assert calls == []
 
     # Valid account_id -> single POST with non-empty normalized AccountId.
-    client.create_order(amount=100, currency="RUB", description="d", account_id="  tenant-1  ")
+    client.create_order(
+        amount=100, currency="RUB", description="d", account_id="  tenant-1  "
+    )
     assert len(calls) == 1
     assert calls[0][1]["AccountId"] == "tenant-1"
 
 
 def test_create_order_missing_account_id_is_typeerror():
     from billing.cloudpayments_client import CloudPaymentsConfig, CloudPaymentsClient
+
     client = CloudPaymentsClient(
         CloudPaymentsConfig(public_id="p", api_secret="s", webhook_secret="wh")
     )
     with pytest.raises(TypeError):
         client.create_order(amount=100, currency="RUB", description="d")
-

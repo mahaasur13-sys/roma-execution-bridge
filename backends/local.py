@@ -1,4 +1,5 @@
 """Local backend — current simulation mode (no real execution)."""
+
 from __future__ import annotations
 
 import logging
@@ -21,7 +22,12 @@ class LocalBackend(BaseBackend):
         return True
 
     async def dispatch(self, ctx: JobContext) -> dict:
-        logger.info("local.dispatch job=%s tenant=%s task=%s", ctx.job_id, ctx.tenant_id, ctx.task[:60])
+        logger.info(
+            "local.dispatch job=%s tenant=%s task=%s",
+            ctx.job_id,
+            ctx.tenant_id,
+            ctx.task[:60],
+        )
         return {
             "backend": "local",
             "status": "queued",
@@ -35,9 +41,12 @@ class LocalBackend(BaseBackend):
     async def cancel_job(self, ctx: JobContext) -> dict:
         return {"status": "cancelled", "job_id": ctx.job_id, "backend": "local"}
 
-    async def run_command(self, ctx: JobContext, command: str, timeout: int = 600) -> dict:
+    async def run_command(
+        self, ctx: JobContext, command: str, timeout: int = 600
+    ) -> dict:
         """Выполняет команду локально (симуляция)."""
         import asyncio
+
         logger.info("local.run_command job=%s cmd=%.80s", ctx.job_id, command)
         # Симуляция выполнения
         await asyncio.sleep(0.5)

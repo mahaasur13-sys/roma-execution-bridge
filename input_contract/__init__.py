@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 class ROMAValidationError(Exception):
     """Raised when input fails validation."""
+
     def __init__(self, code: str, message: str, severity: str = "critical"):
         self.code = code
         self.message = message
@@ -30,15 +31,15 @@ class ValidationResult:
             "error": {
                 "code": self.code,
                 "message": self.message,
-                "severity": self.severity
-            }
+                "severity": self.severity,
+            },
         }
 
 
 class InputContractValidator:
     """
     STRICT validation layer — NEVER generates fallback tasks.
-    
+
     Input Contract Rules:
     1. Empty/whitespace-only input → REJECT
     2. Input must be meaningful task description
@@ -51,7 +52,7 @@ class InputContractValidator:
         code="USER_TASK_REQUIRED",
         message="Task input cannot be empty. Provide a valid task description.",
         severity="critical",
-        rejected_input=None
+        rejected_input=None,
     )
 
     REJECTED_TOO_SHORT = ValidationResult(
@@ -59,7 +60,7 @@ class InputContractValidator:
         code="USER_TASK_TOO_SHORT",
         message="Task description too short (minimum 3 characters).",
         severity="high",
-        rejected_input=None
+        rejected_input=None,
     )
 
     @classmethod
@@ -93,7 +94,7 @@ class InputContractValidator:
                 code="USER_TASK_DANGEROUS_PATTERN",
                 message=f"Dangerous pattern detected: {dangerous}. Task rejected.",
                 severity="high",
-                rejected_input=stripped[:50]
+                rejected_input=stripped[:50],
             )
 
         # VALID
@@ -102,7 +103,7 @@ class InputContractValidator:
             code="USER_TASK_VALID",
             message="Task accepted",
             severity="low",
-            rejected_input=None
+            rejected_input=None,
         )
 
     @classmethod
@@ -128,8 +129,6 @@ class InputContractValidator:
         result = cls.validate(user_task)
         if not result.valid:
             raise ROMAValidationError(
-                code=result.code,
-                message=result.message,
-                severity=result.severity
+                code=result.code, message=result.message, severity=result.severity
             )
         return user_task.strip()

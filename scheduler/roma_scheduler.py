@@ -22,7 +22,7 @@ ALLOWED_BINARIES = {"python", "python3"}
 
 class ROMAGPUScheduler:
     def __init__(self):
-        qm = QueueManager()
+        _qm = QueueManager()
         self.policy_engine = GPUPolicyEngineV2()
         self.gpu_connector = get_gpu_connector()
 
@@ -53,7 +53,7 @@ class ROMAGPUScheduler:
             gpu_required=gpu_required,
             plugin_type=job.get("plugin_type", "default"),
             tenant_tier=job.get("tenant_tier", "FREE"),
-            policy_engine=self.policy_engine
+            policy_engine=self.policy_engine,
         )
 
         # R5b: контракт EnterpriseDecisionGate.evaluate(tenant_id, payload) -> GateDecision;
@@ -64,10 +64,18 @@ class ROMAGPUScheduler:
             "plugin_type": job.get("plan_tier", "PRO"),
         }
         if self.cost_gate is None:
-            gate_decision, gate_allowed, gate_reason = "disabled", True, "cost gate disabled"
+            gate_decision, gate_allowed, gate_reason = (
+                "disabled",
+                True,
+                "cost gate disabled",
+            )
         else:
-            gate_result = self.cost_gate.evaluate(job.get("tenant_id", "default"), payload)
-            gate_decision = getattr(gate_result.result, "value", str(gate_result.result))
+            gate_result = self.cost_gate.evaluate(
+                job.get("tenant_id", "default"), payload
+            )
+            gate_decision = getattr(
+                gate_result.result, "value", str(gate_result.result)
+            )
             gate_allowed = gate_decision != GateResult.DENIED.value
             gate_reason = gate_result.reason
 
@@ -76,7 +84,7 @@ class ROMAGPUScheduler:
                 return {
                     "status": "rejected",
                     "reason": gate_reason,
-                    "estimated_cost": prediction.get("estimated_cost", 0)
+                    "estimated_cost": prediction.get("estimated_cost", 0),
                 }
             execution_target = "gpu_worker"
         else:
@@ -87,7 +95,7 @@ class ROMAGPUScheduler:
             "execution_target": execution_target,
             "job_id": job.get("job_id"),
             "estimated_cost": prediction.get("estimated_cost", 0),
-            "gate_decision": gate_decision
+            "gate_decision": gate_decision,
         }
 
     async def execute_job(self, job: dict) -> dict:
@@ -103,7 +111,7 @@ class ROMAGPUScheduler:
                 "gpu": job.get("gpu", "any"),
                 "memory": job.get("memory", "8GB"),
                 "timeout": job.get("timeout", 3600),
-                "environment": job.get("environment", {})
+                "environment": job.get("environment", {}),
             }
             result = await self.gpu_connector.execute(gpu_job)
             result["execution_target"] = "gpu_worker"
@@ -113,20 +121,30 @@ class ROMAGPUScheduler:
 
     def _execute_local(self, job: dict) -> dict:
         import subprocess
+
         try:
             command = job.get("command", "")
             argv = shlex.split(command) if command else []
             if not argv or os.path.basename(argv[0]) not in ALLOWED_BINARIES:
-                return {"status": "failed", "error": "command not allowed (allowlist: python/python3)",
-                        "execution_target": "local"}
+                return {
+                    "status": "failed",
+                    "error": "command not allowed (allowlist: python/python3)",
+                    "execution_target": "local",
+                }
             result = subprocess.run(
-                argv, shell=False, capture_output=True, text=True,
-                timeout=job.get("timeout", 300)
+                argv,
+                shell=False,
+                capture_output=True,
+                text=True,
+                timeout=job.get("timeout", 300),
             )
             return {
                 "status": "success" if result.returncode == 0 else "failed",
-                "stdout": result.stdout, "stderr": result.stderr,
-                "returncode": result.returncode, "execution_target": "local", "duration_seconds": 0
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "returncode": result.returncode,
+                "execution_target": "local",
+                "duration_seconds": 0,
             }
         except Exception as e:
             return {"status": "failed", "error": str(e), "execution_target": "local"}
@@ -137,7 +155,7 @@ class ROMAGPUScheduler:
             "gpu_available": self.gpu_connector.is_available(),
             "gpu_worker_count": self.gpu_connector.get_worker_count(),
             "gpu_metrics": self.gpu_connector.get_metrics(),
-            "policy_engine": self.policy_engine.get_status()
+            "policy_engine": self.policy_engine.get_status(),
         }
 
 
@@ -149,6 +167,7 @@ class ROMAJobExecutor:
 
     async def submit(self, job: dict) -> dict:
         import uuid
+
         job_id = job.get("job_id") or str(uuid.uuid4())
         job["job_id"] = job_id
         tenant_id = job.get("tenant_id", "unknown")
@@ -166,15 +185,21 @@ class ROMAJobExecutor:
             owner = self._job_ownership.get(job_id)
             if owner and owner != tenant_id:
                 import logging
+
                 logging.getLogger("roma.scheduler").warning(
                     "Tenant %s tried to access result of job %s owned by %s — denied",
-                    tenant_id, job_id, owner
+                    tenant_id,
+                    job_id,
+                    owner,
                 )
                 return None
         return self.results.get(job_id)
 
     def get_metrics(self) -> dict:
-        return {"results_tracked": len(self.results), "scheduler": self.scheduler.get_status()}
+        return {
+            "results_tracked": len(self.results),
+            "scheduler": self.scheduler.get_status(),
+        }
 
 
 _executor: Optional[ROMAJobExecutor] = None
@@ -188,6 +213,7 @@ def get_executor() -> ROMAJobExecutor:
 
 
 if __name__ == "__main__":
+
     async def demo():
         executor = get_executor()
         print("=== ROMA GPU Scheduler ===")
@@ -200,7 +226,7 @@ if __name__ == "__main__":
             "gpu_required": True,
             "memory": "8GB",
             "timeout": 30,
-            "tenant_tier": "PRO"
+            "tenant_tier": "PRO",
         }
 
         print("\n--- Submit GPU job ---")
@@ -215,7 +241,7 @@ if __name__ == "__main__":
             "task_type": "data_prep",
             "command": "echo 'Local execution'",
             "gpu_required": False,
-            "tenant_tier": "FREE"
+            "tenant_tier": "FREE",
         }
 
         print("\n--- Submit local job ---")
