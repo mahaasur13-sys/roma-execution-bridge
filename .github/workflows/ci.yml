@@ -37,6 +37,8 @@ jobs:
         run: python -m pytest tests/ -q -rs
       - name: Single-file parity gate (P1-C)
         run: bash ci/parity_check.sh
+      - name: Coverage ratchet gate (P1-D)
+        run: bash ci/coverage_gate.sh
 
   lint:
     runs-on: ubuntu-latest
