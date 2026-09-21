@@ -166,7 +166,9 @@ class PGConnectionManager:
         if self._pg_available is None:
             info["status"] = "uninitialized"; return info
         if not self._pg_available:
-            info["status"] = "unavailable"; return info
+            if not self._ensure_pool():
+                info["status"] = "unavailable"; return info
+            info["connected"] = True
         try:
             with self.get_connection("health") as conn:
                 cur = conn.cursor(); cur.execute("SELECT version()")
