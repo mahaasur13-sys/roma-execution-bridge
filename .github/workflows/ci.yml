@@ -23,6 +23,21 @@ jobs:
           echo "Compile OK"
       - name: Run tests
         run: python3 test_ci.py
+  pytest-suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install typer rich requests pyyaml plotly dash pytest pytest-cov psycopg2-binary prometheus-client fastapi httpx
+      - name: Full suite (honest counts, skip reasons shown)
+        run: python -m pytest tests/ -q -rs
+      - name: Single-file parity gate (P1-C)
+        run: bash ci/parity_check.sh
+
   lint:
     runs-on: ubuntu-latest
     steps:

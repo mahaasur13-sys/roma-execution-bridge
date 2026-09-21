@@ -73,20 +73,20 @@ def test_ledger_append_only_trigger():
     """UPDATE/DELETE по ledger_entries должны падать (триггер L3). Нужен PG_DSN."""
     import os
     if not os.environ.get("PG_DSN"):
-        pytest.skip("PG_DSN не задан — триггер проверяется вручную (psql)")
+        pytest.skip("PG_DSN не задан — триггер проверяется вручную (psql); issue: P1-C")
 
     from billing.pg_connection import get_pg_manager, PGUnavailableError
     mgr = get_pg_manager()
     try:
         ctx = mgr.get_connection("test_append_only")
     except PGUnavailableError:
-        pytest.skip("PG unavailable in this pytest process")
+        pytest.skip("PG unavailable in this pytest process; issue: P1-C")
     with ctx as conn:
         cur = conn.cursor()
         cur.execute("SELECT ledger_id FROM ledger_entries LIMIT 1")
         row = cur.fetchone()
         if not row:
-            pytest.skip("ledger_entries пуста — нет строки для триггера")
+            pytest.skip("ledger_entries пуста — нет строки для триггера; issue: P1-C")
         lid = row[0]
         with pytest.raises(Exception):
             cur.execute(
