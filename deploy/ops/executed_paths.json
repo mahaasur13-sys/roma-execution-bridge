@@ -17,5 +17,19 @@
       "severity": "critical",
       "why": "канал доставки алертов в Telegram; его отказ делает молчаливыми все остальные алерты"
     }
+  ],
+  "checks": [
+    {
+      "name": "grafana-barrier",
+      "type": "grafana_fail_closed",
+      "shim": "/usr/local/bin/grafana-server",
+      "shim_canon": "deploy/ops/grafana_server_shim.sh",
+      "sealed": "/home/workspace/.sealed/grafana-admin.txt",
+      "supervisor_conf": "/etc/zo/supervisord-user.conf",
+      "program": "astrofin-grafana",
+      "probe_url": "http://127.0.0.1:3000/api/login",
+      "why": "A4: без sealed-файла Grafana должна НЕ стартовать (exit 78). Проверяем shim, приоритет PATH, платформенный command и отсутствие дефолтного пароля",
+      "platform_sealed": "/root/.sealed/grafana-admin.txt"
+    }
   ]
 }
