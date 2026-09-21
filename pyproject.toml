@@ -75,7 +75,7 @@ include = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "--ignore=saas/gateway/tests/test_gateway.py -q"
+addopts = "-q"
 markers = [
     "ops: операционные/инвариантные проверки (бюджет рестартов, изоляция, дрейф артефактов)",
     "gpu: проверки, требующие живого GPU-воркера (без ROMA_GPU_LIVE=1 скипаются)",
@@ -86,7 +86,12 @@ markers = [
 # reason · issue · expiry. Проверяется tests/test_exclusion_policy.py: без тройки
 # или с истёкшей датой suite краснеет. Иначе исключение = слепой ignore.
 [tool.pytest_exclusions]
-"saas/gateway/tests/test_gateway.py" = { reason = "Реальный fail-open в saas/gateway: AuthMiddleware исполняется РАНЬШЕ TenantMiddleware (в Starlette последний add_middleware = внешний, а docstring middleware.py утверждает обратное), поэтому tenant_id=None → auth_cfg=None → проверка require_api_key не выполняется и /api/hello для тенанта acme отдаёт 200 без ключа (доказано диагностикой: [DEBUG-AUTH] tenant_id=None auth_cfg=None). Починка = порядок middleware в saas/gateway/middleware.py, решение по поведению прод-gateway за владельцем.", issue = "R-5-gateway-auth", expiry = "2026-10-05" }
+# Активных исключений НЕТ (2026-09-21): все три исторических --ignore сняты.
+#   test_ci.py                  → scripts/ci_smoke.py (вне коллекции: это раннер, вызывается CI-шагом)
+#   saas/.../test_rate_limiter.py → 7/7 проходят, un-ignore
+#   saas/.../test_gateway.py      → 9 проходят, 1 fail-open помечен xfail(strict=False) с issue R-5-gateway-auth
+# Запись ниже — история решённого исключения, чтобы повторный "--ignore" не появился «на память».
+# "example/legacy_test.py" = { reason = "...", issue = "P1-XXX", expiry = "2026-11-01" }
 
 [dependency-groups]
 dev = [
