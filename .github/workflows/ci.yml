@@ -82,7 +82,11 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install ruff
-        run: pip install ruff
+        # G-TOOL-PIN: точный пин версии. Без него CI получал свежий ruff
+        # (0.16.8: 1286 замечаний на неизменном дереве, run 35697239211) —
+        # «зелёный lint» зависел от даты запуска, а не от содержимого коммита.
+        # Версия ниже — та, на которой дерево зелёное на ноде (ruff 0.15.20).
+        run: pip install ruff==0.15.20
       - name: Lint
         run: ruff check . --output-format=concise
 
