@@ -115,15 +115,18 @@ jobs:
             cosign sign --yes "$TAG"
           done
 
-      - name: Upload attestation bundle (SLSA provenance)
-        if: github.event_name != 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
-        with:
-          name: cosign-attestations
-          path: |
-            ~/.cosign/.attestation
-          retention-days: 30
-          if-no-files-found: ignore
+      # G-COSIGN-BUNDLE-NOOP (2026-09-22) — здесь стоял шаг «Upload attestation
+      # bundle (SLSA provenance)» (actions/upload-artifact@v4, path
+      # ~/.cosign/.attestation, if-no-files-found: ignore). Пути не существовало
+      # ни разу: прогон 35769398021 — «No files were found with the provided
+      # path: ~/.cosign/.attestation. No artifacts will be uploaded.»
+      # Аттестация — артефакт РЕЕСТРА, не локальный файл: cosign attest
+      # публикует DSSE-конверт в тот же GHCR-репозиторий (referring artifact)
+      # и записывает вход в Rekor tlog; у cosign v2.4.1 нет флага локального
+      # вывода бандла (doc/cosign_attest.md тега v2.4.1: --predicate, --type,
+      # --no-upload; --output-* отсутствует). Шаг давал «success без файла»
+      # и вводил в заблуждение; рождается бандл в job `attest`, там и живёт
+      # его доказательство — `cosign verify-attestation` из реестра.
 
       - name: Verify signatures exist
         run: |
