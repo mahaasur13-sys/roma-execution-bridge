@@ -28,7 +28,6 @@ import pytest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 LEASE_PY = REPO_ROOT / "deploy" / "ops" / "lease.py"
-REAL_SESSIONS = pathlib.Path("/home/workspace/artifacts/.sessions")
 
 
 def load_lease_module():
@@ -252,14 +251,21 @@ def test_cli_guard_exits_3_on_collision(tmp_path: pathlib.Path) -> None:
     assert lease.main(["guard", "--artifacts-dir", str(tmp_path)]) == 0
 
 
-def test_real_sessions_dir_has_at_most_one_fresh_marker() -> None:
-    """Интеграционная проверка реального каталога: живой писатель должен быть один."""
-    if not REAL_SESSIONS.is_dir():
-        pytest.skip(
-            "issue: A-0 · expiry: 2026-12-31 · нет каталога .sessions — проверка неприменима"
-        )
-    fresh = lease.fresh_markers(REAL_SESSIONS, 15)
+def test_lease_sessions_dir_has_at_most_one_fresh_marker(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Свой каталог сессий вместо нодового .sessions: проверка обязана исполняться
+    и на ноде, и в CI (нодовые артефакты — не часть доказательства).
+
+    Свидетельство то же, что и раньше: живой писатель в каталоге ровно один —
+    единственный свежий маркер; протухший (40 минут) в счёт не идёт.
+    """
+    sessions = tmp_path / ".sessions"
+    write_marker_file(sessions, "instance-live", lease.iso())
+    write_marker_file(sessions, "instance-stale", iso_minutes_ago(40))
+    fresh = lease.fresh_markers(sessions, 15)
     assert len(fresh) <= 1, f"свежих маркеров больше одного: {sorted(fresh)}"
+    assert set(fresh) == {"instance-live"}, f"свежий маркер подменён: {sorted(fresh)}"
 
 
 @pytest.mark.parametrize(
