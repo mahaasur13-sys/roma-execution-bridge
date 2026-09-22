@@ -33,9 +33,7 @@ pytestmark = pytest.mark.ops
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 GATE = REPO_ROOT / "ci" / "coverage_gate.sh"
 THRESHOLDS = REPO_ROOT / ".ci" / "coverage-thresholds.json"
-CANON = json.loads(
-    (REPO_ROOT / ".ci" / "run-completeness.json").read_text(encoding="utf-8")
-)["canon"]
+MANIFEST = REPO_ROOT / ".ci" / "run-completeness.json"
 
 PRODUCT_MARGIN = 0.02  # «чуть ниже» пола продукта, п.п.
 MONEY_MARGIN = 0.05  # «чуть ниже» денежного пола, п.п.
@@ -45,18 +43,45 @@ def _thresholds() -> dict:
     return json.loads(THRESHOLDS.read_text(encoding="utf-8"))
 
 
+def _profile() -> dict:
+    """G-CANON-ENV-PARITY: ожидания полноты — из профиля среды, а не из чисел чужой машины.
+
+    Нода и раннер различаются свидетельством: на раннере нет платформенного
+    promtail-конфига, поэтому контроль R6-live — осознанный admission CI-профиля.
+    """
+    data = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    in_ci = any(
+        (os.environ.get(var) or "").strip().lower() not in ("", "0", "false", "no")
+        for var in ("CI", "GITHUB_ACTIONS")
+    )
+    return data["profiles"]["ci" if in_ci else "node"]
+
+
 def _write_junit(path: pathlib.Path) -> pathlib.Path:
-    """Синтетический junitxml, совпадающий с каноном полноты (иначе негатив уедет в A-6)."""
-    cases = []
-    for index in range(CANON["collected"]):
-        outcome = '<skipped message="synthetic" />' if index < CANON["skipped"] else ""
-        cases.append(
-            f'<testcase classname="synthetic.Case" name="test_{index}">{outcome}</testcase>'
+    """Синтетический junitxml, совпадающий с профилем полноты среды (иначе негатив уедет в A-6).
+
+    Скипы здесь ИМЕНОВАННЫЕ: счётчика мало — профиль сверяет осознанные скипы поимённо.
+    """
+    profile = _profile()
+    cases: list[str] = [
+        f'<testcase classname="synthetic.Case" name="test_{index}" />'
+        for index in range(profile["passed"])
+    ]
+    for entry in profile["named_admissions"]:
+        classname, name = entry["test"].split("::")
+        node_class = classname[:-3].replace("/", ".")
+        message = (
+            f"issue: {entry['issue']} · expiry: {entry['expiry']} · {entry['symptom']}"
         )
+        cases.append(
+            f'<testcase classname="{node_class}" name="{name}">'
+            f'<skipped message="{message}" /></testcase>'
+        )
+    skipped = profile["admission_skips"]
     path.write_text(
         '<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests">'
-        f'<testsuite name="pytest" errors="0" failures="0" skipped="{CANON["skipped"]}" '
-        f'tests="{CANON["collected"]}" time="0.0">{"".join(cases)}</testsuite></testsuites>',
+        f'<testsuite name="pytest" errors="0" failures="0" skipped="{skipped}" '
+        f'tests="{len(cases)}" time="0.0">{"".join(cases)}</testsuite></testsuites>',
         encoding="utf-8",
     )
     return path

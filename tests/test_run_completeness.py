@@ -92,19 +92,122 @@ def _run_checker(
     return subprocess.run(cmd, capture_output=True, text=True, cwd=REPO_ROOT)
 
 
-def test_checker_accepts_run_matching_canon(tmp_path: pathlib.Path) -> None:
-    canon = _canon()
-    junit = _write_junit(
-        tmp_path / "canon.xml",
-        passed=canon["passed"],
-        failures=canon["failures"],
-        errors=canon["errors"],
-        skipped=canon["skipped"],
+def _in_ci() -> bool:
+    """Признак среды — те же переменные, что видит проверка (своих флагов не вводим)."""
+    for var in ("CI", "GITHUB_ACTIONS"):
+        raw = (os.environ.get(var) or "").strip().lower()
+        if raw and raw not in ("0", "false", "no"):
+            return True
+    return False
+
+
+def _profile() -> dict:
+    """Профиль среды из канона: ожидания объявлены поимённо, а не наследуются машиной."""
+    profiles = json.loads(MANIFEST.read_text(encoding="utf-8"))["profiles"]
+    return profiles["ci" if _in_ci() else "node"]
+
+
+def _write_named_junit(
+    path: pathlib.Path,
+    profile: dict,
+    *,
+    drop: str | None = None,
+    extra: str | None = None,
+) -> pathlib.Path:
+    """Синтетический junit в форме профиля: passed + ПОИМЁННЫЕ admission-скипы."""
+    entries = [
+        entry["test"] for entry in profile["named_admissions"] if entry["test"] != drop
+    ]
+    if extra is not None:
+        entries.append(extra)
+    cases = [
+        f'<testcase classname="synthetic.Case" name="test_{index}" />'
+        for index in range(profile["passed"])
+    ]
+    for entry in entries:
+        module, name = entry.split("::")
+        classname = module[:-3].replace("/", ".")
+        cases.append(
+            f'<testcase classname="{classname}" name="{name}">'
+            '<skipped message="issue: T-1 · expiry: 2026-12-31 · синтетика профиля" />'
+            "</testcase>"
+        )
+    path.write_text(
+        '<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests">'
+        f'<testsuite name="pytest" errors="0" failures="0" '
+        f'skipped="{len(entries)}" tests="{len(cases)}" time="0.0">'
+        f'{"".join(cases)}</testsuite></testsuites>',
+        encoding="utf-8",
     )
+    return path
+
+
+def test_checker_accepts_run_matching_profile(tmp_path: pathlib.Path) -> None:
+    """G-CANON-ENV-PARITY, позитив: числа профиля среды + поимённые admission → зелёный.
+
+    Печать обязана показывать профиль: собранное = passed профиля + admission профиля.
+    """
+    profile = _profile()
+    junit = _write_named_junit(tmp_path / "profile.xml", profile)
     result = _run_checker(junit=junit)
     assert result.returncode == 0, result.stderr
     assert "RUN COMPLETENESS: PASSED" in result.stdout
     assert f"CANON         : {MANIFEST}" in result.stdout
+    assert f"({profile['label']} profile)" in result.stdout, result.stdout
+    assert (
+        f"{_canon()['collected']} = {profile['passed']} + {profile['admission_skips']}"
+        in result.stdout
+    ), result.stdout
+
+
+def test_checker_fails_closed_on_unknown_environment(tmp_path: pathlib.Path) -> None:
+    """G-CANON-ENV-PARITY, негатив 1: чужой профиль вместо своего → отказ (fail-closed).
+
+    «Зелёный» не имеет права опираться на числа другой машины: если профиля под текущие
+    признаки среды в каноне нет, проверка обязана отказать, а не подставить чужие ожидания.
+    """
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    foreign = "ci" if not _in_ci() else "node"
+    manifest["profiles"] = {"foreign": manifest["profiles"][foreign]}
+    path = tmp_path / "foreign-profile.json"
+    path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    junit = _write_named_junit(tmp_path / "profile.xml", _profile())
+    result = _run_checker(junit=junit, manifest=path)
+    assert result.returncode != 0
+    assert "не объявлена в профилях" in result.stderr, result.stderr
+
+
+def test_checker_rejects_unnamed_admission(tmp_path: pathlib.Path) -> None:
+    """G-CANON-ENV-PARITY, негатив 2: скип без поимённой записи → отказ.
+
+    Счётчик admission слеп к подмене одного осознанного скипа другим: сверка обязана
+    быть поимённой, иначе «класс скипов не изменился» ничего не значит.
+    """
+    junit = _write_named_junit(
+        tmp_path / "unnamed.xml",
+        _profile(),
+        extra="tests/test_synthetic.py::test_not_declared",
+    )
+    result = _run_checker(junit=junit)
+    assert result.returncode != 0
+    assert "admission без поимённой записи" in result.stderr, result.stderr
+
+
+def test_checker_rejects_missing_declared_admission(tmp_path: pathlib.Path) -> None:
+    """G-CANON-ENV-PARITY, негатив 3: объявленный admission не наблюдался → отказ.
+
+    Обратная сторона поимённой сверки: исчезновение осознанного скипа (свидетельство
+    сузилось) тоже обязано ронять проверку, а не проходить молча.
+    """
+    profile = _profile()
+    junit = _write_named_junit(
+        tmp_path / "missing.xml",
+        profile,
+        drop=profile["named_admissions"][0]["test"],
+    )
+    result = _run_checker(junit=junit)
+    assert result.returncode != 0
+    assert "предписанный профилем" in result.stderr, result.stderr
 
 
 def test_checker_rejects_legacy_threshold_run(tmp_path: pathlib.Path) -> None:

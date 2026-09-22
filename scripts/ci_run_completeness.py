@@ -25,6 +25,14 @@ G-CI-PG-CANON: скипы делятся на ДВА класса, различ�
 Различение — по маркеру `env-skip:` в причине скипа (`ENV_SKIP_MARKER`, тот же
 литерал объявлен в `tests/conftest.py`; совпадение проверяет политика исключений).
 
+G-CANON-ENV-PARITY: ожидания по среде объявлены ЯВНО (`profiles` в манифесте):
+плоский канон был нода-относителен, и в CI (где часть проверок исполняется, а часть
+не может — нет платформенных артефактов раннера) он краснел контрактно, а не по делу.
+Профиль берётся из окружения (`CI`/`GITHUB_ACTIONS` → `ci`, иначе `node`); среда, которой
+нет в манифесте, — отказ (fail-closed). Admission-скипы обязаны быть записаны ПОИМЁННО
+(`named_admissions`, тройка: класс · симптом · issue/expiry): скип без поимённой записи
+или предписанная запись, которой не было, — отказ, а не «счётчик совпал».
+
 Режим `--mode narrow` (локальный/негативный прогон) печатает, что канон НЕ применяется,
 но расхождения declared/recorded/outcomes проверяет так же — сужение области прогона
 не должно быть молчаливым даже там.
@@ -52,6 +60,9 @@ REQUIRED_KEYS = ("collected", "passed", "failures", "errors", "skipped")
 # Литерал ОБЯЗАН совпадать с ENV_SKIP_MARKER в tests/conftest.py (проверяет политика).
 ENV_SKIP_MARKER = "env-skip:pg-unavailable"
 CI_ENV_VARS = ("CI", "GITHUB_ACTIONS")
+# G-CANON-ENV-PARITY: профиль среды + поимённый реестр admission-скипов.
+PROFILE_KEYS = ("passed", "admission_skips", "env_skips_max", "named_admissions")
+ADMISSION_KEYS = ("test", "class", "symptom", "issue", "expiry")
 
 
 def ci_mode() -> bool:
@@ -97,7 +108,74 @@ def load_manifest(path: pathlib.Path) -> tuple[dict, str]:
                 f"манифест {path}: canon['{key}'] не целое число: {value!r} "
                 "(класс скипов обязан быть объявлен явно — fail-closed)"
             )
+    profiles = data.get("profiles")
+    if not isinstance(profiles, dict) or not profiles:
+        raise CompletenessError(
+            f"манифест {path}: нет объекта 'profiles' — ожидания по среде обязаны быть "
+            "объявлены явно (неизвестная среда = отказ, fail-closed)"
+        )
+    for env_name, profile in profiles.items():
+        if not isinstance(profile, dict):
+            raise CompletenessError(
+                f"манифест {path}: profiles['{env_name}'] не объект: {profile!r}"
+            )
+        for key in PROFILE_KEYS:
+            if key == "named_admissions":
+                continue
+            value = profile.get(key)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise CompletenessError(
+                    f"манифест {path}: profiles['{env_name}']['{key}'] не целое число: {value!r}"
+                )
+        admissions = profile.get("named_admissions")
+        if not isinstance(admissions, list):
+            raise CompletenessError(
+                f"манифест {path}: profiles['{env_name}']['named_admissions'] не список — "
+                "поимённый реестр admission-скипов обязателен (счётчик без имён слеп)"
+            )
+        if len(admissions) != profile["admission_skips"]:
+            raise CompletenessError(
+                f"манифест {path}: profiles['{env_name}']: реестр {len(admissions)} != "
+                f"admission_skips {profile['admission_skips']} (счётчик и реестр обязаны совпадать)"
+            )
+        for entry in admissions:
+            if not isinstance(entry, dict) or any(
+                not isinstance(entry.get(key), str) or not entry.get(key)
+                for key in ADMISSION_KEYS
+            ):
+                raise CompletenessError(
+                    f"манифест {path}: profiles['{env_name}']: запись admission без полной "
+                    f"тройки {ADMISSION_KEYS}: {entry!r}"
+                )
     return data, hashlib.sha256(raw).hexdigest()
+
+
+def resolve_profile(data: dict, path: pathlib.Path) -> tuple[str, dict]:
+    """G-CANON-ENV-PARITY: ожидания — из объявленного профиля среды, не из догадки.
+
+    Неизвестная среда (нет профиля под текущие CI/локальные признаки) → отказ:
+    «зелёный» не имеет права опираться на числа чужой машины.
+    """
+    env_name = "ci" if ci_mode() else "node"
+    profiles = data.get("profiles") or {}
+    profile = profiles.get(env_name)
+    if not isinstance(profile, dict):
+        raise CompletenessError(
+            f"среда '{env_name}' не объявлена в профилях {path} — неизвестная среда: "
+            f"fail-closed (объявлены: {sorted(profiles)})"
+        )
+    # Ярлык объявлен манифестом (печать профиля читаема из лога и из файла).
+    profile["label"] = str(
+        profile.get("label") or ("CI" if env_name == "ci" else env_name)
+    )
+    return env_name, profile
+
+
+def case_id_of(case: ET.Element) -> str:
+    """Идентификатор теста в форме pytest-nodeid: tests/pkg/test_mod.py::test_name."""
+    classname = (case.get("classname") or "").replace(".", "/")
+    name = case.get("name") or ""
+    return f"{classname}.py::{name}" if classname else name
 
 
 def parse_junit(path: pathlib.Path) -> tuple[int, dict]:
@@ -125,6 +203,8 @@ def parse_junit(path: pathlib.Path) -> tuple[int, dict]:
     outcomes = {"passed": 0, "failures": 0, "errors": 0, "skipped": 0}
     env_skips = 0
     recorded = 0
+    skipped_ids: list[str] = []
+    env_skipped_ids: list[str] = []
     for suite in suites:
         for case in suite.iter("testcase"):
             recorded += 1
@@ -134,13 +214,18 @@ def parse_junit(path: pathlib.Path) -> tuple[int, dict]:
                 outcomes["errors"] += 1
             elif case.find("skipped") is not None:
                 outcomes["skipped"] += 1
+                skipped_id = case_id_of(case)
+                skipped_ids.append(skipped_id)
                 message = case.find("skipped").get("message") or ""
                 if ENV_SKIP_MARKER in message:
                     env_skips += 1
+                    env_skipped_ids.append(skipped_id)
             else:
                 outcomes["passed"] += 1
     outcomes["env_skips"] = env_skips
     outcomes["admission_skips"] = outcomes["skipped"] - env_skips
+    outcomes["skipped_ids"] = skipped_ids
+    outcomes["env_skipped_ids"] = env_skipped_ids
     return declared, outcomes | {"recorded": recorded}
 
 
@@ -153,7 +238,10 @@ def print_block(
     canon: dict,
     canon_path: pathlib.Path,
     canon_sha: str,
+    profile_env: str,
+    profile: dict,
 ) -> None:
+    env_label = profile["label"]
     executed = sum(observed[k] for k in ("passed", "failures", "errors", "skipped"))
     print("=== RUN COMPLETENESS (A-6: collected == executed) ===")
     print(f"JUNIT         : {junit}")
@@ -176,6 +264,15 @@ def print_block(
         f"env-skip={observed['env_skips']} "
         f"(CI: {'yes' if ci_mode() else 'no'} · в CI env-skip обязан быть 0)"
     )
+    print(
+        f"PROFILE       : {env_label} "
+        f"(passed {profile['passed']} · admission {profile['admission_skips']} · "
+        f"env-skip max {profile['env_skips_max']})"
+    )
+    print(
+        f"             {declared} = {profile['passed']} + {profile['admission_skips']} "
+        f"({env_label} profile)"
+    )
     print(f"RUN MODE      : {mode}")
     if mode == "narrow":
         print(
@@ -192,6 +289,7 @@ def check(
 ) -> int:
     canon_data, canon_sha = load_manifest(manifest)
     canon = canon_data["canon"]
+    profile_env, profile = resolve_profile(canon_data, manifest)
     declared, observed = parse_junit(junit)
     print_block(
         junit=junit,
@@ -201,6 +299,8 @@ def check(
         canon=canon,
         canon_path=manifest,
         canon_sha=canon_sha,
+        profile_env=profile_env,
+        profile=profile,
     )
 
     problems: list[str] = []
@@ -229,12 +329,14 @@ def check(
         # Поэтому ожидание считается С УЧЁТОМ класса, а не сравнением с сырым каноном;
         # число env-скипов отдельно ограничено (CI: 0; локально: 0 или env_skips_expected).
         env_skips = observed["env_skips"]
+        env_label = profile["label"]
+        # G-CANON-ENV-PARITY: ожидание — из профиля среды (collected общий: набор один).
         expected = {
             "collected": canon["collected"],
-            "passed": canon["passed"] - env_skips,
+            "passed": profile["passed"] - env_skips,
             "failures": canon["failures"],
             "errors": canon["errors"],
-            "skipped": canon["skipped"] + env_skips,
+            "skipped": profile["admission_skips"] + env_skips,
         }
         for key in REQUIRED_KEYS:
             if actual[key] != expected[key]:
@@ -244,15 +346,39 @@ def check(
                         f"с учётом env-skip={env_skips} (набор изменился — обнови "
                         f"{manifest.name} явным диффом)"
                     )
-                else:
+                elif key == "collected":
                     problems.append(
                         f"{key}: {actual[key]} != канон {canon[key]} "
                         f"(набор изменился — обнови {manifest.name} явным диффом)"
                     )
-        if observed["admission_skips"] != canon["admission_skips"]:
+                else:
+                    problems.append(
+                        f"{key}: {actual[key]} != ожидание профиля {env_label} "
+                        f"{expected[key]} (канон {canon[key]}) — набор изменился, "
+                        f"обнови {manifest.name} явным диффом"
+                    )
+        if observed["admission_skips"] != profile["admission_skips"]:
             problems.append(
-                f"admission-скипы: {observed['admission_skips']} != канон "
-                f"{canon['admission_skips']} (изменился класс осознанных скипов)"
+                f"admission-скипы: {observed['admission_skips']} != профиль {profile_env} "
+                f"{profile['admission_skips']} (изменился класс осознанных скипов)"
+            )
+        # Поимённая сверка: счётчик без имён слеп к подмене одного осознанного скипа другим.
+        named = {entry["test"]: entry for entry in profile["named_admissions"]}
+        env_skip_ids = set(observed["env_skipped_ids"])
+        admission_ids = [
+            cid for cid in observed["skipped_ids"] if cid not in env_skip_ids
+        ]
+        unnamed = sorted(set(admission_ids) - set(named))
+        if unnamed:
+            problems.append(
+                f"admission без поимённой записи в профиле {profile_env}: {unnamed} "
+                "(класс скипа обязан быть объявлен поимённо с тройкой класс·симптом·срок)"
+            )
+        missed = sorted(set(named) - set(admission_ids))
+        if missed:
+            problems.append(
+                f"предписанный профилем {profile_env} admission не наблюдался: {missed} "
+                "(свидетельство сузилось — сверка поимённая, не только счётчиком)"
             )
         if ci_mode():
             if env_skips:
@@ -260,10 +386,10 @@ def check(
                     f"в CI env-skip={env_skips} (обязано быть 0): PG-проверки не исполнены — "
                     "CI обязан поднять реальный PostgreSQL (G-CI-PG-CANON)"
                 )
-        elif env_skips not in (0, canon["env_skips_expected"]):
+        elif env_skips not in (0, profile["env_skips_max"]):
             problems.append(
                 f"env-skip={env_skips}: локально допустимо только 0 или "
-                f"{canon['env_skips_expected']} (частично неисполненный PG-набор — это "
+                f"{profile['env_skips_max']} (частично неисполненный PG-набор — это "
                 "не норма, а расхождение)"
             )
 
