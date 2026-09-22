@@ -8,13 +8,17 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Install operator dependencies
+# G-COSIGN-OPERATOR-PIN: список пинов приведён к тому, что оператор действительно
+# импортирует (kopf, kubernetes). Пакета cert-manager==1.14.4 в PyPI нет — 1.14.4
+# это версия helm-трека cert-manager (пространства версий не совпадают; PyPI-трек
+# python-пакета: 1.0.0...4.0.0). Сам python-пакет controller не импортирует:
+# сертификаты создаются через kubernetes.client.CustomObjectsApi (API cert-manager.io/v1),
+# а необязательный `cert_manager_client` берётся в try/except с рабочим фолбэком.
+# asyncio и logging — стандартная библиотека, из PyPI не ставятся.
 COPY pyproject.toml .
 RUN pip install --no-cache-dir \
     kopf==1.37.2 \
-    kubernetes==31.0.0 \
-    cert-manager==1.14.4 \
-    asyncio \
-    logging
+    kubernetes==31.0.0
 
 COPY config/crd/controller/operator.py .
 
