@@ -1185,15 +1185,18 @@ async def _update_job_status_pg(job_id, status, completed_at, error, tenant_id=N
                 params.append(error)
             if tenant_id is not None:
                 params.extend([job_id, tenant_id])
+                # B608-safe: SET/WHERE-фрагменты — внутренние литералы, значения — bound params (issue: G-SEC-SCAN/B608).
                 cur.execute(
-                    f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = %s AND tenant_id = %s",
+                    f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = %s AND tenant_id = %s",  # nosec B608
                     params,
-                )  # nosec B608 — SQL fragments are internal literals; all values are bound params
+                )
             else:
                 params.append(job_id)
+                # B608-safe: SET/WHERE-фрагменты — внутренние литералы, значения — bound params (issue: G-SEC-SCAN/B608).
                 cur.execute(
-                    f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = %s", params
-                )  # nosec B608 — SQL fragments are internal literals; all values are bound params
+                    f"UPDATE execution_jobs SET {', '.join(sets)} WHERE id = %s",  # nosec B608
+                    params,
+                )
         conn.commit()
     finally:
         _pg_return(conn)
@@ -1215,15 +1218,18 @@ def _update_job_status_sqlite(job_id, status, completed_at, error, tenant_id=Non
             params.append(error)
         if tenant_id is not None:
             params.extend([job_id, tenant_id])
+            # B608-safe: SET/WHERE-фрагменты — внутренние литералы, значения — bound params (issue: G-SEC-SCAN/B608).
             c.execute(
-                f"UPDATE execution_jobs SET {sets} WHERE id = ? AND tenant_id = ?",
+                f"UPDATE execution_jobs SET {sets} WHERE id = ? AND tenant_id = ?",  # nosec B608
                 params,
-            )  # nosec B608 — SQL fragments are internal literals; all values are bound params
+            )
         else:
             params.append(job_id)
+            # B608-safe: SET/WHERE-фрагменты — внутренние литералы, значения — bound params (issue: G-SEC-SCAN/B608).
             c.execute(
-                f"UPDATE execution_jobs SET {sets} WHERE id = ?", params
-            )  # nosec B608 — SQL fragments are internal literals; all values are bound params
+                f"UPDATE execution_jobs SET {sets} WHERE id = ?",  # nosec B608
+                params,
+            )
         c.commit()
     finally:
         c.close()
@@ -1902,9 +1908,11 @@ async def _update_execution_job_pg(
                     )
                     extra.extend(list(if_status_not_in))
                 params.extend(extra)
+                # B608-safe: SET/WHERE-фрагменты — внутренние литералы, значения — bound params (issue: G-SEC-SCAN/B608).
                 cur.execute(
-                    f"UPDATE execution_jobs SET {', '.join(sets)} WHERE {where}", params
-                )  # nosec B608 — SQL fragments are internal literals; all values are bound params
+                    f"UPDATE execution_jobs SET {', '.join(sets)} WHERE {where}",  # nosec B608
+                    params,
+                )
                 n = cur.rowcount
         conn.commit()
         return n
@@ -1969,9 +1977,11 @@ def _update_execution_job_sqlite(
             params.extend(extra)
             cur = c.cursor()
             try:
+                # B608-safe: SET/WHERE-фрагменты — внутренние литералы, значения — bound params (issue: G-SEC-SCAN/B608).
                 cur.execute(
-                    f"UPDATE execution_jobs SET {', '.join(sets)} WHERE {where}", params
-                )  # nosec B608 — SQL fragments are internal literals; all values are bound params
+                    f"UPDATE execution_jobs SET {', '.join(sets)} WHERE {where}",  # nosec B608
+                    params,
+                )
                 n = cur.rowcount
             finally:
                 cur.close()
@@ -2090,13 +2100,15 @@ async def _list_decision_records_pg(
                 where.append("decided_at <= %s")
                 params.append(date_to)
             where_clause = " AND ".join(where)
+            # B608-safe: SET/WHERE-фрагменты — внутренние литералы, значения — bound params (issue: G-SEC-SCAN/B608).
             cur.execute(
-                f"SELECT COUNT(*) FROM decision_records WHERE {where_clause}",
-                params,  # nosec B608 — SQL fragments are internal literals; all values are bound params
+                f"SELECT COUNT(*) FROM decision_records WHERE {where_clause}",  # nosec B608
+                params,
             )
             total = cur.fetchone()[0]
+            # B608-safe: SET/WHERE-фрагменты — внутренние литералы, значения — bound params (issue: G-SEC-SCAN/B608).
             cur.execute(
-                f"SELECT * FROM decision_records WHERE {where_clause} ORDER BY decided_at DESC LIMIT %s OFFSET %s",  # nosec B608 — SQL fragments are internal literals; all values are bound params
+                f"SELECT * FROM decision_records WHERE {where_clause} ORDER BY decided_at DESC LIMIT %s OFFSET %s",  # nosec B608
                 params + [limit, offset],
             )
             cols = [desc[0] for desc in cur.description]
@@ -2129,13 +2141,14 @@ def _list_decision_records_sqlite(tenant_id, result, date_from, date_to, limit, 
             where.append("decided_at <= ?")
             params.append(date_to)
         where_clause = " AND ".join(where)
+        # B608-safe: SET/WHERE-фрагменты — внутренние литералы, значения — bound params (issue: G-SEC-SCAN/B608).
+        # B608-safe: SET/WHERE-фрагменты — внутренние литералы, значения — bound params (issue: G-SEC-SCAN/B608).
         total = c.execute(
-            f"SELECT COUNT(*) FROM decision_records WHERE {where_clause}", params
-        ).fetchone()[
-            0
-        ]  # nosec B608 — SQL fragments are internal literals; all values are bound params
+            f"SELECT COUNT(*) FROM decision_records WHERE {where_clause}",  # nosec B608
+            params,
+        ).fetchone()[0]
         rows = c.execute(
-            f"SELECT * FROM decision_records WHERE {where_clause} ORDER BY decided_at DESC LIMIT ? OFFSET ?",  # nosec B608 — SQL fragments are internal literals; all values are bound params
+            f"SELECT * FROM decision_records WHERE {where_clause} ORDER BY decided_at DESC LIMIT ? OFFSET ?",  # nosec B608
             params + [limit, offset],
         ).fetchall()
         return ([dict(r) for r in rows], total)
@@ -2305,12 +2318,15 @@ def list_decision_records(
                         params.append(date_to)
 
                     where = " AND ".join(clauses)
+                    # B608-safe: SET/WHERE-фрагменты — внутренние литералы, значения — bound params (issue: G-SEC-SCAN/B608).
                     cur.execute(
-                        f"SELECT COUNT(*) FROM decision_records WHERE {where}", params
-                    )  # nosec B608 — SQL fragments are internal literals; all values are bound params
+                        f"SELECT COUNT(*) FROM decision_records WHERE {where}",  # nosec B608
+                        params,
+                    )
                     total = cur.fetchone()[0]
+                    # B608-safe: SET/WHERE-фрагменты — внутренние литералы, значения — bound params (issue: G-SEC-SCAN/B608).
                     cur.execute(
-                        f"SELECT id, request_id, gate_result, gate_reason, estimated_cost, quota_remaining, decided_at FROM decision_records WHERE {where} ORDER BY decided_at DESC LIMIT %s OFFSET %s",  # nosec B608 — SQL fragments are internal literals; all values are bound params
+                        f"SELECT id, request_id, gate_result, gate_reason, estimated_cost, quota_remaining, decided_at FROM decision_records WHERE {where} ORDER BY decided_at DESC LIMIT %s OFFSET %s",  # nosec B608
                         params + [limit, offset],
                     )
                     rows = [
@@ -2345,13 +2361,14 @@ def list_decision_records(
                 clauses.append("decided_at <= ?")
                 params.append(date_to)
             where = " AND ".join(clauses)
+            # B608-safe: SET/WHERE-фрагменты — внутренние литералы, значения — bound params (issue: G-SEC-SCAN/B608).
+            # B608-safe: SET/WHERE-фрагменты — внутренние литералы, значения — bound params (issue: G-SEC-SCAN/B608).
             total = c.execute(
-                f"SELECT COUNT(*) FROM decision_records WHERE {where}", params
-            ).fetchone()[
-                0
-            ]  # nosec B608 — SQL fragments are internal literals; all values are bound params
+                f"SELECT COUNT(*) FROM decision_records WHERE {where}",  # nosec B608
+                params,
+            ).fetchone()[0]
             rows = c.execute(
-                f"SELECT id, request_id, gate_result, gate_reason, estimated_cost, quota_remaining, decided_at FROM decision_records WHERE {where} ORDER BY decided_at DESC LIMIT ? OFFSET ?",  # nosec B608 — SQL fragments are internal literals; all values are bound params
+                f"SELECT id, request_id, gate_result, gate_reason, estimated_cost, quota_remaining, decided_at FROM decision_records WHERE {where} ORDER BY decided_at DESC LIMIT ? OFFSET ?",  # nosec B608
                 params + [limit, offset],
             ).fetchall()
             return [
