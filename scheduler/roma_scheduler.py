@@ -11,7 +11,7 @@ from typing import Optional
 from scheduler.gpu_policy_engine_v2 import GPUPolicyEngineV2
 from gpu_worker.connector import get_gpu_connector
 from cost.gate import EnterpriseDecisionGate as DecisionGate, GateResult
-from cost.predictor import CostPredictor
+from cost.predictor import CostPredictor, UNKNOWN_TENANT
 from queue_manager.queue_manager import QueueManager
 
 logger = logging.getLogger("roma.scheduler")
@@ -48,13 +48,25 @@ class ROMAGPUScheduler:
     def route_job(self, job: dict) -> dict:
         gpu_required = job.get("gpu_required", True)
 
+        # G-PRICING-TIER-PATH: тариф берётся из записи клиента внутри предиктора;
+        # payload-поле tenant_tier больше не подаётся как авторитетный тариф.
         prediction = self.predictor.predict(
             task=job.get("task_type", "default"),
             gpu_required=gpu_required,
             plugin_type=job.get("plugin_type", "default"),
-            tenant_tier=job.get("tenant_tier", "FREE"),
+            tenant_id=job.get("tenant_id"),
             policy_engine=self.policy_engine,
         )
+
+        if prediction.get("decision") == UNKNOWN_TENANT:
+            # Клиент без записи — отдельный отказ: решение и цена по выдуманному
+            # free-тарифу не считаются (не silent-FREE).
+            return {
+                "status": "rejected",
+                "reason": UNKNOWN_TENANT,
+                "detail": prediction.get("decision_reason", ""),
+                "estimated_cost": None,
+            }
 
         # R5b: контракт EnterpriseDecisionGate.evaluate(tenant_id, payload) -> GateDecision;
         # решение читается из полей dataclass, а не как из словаря ("REJECTED" контракт не отдаёт).
@@ -219,6 +231,8 @@ if __name__ == "__main__":
         print("=== ROMA GPU Scheduler ===")
         print(f"Status: {executor.get_metrics()}")
 
+        # Демо-джобы ниже не несут tenant_id: после G-PRICING-TIER-PATH такой
+        # джоб получает отказ UNKNOWN_TENANT (цена без записи клиента не считается).
         gpu_job = {
             "job_id": "demo-gpu-001",
             "task_type": "ml_training",

@@ -23,8 +23,11 @@ BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
+# G-PRICING-TIER-PATH: гейт импортируется по своему фактическому контракту —
+# `DecisionGate` в cost/gate.py не существовал вовсе (CLI был неимпортируем), поэтому
+# тарифный путь CLI не был проверяем ни одним прогоном.
 from cost.predictor import CostPredictor
-from cost.gate import DecisionGate
+from cost.gate import EnterpriseDecisionGate, GateResult
 from cost.estimator import RuntimeEstimator
 from cost.explainability import CostExplainabilityEngine
 from plugins.plugin_runtime import PluginRuntime
@@ -34,6 +37,10 @@ import urllib.request
 import urllib.error
 
 API_BASE = os.environ.get("ROMA_API_URL", "http://localhost:8080")
+
+# G-PRICING-TIER-PATH: клиента задаёт окружение. Хардкод "default-tenant" был
+# равносилен выдуманному тарифу: и цена, и квота искали запись по несуществующему id.
+TENANT_ID_ENV = "ROMA_TENANT_ID"
 
 
 def _api_get(path: str) -> dict:
@@ -78,8 +85,9 @@ class ROMA_CLI:
 [cancel]  Отмена"""
 
     def __init__(self):
+        self.tenant_id = (os.environ.get(TENANT_ID_ENV) or "").strip() or None
         self.predictor = CostPredictor()
-        self.gate = DecisionGate()
+        self.gate = EnterpriseDecisionGate()
         self.estimator = RuntimeEstimator()
         self.explainer = CostExplainabilityEngine()
         self.runtime = PluginRuntime()
@@ -93,10 +101,15 @@ class ROMA_CLI:
         print(f"\n🎯 Задача: {task}\n")
         print("⏳ Анализирую...")
 
-        # Предсказание стоимости
+        gpu_required = "gpu" in task.lower() or "train" in task.lower()
+
+        # Предсказание стоимости: тариф — из записи клиента (id из окружения)
         prediction = self.predictor.predict(
-            task, gpu_required=("gpu" in task.lower() or "train" in task.lower())
+            task, gpu_required=gpu_required, tenant_id=self.tenant_id
         )
+        if self._unpriced(prediction):
+            self._print_unpriced(prediction)
+            return 1
 
         # Вывод базовой информации
         print(f"\n💰 Ожидаемая стоимость: ${prediction['estimated_cost']:.2f}")
@@ -109,22 +122,25 @@ class ROMA_CLI:
         print(f"⚠️  Уровень риска: {prediction.get('risk_level', 'LOW')}\n")
         print(self._breakdown_str(prediction.get('breakdown', {})))
 
-        # Принимаем решение через Gate
-        decision = self.gate.decide(
-            task,
-            plugin_type="default",
-            gpu_required=prediction.get("gpu_required", False),
-            tenant_id="default-tenant",
-            **prediction,
+        # Квота/политика — гейт, по фактическому контракту evaluate(tenant_id, payload).
+        # Тенант — тот же, что у цены: подстановка "default-tenant" давала чужую квоту.
+        gate_decision = self.gate.evaluate(
+            self.tenant_id,
+            {"task": task, "gpu_required": gpu_required},
         )
-
-        if decision['action'] == "REJECTED":
-            print(f"\n🚫 ОТКЛОНЕНО: {decision['reason']}")
+        if gate_decision.result == GateResult.DENIED:
+            print(f"\n🚫 ОТКЛОНЕНО: {gate_decision.reason}")
             return 1
 
-        if decision['action'] == "REQUIRES_CONFIRMATION":
+        action = prediction.get("decision")
+
+        if action == "REJECTED":
+            print(f"\n🚫 ОТКЛОНЕНО: {prediction.get('decision_reason', action)}")
+            return 1
+
+        if action == "REQUIRES_CONFIRMATION":
             print(
-                f"\n⚠️  Предупреждение: стоимость ${decision['final_cost']:.2f} — подтвердите?"
+                f"\n⚠️  Предупреждение: стоимость ${prediction['estimated_cost']:.2f} — подтвердите?"
             )
             print(self.PROMPT_OPTIONS)
             choice = input("\n> ").strip().lower()
@@ -136,9 +152,7 @@ class ROMA_CLI:
                 return self.cmd_run(task)
 
         # Отправка задачи на сервер
-        print(
-            f"\n✅ {decision['action']}: ${decision.get('final_cost', prediction['estimated_cost']):.2f}"
-        )
+        print(f"\n✅ {action}: ${prediction['estimated_cost']:.2f}")
         print("\n🚀 Отправляю задачу на сервер...")
         job_id = self._submit_job(task, prediction)
 
@@ -153,7 +167,7 @@ class ROMA_CLI:
     def cmd_explain(self, task: str) -> int:
         """Объяснение решения."""
         print(f"\n🧠 Объяснение: {task}\n")
-        explanation = self.explainer.explain(task)
+        explanation = self.explainer.explain(task, tenant_id=self.tenant_id)
         print("=" * 50)
         print("📋 ПЛАН ВЫПОЛНЕНИЯ")
         for step in explanation['execution_plan']:
@@ -161,7 +175,9 @@ class ROMA_CLI:
         print("\n💰 РАЗБОР СТОИМОСТИ")
         for item, cost in explanation['cost_breakdown'].items():
             print(f"  {item}: ${cost:.2f}")
-        print(f"\n  ВСЕГО: ${explanation['total_cost']:.2f}")
+        total = explanation.get('total_cost')
+        total_str = "n/a — цена не установлена" if total is None else f"${total:.2f}"
+        print(f"\n  ВСЕГО: {total_str}")
         if explanation.get('alternatives'):
             print("\n💡 БОЛЕЕ ДЕШЁВЫЕ АЛЬТЕРНАТИВЫ")
             for alt in explanation['alternatives']:
@@ -177,8 +193,13 @@ class ROMA_CLI:
         """Быстрый расчёт стоимости."""
         print(f"\n💰 Оценка стоимости: {task}\n")
         prediction = self.predictor.predict(
-            task, gpu_required=("gpu" in task.lower() or "train" in task.lower())
+            task,
+            gpu_required=("gpu" in task.lower() or "train" in task.lower()),
+            tenant_id=self.tenant_id,
         )
+        if self._unpriced(prediction):
+            self._print_unpriced(prediction)
+            return 1
         # Выводим только ключевые цифры
         result = {
             "estimated_cost": round(prediction['estimated_cost'], 4),
@@ -243,7 +264,7 @@ class ROMA_CLI:
         return result.get("job_id")
 
     def _show_alternatives(self, task: str) -> None:
-        explanation = self.explainer.explain(task)
+        explanation = self.explainer.explain(task, tenant_id=self.tenant_id)
         print("\n💡 АЛЬТЕРНАТИВЫ:")
         if explanation.get('alternatives'):
             for alt in explanation['alternatives']:
@@ -252,6 +273,25 @@ class ROMA_CLI:
                 )
         else:
             print("  (дешёвых альтернатив не найдено)")
+
+    def _unpriced(self, prediction: dict) -> bool:
+        """Цена не установлена: нет записи клиента или план не объявлен.
+
+        G-PRICING-TIER-PATH: это отказ с кодом, а не цена 0.0 — напечатать её как
+        стоимость значило бы принять решение на нуле.
+        """
+        return prediction.get("estimated_cost") is None
+
+    def _print_unpriced(self, prediction: dict) -> None:
+        label = self.tenant_id or f"<не задан: {TENANT_ID_ENV}>"
+        print(
+            f"\n🚫 ЦЕНА НЕ УСТАНОВЛЕНА: {prediction.get('decision')} — "
+            f"{prediction.get('decision_reason', '')}"
+        )
+        print(
+            f"   клиент: {label} · тариф берётся из записи клиента, "
+            "подстановки free-тарифа нет."
+        )
 
     def _format_duration(self, minutes: float) -> str:
         if not minutes:
