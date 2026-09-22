@@ -92,8 +92,10 @@ jobs:
         env:
           IMAGE_TAGS: ghcr.io/${{ github.repository }}/stripe-webhook:latest ghcr.io/${{ github.repository }}/stripe-webhook:${{ env.TAG_SUFFIX }}
         run: |
+          # G-COSIGN-DOCKERFILE-CONTEXT: контекст — каталог самого образца (его Dockerfile
+          # копирует requirements.txt и app/ относительно контекста, корень их не содержит).
           for TAG in $IMAGE_TAGS; do
-            docker build -t "$TAG" -f deploy/stripe-webhook/Dockerfile .
+            docker build -t "$TAG" -f deploy/stripe-webhook/Dockerfile deploy/stripe-webhook/
             docker push "$TAG"
           done
           for TAG in $IMAGE_TAGS; do
