@@ -15,7 +15,10 @@ tracked-копию, а работает другая. Класс дефекта 
     с GO, иначе отставший репозиторий молча откатит живой фикс;
   * расхождение/отсутствие → строка в лог + алерт через alert-relay + exit≠0;
   * --ci: отсутствие executed_path (чужая машина, CI-раннер) — предупреждение, а не провал;
-  * проба пароля: только 127.0.0.1, пароль не логируется ни при каком исходе.
+  * проба пароля: только 127.0.0.1, пароль не логируется ни при каком исходе;
+  * ран-состояние (память троттлинга алертов) разрешается переносимо: ROMA_DRIFT_STATE →
+    нодовый путь, если каталог доступен на запись → tmp-fallback; его недоступность вердикт
+    не отменяет — вердиктные строки печатаются всегда (G-DRIFT-CHECK-CI).
 
 R6: платформенный promtail-конфиг (/__substrate/logging/promtail-config.yaml) регенерируется
 платформой и молча теряет джобу pg_watchdog_persistent — строки сторожа перестают доходить
@@ -46,6 +49,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -54,8 +58,33 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = REPO_ROOT / "deploy" / "ops" / "executed_paths.json"
 RELAY_URL = "http://127.0.0.1:8099/notify"
-STATE_PATH = Path("/home/workspace/artifacts/a4-grafana-drift/state.json")
+STATE_ENV_VAR = "ROMA_DRIFT_STATE"
+NODE_STATE_PATH = Path("/home/workspace/artifacts/a4-grafana-drift/state.json")
 ALERT_THROTTLE_S = 900
+
+
+def state_path() -> Path:
+    """G-DRIFT-CHECK-CI: ран-состояние дрейф-проверки разрешается переносимо, а не по ноде.
+
+    Класс дефекта (CI-раннер): абсолютный нодовый путь /home/workspace/... существует только
+    на ноде; вне неё mkdir/write по нему падали PermissionError и убивали процесс ДО строки
+    вердикта. Контроли меряют поведение детектора, а не экологию раннера, поэтому
+    ран-состояние (вспомогательная память троттлинга алертов, а не свидетельство) не отменяет
+    вердикт.
+
+    Порядок: env-override (тесты/CI) → нодовый путь, если его каталог создаётся и доступен на
+    запись → tmp-fallback. На ноде поведение прежнее: тот же файл, тот же формат.
+    """
+    override = os.environ.get(STATE_ENV_VAR)
+    if override:
+        return Path(override)
+    try:
+        NODE_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return Path(tempfile.gettempdir()) / "roma-drift-state.json"
+    if os.access(NODE_STATE_PATH.parent, os.W_OK):
+        return NODE_STATE_PATH
+    return Path(tempfile.gettempdir()) / "roma-drift-state.json"
 
 
 def sha256(path: Path) -> str:
@@ -94,16 +123,26 @@ def notify(
 
 def load_state() -> dict:
     try:
-        return json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        return json.loads(state_path().read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return {}
 
 
 def save_state(state: dict) -> None:
-    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = STATE_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp, STATE_PATH)
+    """G-DRIFT-CHECK-CI: недоступность ран-состояния не имеет права ронять вердикт."""
+    try:
+        path = state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(
+            json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        os.replace(tmp, path)
+    except OSError as exc:
+        print(
+            f"STATE: ран-состояние не сохранено ({type(exc).__name__}: {exc}) — "
+            "вердикт от него не зависит"
+        )
 
 
 def supervisorctl(conf: str, *argv: str) -> tuple[int, str]:
