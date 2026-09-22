@@ -16,7 +16,9 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install deps
-        run: pip install typer rich requests pyyaml plotly dash pytest pytest-cov
+        # G-CI-DEPS-INCOMPLETE: список зависимостей живёт в репозитории
+        # (requirements-ci.txt), а не в этом файле — иначе он разъезжается с деревом.
+        run: pip install -r requirements-ci.txt
       - name: Compile check
         run: |
           find . -name "*.py" -not -path "./__pycache__/*" -exec python -m py_compile {} + 2>&1 | tail -5
@@ -62,7 +64,8 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install deps
-        run: pip install typer rich requests pyyaml plotly dash pytest pytest-cov psycopg2-binary prometheus-client fastapi httpx
+        # G-CI-DEPS-INCOMPLETE: тот же список, что в test-джобе (единый источник).
+        run: pip install -r requirements-ci.txt
       - name: Apply migrations to CI test DB (реальный вход миграций, без глушителей)
         run: python scripts/run_migrations.py
       - name: "Full suite — repo-wide (A-2/N7b: область прогона = весь репозиторий)"
