@@ -77,12 +77,37 @@ class WebhookEvent:
     data: dict
 
 
+# G-PRICING-TIER-PATH (P3 PRICING-INTEGRITY): карта планов объявлена явно и один раз.
+# План из события, которого нет в карте, — отказ, а не молчаливый free: иначе запись
+# клиента получила бы тариф, которого владелец не покупал.
+SUBSCRIPTION_PLANS = ("free", "pro", "enterprise")
+
+
 class StripeWebhookHandler:
     """Handles Stripe webhook events → ROMA billing state updates."""
 
-    def __init__(self, stripe: StripeBillingClient, ledger_callback: Callable):
+    def __init__(
+        self,
+        stripe: StripeBillingClient,
+        ledger_callback: Callable,
+        tenant_store=None,
+    ):
         self._stripe = stripe
         self._lc = ledger_callback
+        self._tenant_store = tenant_store
+
+    @property
+    def tenants(self):
+        """Источник записи клиента. Инжектируется в тестах; иначе — db_adapter.
+
+        Отдельного пути «тариф из события» здесь нет: запись клиента — единственный
+        авторитет по плану (решение владельца по G-PRICING-TIER-PATH).
+        """
+        if self._tenant_store is None:
+            import db_adapter
+
+            self._tenant_store = db_adapter
+        return self._tenant_store
 
     def handle(self, payload: bytes, signature: str) -> dict:
         if not self._stripe.verify_webhook_signature(payload, signature):
@@ -108,17 +133,74 @@ class StripeWebhookHandler:
             return {"status": "processed", "action": "payment_failed_recorded"}
 
         elif event.event_type == "customer.subscription.updated":
-            tenant_id = event.data.get("metadata", {}).get("tenant_id", "unknown")
-            plan = (
-                event.data.get("items", {})
-                .get("data", [{}])[0]
-                .get("price", {})
-                .get("nickname", "unknown")
-            )
-            self._lc.debit(tenant_id, 0, source=f"subscription_update_to_{plan}")
-            return {"status": "processed", "action": "plan_updated"}
+            return self._apply_subscription_update(event)
 
         return {"status": "ignored", "event": event.event_type}
+
+    def _apply_subscription_update(self, event: WebhookEvent) -> dict:
+        """Подписка клиента → реальная запись плана (авторитетно — только запись).
+
+        Класс дефекта (G-PRICING-TIER-PATH, головка Stripe): событие возвращало
+        «plan_updated», не записывая план. Запись клиента оставалась прежней, и все
+        слои, читающие тариф из записи (предиктор, гейт), продолжали видеть старый
+        план — то есть оплаченный тариф не применялся нигде.
+
+        Идемпотентность на replay — состоянием, а не флагом процесса: повтор того же
+        события видит запись уже равной событию и не пишет ничего (ни строки в
+        tenants, ни проводки в ledger). Это переживает рестарт и не требует
+        отдельного хранилища обработанных событий.
+        """
+        data = event.data
+        tenant_id = str(data.get("metadata", {}).get("tenant_id") or "").strip()
+        if not tenant_id:
+            return {
+                "status": "unknown_tenant",
+                "action": "plan_not_written",
+                "reason": "metadata.tenant_id отсутствует — запись клиента не найдена",
+            }
+
+        raw_plan = (
+            data.get("items", {}).get("data", [{}])[0].get("price", {}).get("nickname")
+            or ""
+        )
+        plan = str(raw_plan).strip().lower()
+        if plan not in SUBSCRIPTION_PLANS:
+            return {
+                "status": "unknown_plan",
+                "action": "plan_not_written",
+                "reason": f"план {raw_plan!r} не объявлен в карте планов",
+            }
+
+        tenant = self.tenants.get_tenant(tenant_id)
+        if not tenant:
+            return {
+                "status": "unknown_tenant",
+                "action": "plan_not_written",
+                "reason": f"клиент {tenant_id!r} не найден в записях",
+            }
+
+        status = str(data.get("status") or "active").strip()
+        subscription_id = str(data.get("id") or "").strip()
+        if (
+            str(tenant.get("plan") or "") == plan
+            and str(tenant.get("subscription_status") or "") == status
+            and (
+                not subscription_id
+                or tenant.get("stripe_subscription_id") == subscription_id
+            )
+        ):
+            # replay: запись уже отражает событие — ни записи, ни проводки
+            return {"status": "processed", "action": "plan_unchanged", "plan": plan}
+
+        self.tenants.update_tenant_subscription(
+            tenant_id,
+            str(data.get("customer") or ""),
+            subscription_id,
+            status,
+            plan,
+        )
+        self._lc.debit(tenant_id, 0, source=f"subscription_update_to_{plan}")
+        return {"status": "processed", "action": "plan_written", "plan": plan}
 
 
 if __name__ == "__main__":
