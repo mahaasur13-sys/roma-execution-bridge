@@ -23,7 +23,11 @@ RUN pip install --no-cache-dir \
 COPY config/crd/controller/operator.py .
 
 # Non-root
-RUN useradd -m -u 1000 operator && chown -R operator:operator /app
+# G-COSIGN-OPERATOR-USERADD: в debian:bookworm-slim (база python:3.12-slim) группа
+# `operator` уже существует (base-passwd 3.6.1: operator:x:37), поэтому useradd без -g
+# пытается создать одноимённую группу и падает (exit 9).
+# useradd != groupadd: идемпотентность даётся формой -g, а не глушителем (|| true).
+RUN useradd -m -u 1000 -g operator operator && chown -R operator:operator /app
 USER operator
 
 # kopf，自动检测并在 home 目录寻找 kopf.handle 处理器
