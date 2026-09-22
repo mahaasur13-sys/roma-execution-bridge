@@ -1,11 +1,21 @@
 # ROMA GPU Worker runtime dependencies
 # Pinned to match roma-execution-bridge/pyproject.toml
-fastapi>=0.115.0,<0.116
+#
+# S1/G-SEC-SCAN (2026-09-22): два пина разошлись с pyproject и делали файл
+# неразрешимым/уязвимым при аудите:
+#   * prometheus-client>=0.19.0 конфликтовал с prometheus-fastapi-instrumentator
+#     (1.x требует prometheus-client>=0.8,<0.9) → pip-audit падал на resolution,
+#     а шаг CI укрывал это `|| echo`: файл не проходил аудит никогда;
+#   * fastapi<0.116 тянул starlette 0.46.x, у которой 7 известных advisory
+#     (PYSEC-2026-161/194/248/249/2280/2281/1942); pyproject уже требует
+#     starlette>=1.3.1, поэтому пин приведён к pyproject, starlette объявлен явно.
+fastapi>=0.136,<0.137
 uvicorn[standard]>=0.30.0,<0.32
 pydantic>=2.0,<3.0
 psutil>=5.9.0
-prometheus-client>=0.19.0
+prometheus-client>=0.8.0,<0.9.0
 prometheus-fastapi-instrumentator>=1.0,<2.0
 requests>=2.32.4
 pyyaml>=6.0,<7.0
 kubernetes>=29.0,<32.0
+starlette>=1.3.1,<2.0

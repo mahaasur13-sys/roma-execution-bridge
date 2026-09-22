@@ -135,28 +135,36 @@ jobs:
         with:
           args: detect --source=/github/workspace --redact --config=/github/workspace/.gitleaks.toml --exit-code=1
 
+  # G-CI-SOFTENED (2026-09-22): обе security-джобы были смягчены ДВАЖДЫ —
+  # `continue-on-error: true` (джоба не может покраснеть) и `|| echo "... non-blocking"`
+  # (команда не может вернуть ненулевой код). Из-за этого pip-audit-шаг с
+  # неразрешимым входом (ResolutionImpossible в requirements-worker.txt) выглядел
+  # зелёным. Смягчение снято: ворота твёрдые. Профиль bandit — тот же, что в
+  # security.yml (единственный владелец профиля severity): money path medium+,
+  # repo-wide high. Находки Low/Medium вне money path ворот не открывали никогда;
+  # это зарегистрированный долг, а не молчаливый пропуск.
   pip-audit:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: pip-audit (non-blocking)
+      - name: pip-audit (enforced — любая известная уязвимость валит джобу)
         run: |
-          pip install pip-audit
-          pip-audit -r requirements-worker.txt || echo "pip-audit findings (non-blocking)"
+          pip install "pip-audit==2.7.3"
+          pip-audit -r requirements-worker.txt --progress-spinner off
 
   bandit:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: bandit (non-blocking)
+      - name: bandit — money path (medium+)
         run: |
-          pip install bandit
-          bandit -q -r . -x .venv,tests || echo "bandit findings (non-blocking)"
+          pip install "bandit==1.8.0"
+          bandit -r billing/ routers/ auth/ monitoring/ security/ main.py db_adapter.py -ll -q
+      - name: bandit — repo-wide (high only)
+        run: bandit -r . -x ./.venv,./node_modules,./tests,./.git -lll -q
