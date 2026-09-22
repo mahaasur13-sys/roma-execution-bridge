@@ -73,6 +73,7 @@ def test_sql_has_balance_guard_and_same_columns(ledger, monkeypatch):
     assert insert_params[-1] == 0.5
 
 
+@pytest.mark.pg  # G-CI-PG-CANON: env-skip без живого PG
 def test_ledger_append_only_trigger():
     """UPDATE/DELETE по ledger_entries должны падать (триггер L3). Нужен PG_DSN."""
     import os

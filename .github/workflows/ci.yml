@@ -30,6 +30,32 @@ jobs:
   pytest-suite:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # G-CI-PG-CANON: реальный PostgreSQL вместо скипов. Без него PG-зависимые
+    # проверки (ledger-триггеры, money-path, миграции) уходили в env-skip, и
+    # «зелёный» CI не подтверждал ни покрытие money-path, ни схему.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: roma
+          # CI-эфемерал, localhost: значение живёт только внутри job'а
+          POSTGRES_PASSWORD: ci-ephemeral-localhost
+          POSTGRES_DB: roma_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U roma -d roma_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # CI-эфемерал, localhost: тестовая БД roma_test (изоляция A1: точное имя)
+      PG_DSN: "postgresql://roma:ci-ephemeral-localhost@localhost:5432/roma_test"
+      # CI-эфемерал, не секрет: базис измерения тот же, что в каноне ноды — ветка
+      # GPU-бэкенда исполняется (без VAST_KEY она честно уходит в local с
+      # предупреждением). Без этой переменной знаменатель покрытия иной, и
+      # сравнение CI с каноном было бы сравнением разных областей измерения.
+      ROMA_EXECUTION_BACKEND: vastai
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -37,7 +63,9 @@ jobs:
           python-version: "3.11"
       - name: Install deps
         run: pip install typer rich requests pyyaml plotly dash pytest pytest-cov psycopg2-binary prometheus-client fastapi httpx
-      - name: Full suite — repo-wide (A-2/N7b: область прогона = весь репозиторий)
+      - name: Apply migrations to CI test DB (реальный вход миграций, без глушителей)
+        run: python scripts/run_migrations.py
+      - name: "Full suite — repo-wide (A-2/N7b: область прогона = весь репозиторий)"
         run: |
           python -m pytest -q -rs --junitxml=junit.xml
           python scripts/ci_junit_smoke.py junit.xml

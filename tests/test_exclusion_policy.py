@@ -181,6 +181,24 @@ DECORATOR_KINDS = {"skipif-маркер", "skip-маркер"}
 MAX_CALL_LINES = 6
 SKIP_GLOBS = ("test_*.py", "*_test.py", "conftest.py")
 
+# ---------------------------------------------------------------------------
+# G-CI-PG-CANON (шестой механизм сканера): программный env-skip из conftest.
+# Класс дефекта: скип, вставленный хуком коллекции, НЕ виден текстовым паттернам
+# `pytest.skip` в тест-файлах — а именно он определяет, исполнились ли
+# PG-зависимые проверки. Поэтому контракт проверяется на месте объявления:
+#     ENV_SKIP_MARKER (класс различается машинно) · issue: <ID> · expiry: YYYY-MM-DD
+# и на месте инъекции: причина обязана браться из единственного объявления, иначе
+# объявление и фактическая причина расходятся (скип без тройки, но «по правилам»).
+# ---------------------------------------------------------------------------
+CONFTEST = REPO_ROOT / "tests" / "conftest.py"
+COMPLETENESS_CHECKER = REPO_ROOT / "scripts" / "ci_run_completeness.py"
+ENV_SKIP_KIND = "env-skip-инъекция"
+ENV_SKIP_MARKER_RE = re.compile(r"ENV_SKIP_MARKER\s*=\s*[\"'](?P<marker>[^\"']+)[\"']")
+ENV_SKIP_REASON_RE = re.compile(
+    r"^ENV_SKIP_REASON\s*=\s*\((?P<body>.*?)^\)", re.DOTALL | re.MULTILINE
+)
+ENV_SKIP_INJECT_RE = re.compile(r"reason=ENV_SKIP_REASON\b")
+
 
 def _call_window(lines: list[str], index: int) -> str:
     """Логический вызов: от строки места до закрывающей скобки (не длиннее MAX_CALL_LINES).
@@ -199,8 +217,46 @@ def _call_window(lines: list[str], index: int) -> str:
     return "\n".join(window)
 
 
+def audit_env_skip_declaration(text: str) -> list[str]:
+    """Шестой механизм: контракт объявления env-skip. Вынесено отдельно — негатив вызывает её."""
+    problems = []
+    marker = ENV_SKIP_MARKER_RE.search(text)
+    if not marker:
+        problems.append(
+            "нет объявления ENV_SKIP_MARKER (класс env-скипа неразличим машинно)"
+        )
+    elif not marker.group("marker").startswith("env-skip"):
+        problems.append(
+            f"маркер env-скипа не начинается с 'env-skip': {marker.group('marker')!r}"
+        )
+    if not ENV_SKIP_INJECT_RE.search(text):
+        problems.append(
+            "причина env-скипа не берётся из ENV_SKIP_REASON — объявление и факт расходятся"
+        )
+    reason = ENV_SKIP_REASON_RE.search(text)
+    if not reason:
+        problems.append("нет объявления ENV_SKIP_REASON")
+    body = reason.group("body") if reason else ""
+    if not re.search(r"issue:\s*\S+", body):
+        problems.append("env-skip без issue-id")
+    m = re.search(r"expiry:\s*(\d{4}-\d{2}-\d{2})", body)
+    if not m:
+        problems.append("env-skip без expiry (YYYY-MM-DD)")
+    else:
+        try:
+            if dt.date.fromisoformat(m.group(1)) <= dt.date.today():
+                problems.append(
+                    f"env-skip просрочен (expiry={m.group(1)}) — починить или продлить осознанно"
+                )
+        except ValueError:
+            problems.append(f"env-skip expiry не дата: {m.group(1)!r}")
+    return problems
+
+
 def audit_skip_block(text: str, kind: str = "skip") -> list[str]:
     """Проверяет ОДНО место skip-механизма. Вынесено отдельно, чтобы негатив мог её вызвать."""
+    if kind == ENV_SKIP_KIND:
+        return audit_env_skip_declaration(text)
     problems = []
     if kind in DECORATOR_KINDS:
         if not re.search(r"reason\s*=", text):
@@ -230,7 +286,13 @@ def find_skip_sites(text: str) -> list[tuple[int, str, str]]:
     for index, line in enumerate(lines, start=1):
         for pattern, kind in SKIP_PATTERNS:
             if pattern.search(line):
-                sites.append((index, kind, _call_window(lines, index)))
+                window = _call_window(lines, index)
+                if ENV_SKIP_INJECT_RE.search(window):
+                    # Шестой механизм: причина берётся из объявления в conftest,
+                    # поэтому аудиту предъявляется файл целиком, а не окно вызова.
+                    sites.append((index, ENV_SKIP_KIND, text))
+                else:
+                    sites.append((index, kind, window))
     return sites
 
 
@@ -315,3 +377,64 @@ def test_runtime_skip_budget_requires_issue_and_expiry() -> None:
     assert (
         "ISSUE_MARK" in budget and "EXPIRY_MARK" in budget
     ), "рантайм-бюджет скипов проверяет не всю тройку issue+expiry"
+
+
+# ---------------------------------------------------------------------------
+# G-CI-PG-CANON: контракт шестого механизма — на самом файле, где он объявлен.
+# ---------------------------------------------------------------------------
+
+
+def test_env_skip_declaration_is_complete() -> None:
+    """Реальный conftest: класс env-скипа различим, тройка полная и не просрочена."""
+    problems = audit_env_skip_declaration(CONFTEST.read_text(encoding="utf-8"))
+    assert (
+        not problems
+    ), "контракт env-skip нарушен в tests/conftest.py:\n  " + "\n  ".join(problems)
+
+
+def test_env_skip_marker_is_single_source() -> None:
+    """Класс скипа различается МАШИННО: маркер обязан совпадать у conftest и чекера канона."""
+    decl = ENV_SKIP_MARKER_RE.search(CONFTEST.read_text(encoding="utf-8"))
+    assert decl, "в tests/conftest.py нет объявления ENV_SKIP_MARKER"
+    marker = decl.group("marker")
+    checker = COMPLETENESS_CHECKER.read_text(encoding="utf-8")
+    assert marker in checker, (
+        f"маркер env-скипа {marker!r} не используется чекером канона "
+        f"({COMPLETENESS_CHECKER.relative_to(REPO_ROOT)}) — класс скипа не проверяется"
+    )
+
+
+def test_env_skip_contract_can_actually_fail() -> None:
+    """НЕГАТИВ: без тройки и без единого объявления детектор обязан краснеть."""
+    bad = (
+        'ENV_SKIP_MARKER = "pg-skip"\n'
+        "ENV_SKIP_REASON = (\n"
+        '    "нет PG"\n'
+        ")\n"
+        "skip = pytest.mark." + 'skip(reason="нет PG")\n'
+    )
+    problems = audit_env_skip_declaration(bad)
+    assert len(problems) >= 3, f"детектор env-skip не сработал: {problems}"
+    good = (
+        'ENV_SKIP_MARKER = "env-skip:pg-unavailable"\n'
+        "ENV_SKIP_REASON = (\n"
+        '    "env-skip:pg-unavailable · issue: G-CI-PG-CANON · expiry: 2099-01-01"\n'
+        ")\n"
+        "skip = pytest.mark." + "skip(reason=ENV_SKIP_REASON)\n"
+    )
+    assert (
+        audit_env_skip_declaration(good) == []
+    ), "детектор env-skip ложно краснеет на корректном объявлении"
+
+
+def test_env_skip_injection_is_scanned_as_its_own_mechanism() -> None:
+    """Структурный негатив: инъекция из conftest распознаётся шестым механизмом, а не «голым skip»."""
+    synthetic = (
+        "def test_x():\n"
+        "    skip = pytest.mark." + "skip(reason=ENV_SKIP_REASON)\n"
+        "    item.add_marker(skip)\n"
+    )
+    kinds = {kind for _, kind, _ in find_skip_sites(synthetic)}
+    assert (
+        ENV_SKIP_KIND in kinds
+    ), f"инъекция env-skip не распознана отдельным механизмом: {kinds or 'пусто'}"

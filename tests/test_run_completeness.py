@@ -167,7 +167,10 @@ def test_checker_rejects_narrowed_run_still_above_legacy_threshold(
     assert (
         result.returncode != 0
     ), "суженный прогон выше прежнего порога обязан ронять проверку"
-    assert f"collected: {recorded} != канон {canon['collected']}" in result.stderr
+    # G-CI-PG-CANON: формулировка зависит от класса скипов прогона (env-skip
+    # добавляет пометку), но негатив обязан называть расхождение и канон.
+    assert f"collected: {recorded} != " in result.stderr, result.stderr
+    assert str(canon["collected"]) in result.stderr, result.stderr
 
 
 def test_checker_rejects_declared_executed_mismatch(tmp_path: pathlib.Path) -> None:

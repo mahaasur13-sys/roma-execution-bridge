@@ -58,6 +58,7 @@ def _seed_entry(cur):
     return fallback[0]
 
 
+@pytest.mark.pg  # G-CI-PG-CANON: env-skip без живого PG
 def test_trigger_names_present():
     """После 009 на ledger_entries висят оба триггера и функция ledger_no_mutate."""
     with _pg_conn() as conn:
@@ -79,6 +80,7 @@ def test_trigger_names_present():
     assert found[TRIGGER_TRUNCATE][1] == "O", "триггер должен быть enabled (O)"
 
 
+@pytest.mark.pg  # G-CI-PG-CANON: env-skip без живого PG
 def test_update_raises():
     """UPDATE ledger_entries → RAISE, строка не меняется."""
     with _pg_conn() as conn:
@@ -94,6 +96,7 @@ def test_update_raises():
     assert "append-only" in str(exc.value).lower()
 
 
+@pytest.mark.pg  # G-CI-PG-CANON: env-skip без живого PG
 def test_delete_raises():
     """DELETE ledger_entries → RAISE."""
     with _pg_conn() as conn:
@@ -106,6 +109,7 @@ def test_delete_raises():
     assert "append-only" in str(exc.value).lower()
 
 
+@pytest.mark.pg  # G-CI-PG-CANON: env-skip без живого PG
 def test_truncate_raises():
     """TRUNCATE ledger_entries → RAISE (statement-level триггер)."""
     with _pg_conn() as conn:
@@ -116,6 +120,7 @@ def test_truncate_raises():
     assert "append-only" in str(exc.value).lower()
 
 
+@pytest.mark.pg  # G-CI-PG-CANON: env-skip без живого PG
 def test_insert_still_allowed():
     """INSERT не блокируется: append-only не означает read-only."""
     with _pg_conn() as conn:

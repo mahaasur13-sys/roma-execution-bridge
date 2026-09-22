@@ -23,10 +23,10 @@ from starlette.testclient import TestClient
 import db_adapter as db
 import main
 
-_NEEDS_PG = pytest.mark.skipif(
-    not os.environ.get("PG_DSN"),
-    reason="дебет L2/L4 идёт только через PG (advisory-lock + CTE); без PG_DSN путь не проверить · issue: P1-C · expiry: 2026-12-31",
-)
+# G-CI-PG-CANON: класс env-скипа ставится ОДНИМ механизмом — маркером `pg` в conftest
+# (отсутствие PG_DSN → env-skip с тройкой issue/expiry), а не локальным skipif:
+# два разных порога на одно явление — источник дефекта (скип уходил в класс admission
+# и «зелёный» CI не отличал неисполненный money-path от осознанного скипа).
 
 
 def _uniq(prefix: str) -> str:
@@ -96,7 +96,7 @@ def test_submit_does_not_debit(tenant):
     assert _count_debits(tenant["tenant_id"], job_id) == 0
 
 
-@_NEEDS_PG
+@pytest.mark.pg  # G-CI-PG-CANON: env-skip без живого PG
 def test_complete_debits_exactly_once(tenant):
     job_id = _seed_running_job(tenant["tenant_id"])
     client = TestClient(main.app, raise_server_exceptions=False)
@@ -127,7 +127,7 @@ def test_worker_db_functions_exist(tenant):
     db.release_worker("w-bill-1")
 
 
-@_NEEDS_PG
+@pytest.mark.pg  # G-CI-PG-CANON: env-skip без живого PG
 def test_complete_without_funds_returns_402(monkeypatch):
     """fail-closed: no CREDIT → /complete 402, no debit, status unchanged."""
     tenant_id = _uniq("test-bill")

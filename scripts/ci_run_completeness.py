@@ -16,6 +16,15 @@
 Отличие от канона → FAIL, пока числа не переписаны ЯВНЫМ диффом манифеста:
 порог никогда не понижается сам по себе.
 
+G-CI-PG-CANON: скипы делятся на ДВА класса, различаемых машинно по причине в junitxml:
+  * admission — скип осознан и одинаков на всех машинах (GPU-live, плейсхолдеры
+    submit-роутера): постоянная величина канона (`admission_skips`);
+  * env-skip  — проверка не исполнена из-за ОТСУТСТВИЯ окружения (нет `PG_DSN`).
+    Локально допустимо 0 или все PG-тесты (`env_skips_expected`); в CI (`CI` выставлен
+    Actions) — строго 0, иначе «зелёный» CI врёт про неисполненный money-path.
+Различение — по маркеру `env-skip:` в причине скипа (`ENV_SKIP_MARKER`, тот же
+литерал объявлен в `tests/conftest.py`; совпадение проверяет политика исключений).
+
 Режим `--mode narrow` (локальный/негативный прогон) печатает, что канон НЕ применяется,
 но расхождения declared/recorded/outcomes проверяет так же — сужение области прогона
 не должно быть молчаливым даже там.
@@ -32,12 +41,26 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import pathlib
 import sys
 import xml.etree.ElementTree as ET
 
 EXIT_FAIL = 3
 REQUIRED_KEYS = ("collected", "passed", "failures", "errors", "skipped")
+# G-CI-PG-CANON: класс env-скипа различим машинно по этому маркеру в причине.
+# Литерал ОБЯЗАН совпадать с ENV_SKIP_MARKER в tests/conftest.py (проверяет политика).
+ENV_SKIP_MARKER = "env-skip:pg-unavailable"
+CI_ENV_VARS = ("CI", "GITHUB_ACTIONS")
+
+
+def ci_mode() -> bool:
+    """Прогон в CI: Actions выставляет CI/GITHUB_ACTIONS сам (никаких своих флагов)."""
+    for var in CI_ENV_VARS:
+        raw = (os.environ.get(var) or "").strip().lower()
+        if raw and raw not in ("0", "false", "no"):
+            return True
+    return False
 
 
 class CompletenessError(Exception):
@@ -67,6 +90,13 @@ def load_manifest(path: pathlib.Path) -> tuple[dict, str]:
             raise CompletenessError(
                 f"манифест {path}: canon['{key}'] не целое число: {value!r}"
             )
+    for key in ("admission_skips", "env_skips_expected"):
+        value = canon.get(key)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise CompletenessError(
+                f"манифест {path}: canon['{key}'] не целое число: {value!r} "
+                "(класс скипов обязан быть объявлен явно — fail-closed)"
+            )
     return data, hashlib.sha256(raw).hexdigest()
 
 
@@ -93,6 +123,7 @@ def parse_junit(path: pathlib.Path) -> tuple[int, dict]:
         declared += int(suite.get("tests") or 0)
 
     outcomes = {"passed": 0, "failures": 0, "errors": 0, "skipped": 0}
+    env_skips = 0
     recorded = 0
     for suite in suites:
         for case in suite.iter("testcase"):
@@ -103,8 +134,13 @@ def parse_junit(path: pathlib.Path) -> tuple[int, dict]:
                 outcomes["errors"] += 1
             elif case.find("skipped") is not None:
                 outcomes["skipped"] += 1
+                message = case.find("skipped").get("message") or ""
+                if ENV_SKIP_MARKER in message:
+                    env_skips += 1
             else:
                 outcomes["passed"] += 1
+    outcomes["env_skips"] = env_skips
+    outcomes["admission_skips"] = outcomes["skipped"] - env_skips
     return declared, outcomes | {"recorded": recorded}
 
 
@@ -134,6 +170,11 @@ def print_block(
     print(
         f"             {canon['collected']} collected / {canon['passed']} passed + "
         f"{canon['skipped']} skipped (fact {canon.get('measured_on', '?')})"
+    )
+    print(
+        f"SKIP CLASSES  : admission={observed['admission_skips']} · "
+        f"env-skip={observed['env_skips']} "
+        f"(CI: {'yes' if ci_mode() else 'no'} · в CI env-skip обязан быть 0)"
     )
     print(f"RUN MODE      : {mode}")
     if mode == "narrow":
@@ -182,12 +223,49 @@ def check(
             "errors": observed["errors"],
             "skipped": observed["skipped"],
         }
+        # G-CI-PG-CANON: канон описывает ПОЛНЫЙ набор (env-skip=0). Env-скипы —
+        # не изменение набора, а явно моделируемое отклонение окружения: пропуск
+        # PG-проверки переносит счётчик из passed в skipped, collected неизменен.
+        # Поэтому ожидание считается С УЧЁТОМ класса, а не сравнением с сырым каноном;
+        # число env-скипов отдельно ограничено (CI: 0; локально: 0 или env_skips_expected).
+        env_skips = observed["env_skips"]
+        expected = {
+            "collected": canon["collected"],
+            "passed": canon["passed"] - env_skips,
+            "failures": canon["failures"],
+            "errors": canon["errors"],
+            "skipped": canon["skipped"] + env_skips,
+        }
         for key in REQUIRED_KEYS:
-            if actual[key] != canon[key]:
+            if actual[key] != expected[key]:
+                if env_skips:
+                    problems.append(
+                        f"{key}: {actual[key]} != {expected[key]} — канон {canon[key]} "
+                        f"с учётом env-skip={env_skips} (набор изменился — обнови "
+                        f"{manifest.name} явным диффом)"
+                    )
+                else:
+                    problems.append(
+                        f"{key}: {actual[key]} != канон {canon[key]} "
+                        f"(набор изменился — обнови {manifest.name} явным диффом)"
+                    )
+        if observed["admission_skips"] != canon["admission_skips"]:
+            problems.append(
+                f"admission-скипы: {observed['admission_skips']} != канон "
+                f"{canon['admission_skips']} (изменился класс осознанных скипов)"
+            )
+        if ci_mode():
+            if env_skips:
                 problems.append(
-                    f"{key}: {actual[key]} != канон {canon[key]} "
-                    f"(набор изменился — обнови {manifest.name} явным диффом)"
+                    f"в CI env-skip={env_skips} (обязано быть 0): PG-проверки не исполнены — "
+                    "CI обязан поднять реальный PostgreSQL (G-CI-PG-CANON)"
                 )
+        elif env_skips not in (0, canon["env_skips_expected"]):
+            problems.append(
+                f"env-skip={env_skips}: локально допустимо только 0 или "
+                f"{canon['env_skips_expected']} (частично неисполненный PG-набор — это "
+                "не норма, а расхождение)"
+            )
 
     if problems:
         raise CompletenessError("; ".join(problems))

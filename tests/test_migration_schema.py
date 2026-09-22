@@ -78,6 +78,7 @@ def test_no_drop_without_if_exists():
                 ), f"{path.name}: DROP without IF EXISTS: {stripped}"
 
 
+@pytest.mark.pg  # G-CI-PG-CANON: env-skip без живого PG
 def test_runner_reapply_is_idempotent(capsys):
     """Second runner pass applies nothing (all files already tracked)."""
     if not _pg_reachable():
@@ -93,6 +94,7 @@ def test_runner_reapply_is_idempotent(capsys):
     assert f"0 applied, {len(files)} skipped" in out
 
 
+@pytest.mark.pg  # G-CI-PG-CANON: env-skip без живого PG
 def test_migrations_create_expected_tables():
     """After apply, the tables the code reads must exist in PG."""
     if not _pg_reachable():
