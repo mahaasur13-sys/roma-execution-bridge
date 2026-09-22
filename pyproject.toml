@@ -120,6 +120,12 @@ ignore = ["E402", "E741", "F402", "F811"]
 # `black --check .` была зелёной без скрытых флагов, конвенция зафиксирована в конфиге.
 # Смена кавычек в 336 файлах — не гигиена, а шум в истории, поэтому отключена явно.
 skip-string-normalization = true
+# G-BLACK-TARGET-WARNING (2026-09-22): без явного target-version black выводит
+# цель из окружающего интерпретатора и печатает предупреждение
+# «Python 3.12 cannot parse code formatted for Python 3.14 ... set --target-version».
+# Значение то же, что у ruff выше (py310); в pyproject black ждёт СПИСОК:
+# исчезает, формат файлов не меняется (336 файлов unchanged на py310/py311/py312).
+target-version = ["py310"]
 
 [dependency-groups]
 dev = [

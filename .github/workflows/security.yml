@@ -14,7 +14,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install bandit
+      # G-TOOL-PIN: тот же пин, что в ROMA CI (детерминизм инструмента).
+      - run: pip install "bandit==1.8.0"
 
       # Money path (billing/authrouters/monitoring): fail on medium+high.
       # Known-safe dynamic SQL in db_adapter.py carries inline `# nosec B608`
