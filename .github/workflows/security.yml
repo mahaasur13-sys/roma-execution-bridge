@@ -39,11 +39,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install pip-audit
-      - name: Install audited dependencies
-        run: pip install .
+      # G-TOOL-PIN: точный пин инструмента (аудит воспроизводится, а не зависит от даты прогона).
+      - run: pip install "pip-audit==2.7.3"
+
+      # S1/G-SEC-SCAN: аудируем окружение, но сначала обновляем его инструментальную часть.
+      # Раннер приносит setuptools 79.0.1 (PYSEC-2026-3447, правится в 83.0.0) и старый pip
+      # (PYSEC-2026-196/1795/1796/2875/2876/3721, PYSEC-2023-228): обновление версий —
+      # реальное устранение, а не подавление находки.
+      - name: Install audited dependencies (+ non-vulnerable tooling)
+        run: |
+          pip install -U "pip>=26.1.2" "setuptools>=83"
+          pip install -e .
+
+      # Первопартийный дистрибутив (сам roma-execution-bridge) отсутствует на PyPI и не может
+      # быть аудирован: исключается ТОЛЬКО он документированным механизмом --skip-editable
+      # (editable-установка строкой выше). Все сторонние зависимости аудируются целиком.
       - name: pip-audit (enforced — any known vulnerability fails the job)
-        run: pip-audit --progress-spinner off
+        run: pip-audit --progress-spinner off --skip-editable
 
   secrets:
     runs-on: ubuntu-latest

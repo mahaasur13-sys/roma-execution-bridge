@@ -145,7 +145,7 @@ jobs:
           python-version: "3.11"
       - name: pip-audit (non-blocking)
         run: |
-          pip install pip-audit
+          pip install "pip-audit==2.7.3"
           pip-audit -r requirements-worker.txt || echo "pip-audit findings (non-blocking)"
 
   bandit:

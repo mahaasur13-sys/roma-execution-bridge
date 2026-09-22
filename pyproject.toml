@@ -39,7 +39,9 @@ dev = [
 roma-bridge = "main:main"
 
 [build-system]
-requires = ["setuptools>=68"]
+# S1/G-SEC-SCAN: пол был >=68, то есть допускал setuptools 79.0.1 — версию с
+# PYSEC-2026-3447 (правится в 83.0.0). Пол поднят до исправленной версии.
+requires = ["setuptools>=83"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
