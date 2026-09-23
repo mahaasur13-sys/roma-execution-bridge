@@ -750,6 +750,32 @@ def _ensure_execution_jobs_table(c) -> None:
             c.execute(f"ALTER TABLE execution_jobs ADD COLUMN {column} {ddl}")
 
 
+def _ensure_audit_events_table(c) -> None:
+    """Create audit_events in SQLite if absent (G-AUDIT-DDL-DRIFT).
+
+    Mirrors migrations/011_audit_events.sql. У таблицы не было DDL нигде —
+    ни миграций (PG), ни этого SQLite-бутстрапа — поэтому чистая data/roma.db
+    отвечала «no such table: audit_events» на запись леджера. Частичный UNIQUE
+    повторяет PG-индекс: ключевые сущности дедуплицируются атомарно, безключевые
+    (entity_id='unknown', dedupe=False) не склеиваются.
+    """
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS audit_events (
+            id          TEXT PRIMARY KEY,
+            tenant_id   TEXT,
+            event_type  TEXT,
+            entity_type TEXT,
+            entity_id   TEXT,
+            data        TEXT
+        )
+    """)
+    c.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS audit_events_dedupe_uidx
+            ON audit_events (tenant_id, event_type, entity_id)
+            WHERE entity_id IS NOT NULL AND entity_id <> 'unknown'
+    """)
+
+
 def find_job_by_idempotency(tenant_id: str, idempotency_key: str):
     """Return job_id for (tenant_id, idempotency_key), or None if not present."""
     if _pg_enabled():
@@ -1481,11 +1507,17 @@ async def _insert_audit_event_pg(eid, tid, etype, ent_type, ent_id, data_json):
         with conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO audit_events (id, tenant_id, event_type, entity_type, entity_id, data)"
-                " VALUES (%s,%s,%s,%s,%s,%s::jsonb)",
+                " VALUES (%s,%s,%s,%s,%s,%s::jsonb)"
+                " ON CONFLICT (tenant_id, event_type, entity_id)"
+                " WHERE entity_id IS NOT NULL AND entity_id <> 'unknown' DO NOTHING"
+                " RETURNING id",
                 (eid, tid, etype, ent_type, ent_id, data_json),
             )
+            inserted = cur.fetchone() is not None
         conn.commit()
-        return {"id": eid}
+        if inserted:
+            return {"id": eid}
+        return {"id": None, "skipped": True}
     finally:
         _pg_return(conn)
 
@@ -1493,12 +1525,15 @@ async def _insert_audit_event_pg(eid, tid, etype, ent_type, ent_id, data_json):
 def _insert_audit_event_sqlite(eid, tid, etype, ent_type, ent_id, data_json):
     c = _sqlite_conn()
     try:
-        c.execute(
-            "INSERT INTO audit_events (id, tenant_id, event_type, entity_type, entity_id, data)"
+        _ensure_audit_events_table(c)
+        cur = c.execute(
+            "INSERT OR IGNORE INTO audit_events (id, tenant_id, event_type, entity_type, entity_id, data)"
             " VALUES (?,?,?,?,?,?)",
             (eid, tid, etype, ent_type, ent_id, data_json),
         )
         c.commit()
+        if cur.rowcount == 0:
+            return {"id": None, "skipped": True}
         return {"id": eid}
     finally:
         c.close()
@@ -1533,6 +1568,7 @@ async def _audit_event_exists_pg(tid, etype, ent_id) -> bool:
 def _audit_event_exists_sqlite(tid, etype, ent_id) -> bool:
     c = _sqlite_conn()
     try:
+        _ensure_audit_events_table(c)
         cur = c.execute(
             "SELECT 1 FROM audit_events"
             " WHERE tenant_id=? AND event_type=? AND entity_id=? LIMIT 1",
