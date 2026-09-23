@@ -35,6 +35,8 @@ spec:
             spec:
               type: object
               required: [task]
+              # STRICT: no additional properties
+              additionalProperties: false
               properties:
                 task:
                   type: string
@@ -103,24 +105,6 @@ spec:
                         type: boolean
 
 ---
-
-# =============================================================================
-# Namespaces — создаются до namespace-scoped ресурсов (иначе kubectl падает)
-# =============================================================================
-
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: roma-system
-
----
-
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: roma-jobs
-
----
 # =============================================================================
 # RomaTask Controller — Reconciliation Loop
 # Watches RomaTask resources and dispatches to Execution Bridge
@@ -169,3 +153,20 @@ roleRef:
   kind: Role
   name: roma-controller
   apiGroup: rbac.authorization.k8s.io
+
+---
+# =============================================================================
+# Example RomaTask — Train YOLOv8
+# =============================================================================
+
+apiVersion: roma.ai/v1
+kind: RomaTask
+metadata:
+  name: yolov8-training-001
+  namespace: roma-jobs
+spec:
+  task: "train YOLOv8 on RTX3060 with COCO dataset"
+  priority: 8
+  gpuRequired: true
+  executionMode: k8s_job
+  backpressureAware: true

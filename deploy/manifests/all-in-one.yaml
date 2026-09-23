@@ -14,14 +14,6 @@ metadata:
 
 ---
 apiVersion: v1
-kind: Namespace
-metadata:
-  name: rl-system
-  labels:
-    name: rl-system
-
----
-apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: roma-executor
@@ -72,11 +64,11 @@ metadata:
   name: roma-checkpoints
   namespace: roma-system
 spec:
-  accessModes: [ReadWriteOnce]
+  accessModes: [ReadWriteMany]
   resources:
     requests:
       storage: 100Gi
-  storageClassName: standard
+  storageClassName: longhorn
 
 ---
 apiVersion: v1
@@ -85,11 +77,11 @@ metadata:
   name: roma-models
   namespace: roma-system
 spec:
-  accessModes: [ReadWriteOnce]
+  accessModes: [ReadWriteMany]
   resources:
     requests:
       storage: 200Gi
-  storageClassName: standard
+  storageClassName: longhorn
 
 ---
 apiVersion: v1
@@ -102,7 +94,7 @@ spec:
   resources:
     requests:
       storage: 50Gi
-  storageClassName: standard
+  storageClassName: longhorn
 
 ---
 apiVersion: v1
@@ -166,7 +158,7 @@ metadata:
   name: roma-api-server
   namespace: roma-system
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: roma-execution-bridge
@@ -184,6 +176,9 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
       affinity:
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -193,13 +188,13 @@ spec:
                     operator: In
                     values: [api-server]
               topologyKey: kubernetes.io/hostname
-      topologySpreadConstraints:
-        - maxSkew: 1
-          topologyKey: topology.kubernetes.io/zone
-          whenUnsatisfiable: ScheduleAnyway
-          labelSelector:
-            matchLabels:
-              app.kubernetes.io/component: api-server
+        topologySpreadConstraints:
+          - maxSkew: 1
+            topologyKey: topology.kubernetes.io/zone
+            whenUnsatisfiable: ScheduleAnyway
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: api-server
       priorityClassName: roma-critical
       containers:
         - name: api-server
@@ -289,6 +284,9 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
       affinity:
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -296,13 +294,13 @@ spec:
                 matchLabels:
                   app.kubernetes.io/component: gpu-worker
               topologyKey: kubernetes.io/hostname
-      topologySpreadConstraints:
-        - maxSkew: 1
-          topologyKey: topology.kubernetes.io/zone
-          whenUnsatisfiable: ScheduleAnyway
-          labelSelector:
-            matchLabels:
-              app.kubernetes.io/component: gpu-worker
+        topologySpreadConstraints:
+          - maxSkew: 1
+            topologyKey: topology.kubernetes.io/zone
+            whenUnsatisfiable: ScheduleAnyway
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: gpu-worker
       priorityClassName: roma-critical
       nodeSelector:
         gpu: "true"
@@ -642,3 +640,94 @@ spec:
     - ports:
         - port: 443
           protocol: TCP
+
+---
+# =============================================================================
+# Pod Security Admission
+# =============================================================================
+
+apiVersion: policy/v1beta1
+kind: PodSecurity
+metadata:
+  name: roma-baseline
+  namespace: roma-system
+spec:
+  baseline:
+    allowedHostPaths: []
+    seccompProfiles:
+      - runtime/default
+      - unconfined
+    supplementalGroups:
+      ranges:
+        - max: 65535
+          min: 1
+    runAsUser:
+      rule: MustRunAsNonRoot
+    fsGroup:
+      rule: MustRunAs
+      ranges:
+        - max: 65535
+          min: 1
+    volumes:
+      - configMap
+      - emptyDir
+      - persistentVolumeClaim
+      - secret
+      - projected
+    hostNetwork: false
+    hostPorts:
+      - max: 65535
+        min: 1
+    hostPID: false
+    hostIPC: false
+    privileged: false
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+      allowCapabilities: []
+    defaultAddCapabilities: []
+
+---
+apiVersion: policy/v1beta1
+kind: PodSecurity
+metadata:
+  name: kong-restricted
+  namespace: rl-system
+spec:
+  restricted:
+    seccompProfiles:
+      - runtime/default
+    runAsUser:
+      rule: MustRunAsNonRoot
+    runAsGroup:
+      rule: MustRunAs
+      ranges:
+        - max: 65535
+          min: 1
+    supplementalGroups:
+      ranges:
+        - max: 65535
+          min: 1
+    fsGroup:
+      rule: MustRunAs
+      ranges:
+        - max: 65535
+          min: 1
+    volumes:
+      - configMap
+      - emptyDir
+      - persistentVolumeClaim
+      - secret
+      - projected
+    hostNetwork: false
+    hostPID: false
+    hostIPC: false
+    privileged: false
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+    requireCanonicalCSCCapabilities: true

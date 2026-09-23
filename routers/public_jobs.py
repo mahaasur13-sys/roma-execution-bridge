@@ -1,11 +1,8 @@
 """Public job routes extracted from main (A2-2)."""
 
-import asyncio
-import json
 import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
 
 import db_adapter as db
 from deps import verify_api_key
@@ -41,71 +38,6 @@ async def get_status(job_id: str, key_info: dict = Depends(verify_api_key)):
         error=job.get("error"),
         backend=job.get("backend"),
         backend_job_id=job.get("backend_job_id"),
-    )
-
-
-# Терминальные статусы джоба (execution_jobs.status) — на них поток закрывается.
-TERMINAL_STATUSES = frozenset({
-    "completed", "committed", "failed", "dead",
-    "cancelled", "canceled", "timeout",
-})
-
-
-@router.get("/jobs/{job_id}/events")
-async def job_events(job_id: str, key_info: dict = Depends(verify_api_key)):
-    """SSE-стрим статуса джоба (text/event-stream).
-
-    События: `status` (мгновенный снапшот + каждая смена), `end` (терминал).
-    Клиент шлёт `Last-Event-ID`; событийный лог на сервере не хранится, поэтому
-    реплей деградирует до снапшота текущего статуса — клиенту этого достаточно.
-    """
-    tenant_id = key_info["tenant_id"]
-    job = db.get_execution_job(job_id)
-    if not job or job.get("tenant_id") != tenant_id:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    async def stream():
-        seq = 0
-        last_status = None
-        while True:
-            job = db.get_execution_job(job_id)
-            if not job or job.get("tenant_id") != tenant_id:
-                seq += 1
-                yield (
-                    f"id: {seq}\nevent: end\n"
-                    f"data: {json.dumps({'job_id': job_id, 'status': 'not_found'})}\n\n"
-                )
-                return
-            status = job.get("status")
-            if status != last_status:
-                seq += 1
-                last_status = status
-                payload = {
-                    "job_id": job_id,
-                    "status": status,
-                    "created_at": job.get("created_at"),
-                    "started_at": job.get("started_at"),
-                    "completed_at": job.get("completed_at"),
-                    "error": job.get("error"),
-                    "backend": job.get("backend"),
-                    "backend_job_id": job.get("backend_job_id"),
-                }
-                yield f"id: {seq}\nevent: status\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-                if status in TERMINAL_STATUSES:
-                    seq += 1
-                    yield (
-                        f"id: {seq}\nevent: end\n"
-                        f"data: {json.dumps({'job_id': job_id, 'status': status})}\n\n"
-                    )
-                    return
-            # keep-alive: не даём LB/прокси порвать поток в тишине
-            yield ": ping\n\n"
-            await asyncio.sleep(2)
-
-    return StreamingResponse(
-        stream(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
@@ -200,7 +132,7 @@ async def list_jobs(key_info: dict = Depends(verify_api_key)):
         "rom_version": "1.0.0",
         "tenant_id": tenant_id,
         "queue": len(my_jobs),
-        "jobs": my_jobs[:10],
+        "jobs": my_jobs[-10:],
         "execution_modes": [
             "k8s_job",
             "k8s_persistent",
