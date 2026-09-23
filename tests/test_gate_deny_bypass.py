@@ -239,8 +239,13 @@ def test_approved_within_quota_still_takes_local_path(monkeypatch):
     assert sched._local_calls == ["j-live"], sched._local_calls
 
 
-def test_requires_confirmation_is_not_rejection(monkeypatch):
-    """REQUIRES_CONFIRMATION — не отказ: маршрутится ровно как прежде (не блокируется)."""
+def test_requires_confirmation_contract_guard(monkeypatch):
+    """REQUIRES_CONFIRMATION — разрешающая форма спектра (не член отказов), но с P3.7
+    маршрут требует подтверждения: без строгого флага — rejected/CONFIRMATION_REQUIRED.
+
+    Прежний контракт («роутится как прежде без подтверждения») закрыт решением
+    владельца B — G-CONFIRM-PASSTHROUGH-SCHED, tests/test_confirm_passthrough_sched.py.
+    """
     _patch_tenant(monkeypatch, {"tenant_id": "t-pro", "plan": PRO})
     _patch_ledger(monkeypatch, jobs=0, gpu_seconds=0)
     sched = _scheduler(gpu_available=False)
@@ -258,8 +263,11 @@ def test_requires_confirmation_is_not_rejection(monkeypatch):
 
     route = sched.route_job(_job("j-confirm", "t-pro", gpu_required=False))
 
-    assert route["status"] == "queued", route
-    assert route["execution_target"] == "local", route
+    assert is_rejection("REQUIRES_CONFIRMATION") is False, route
+    assert route["status"] == "rejected", route
+    assert route["reason"] == plan_source.CONFIRMATION_REQUIRED, route
+    assert "execution_target" not in route, route
+    assert sched._local_calls == [], sched._local_calls
 
 
 # ── ось 3: предикат отказа — спектр и fail-closed хвост ─────────────────────
