@@ -100,12 +100,21 @@ def _force_confirmation_verdict(monkeypatch, sched) -> None:
 
 
 def _spy_confirmation_ledger(monkeypatch) -> list:
-    """Шпион на существующий леджерный путь (audit_events)."""
+    """Шпион на существующий леджерный путь (audit_events).
+
+    Плюс ключ идемпотентности (`event_exists`, P3.9): записанный факт становится
+    виден последующим проходам — как в реальном append-only леджере.
+    """
     import audit.event_store as audit_store
 
     events: list = []
+    keys: set = set()
+
+    def spy_event_exists(tenant_id, event_type, entity_id):
+        return (tenant_id, event_type, entity_id) in keys
 
     def spy_write_event(tenant_id, event_type, entity_type, entity_id, data):
+        keys.add((tenant_id, event_type, entity_id))
         events.append(
             {
                 "tenant_id": tenant_id,
@@ -117,6 +126,7 @@ def _spy_confirmation_ledger(monkeypatch) -> list:
         )
         return {"id": f"audit-{len(events)}"}
 
+    monkeypatch.setattr(audit_store, "event_exists", spy_event_exists)
     monkeypatch.setattr(audit_store, "write_event", spy_write_event)
     return events
 
