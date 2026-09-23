@@ -213,8 +213,8 @@ def test_cross_tenant_isolation_negative(monkeypatch, tmp_path):
 
     Шпион `_ledger` сам реализует фильтр по арендатору, поэтому здесь гоняется
     настоящий SQL: `db_adapter.insert_audit_event` / `audit_event_exists` на
-    временной sqlite-базе. Схема аудита создаётся фикстурой теста — продуктовых
-    DDL/миграций нет (G-AUDIT-DDL-DRIFT — отдельная эпоха).
+    временной sqlite-базе. Схема накатывается продуктовым бутстрапом
+    `_ensure_audit_events_table` (G-AUDIT-DDL-DRIFT) — не ручным CREATE.
     """
     import sqlite3
 
@@ -223,11 +223,7 @@ def test_cross_tenant_isolation_negative(monkeypatch, tmp_path):
     def factory():
         conn = sqlite3.connect(str(db_file))
         conn.row_factory = sqlite3.Row
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS audit_events ("
-            "id TEXT PRIMARY KEY, tenant_id TEXT, event_type TEXT, entity_type TEXT,"
-            " entity_id TEXT, data TEXT)"
-        )
+        db._ensure_audit_events_table(conn)
         return conn
 
     monkeypatch.delenv("PG_DSN", raising=False)
@@ -256,6 +252,98 @@ def test_cross_tenant_isolation_negative(monkeypatch, tmp_path):
     finally:
         conn.close()
     assert [r["tenant_id"] for r in rows] == [tenant_a, tenant_b], rows
+
+
+# ── G-AUDIT-DDL-DRIFT / G-AUDIT-WRITE-ATOMICITY: чистая БД + идемпотентность ──
+
+
+def _real_sqlite(monkeypatch, tmp_path, db_name="ledger-real.db"):
+    """SQLite-зеркало с продуктовым бутстрапом `_ensure_audit_events_table`.
+
+    Таблица не создаётся вручную — накатывается тем же путём, что в продакшене
+    для SQLite (`db_adapter._ensure_*`): тест падает, если бутстрап не создаёт
+    `audit_events` (G-AUDIT-DDL-DRIFT).
+    """
+    import sqlite3
+
+    db_file = tmp_path / db_name
+
+    def factory():
+        conn = sqlite3.connect(str(db_file))
+        conn.row_factory = sqlite3.Row
+        db._ensure_audit_events_table(conn)
+        return conn
+
+    monkeypatch.delenv("PG_DSN", raising=False)
+    monkeypatch.setattr(db, "_USE_PG", False)
+    monkeypatch.setattr(db, "_sqlite_conn", factory)
+    return factory, db_file
+
+
+def _count_audit_rows(factory, tenant_id, event_type, entity_id) -> int:
+    conn = factory()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM audit_events"
+            " WHERE tenant_id=? AND event_type=? AND entity_id=?",
+            (tenant_id, event_type, entity_id),
+        ).fetchone()
+        return row["n"]
+    finally:
+        conn.close()
+
+
+def test_write_event_once_idempotent_on_real_sqlite(monkeypatch, tmp_path):
+    """Два вызова write_event_once с одним ключом → ровно одна строка (реальный SQL)."""
+    factory, _ = _real_sqlite(monkeypatch, tmp_path, "dedup-idem.db")
+
+    first = audit_store.write_event_once(
+        TENANT, "job.user_confirmed", "job", "j-idem", {"user_confirmed": True}
+    )
+    second = audit_store.write_event_once(
+        TENANT, "job.user_confirmed", "job", "j-idem", {"user_confirmed": True}
+    )
+
+    assert first.get("skipped") is not True, first
+    assert second == {"id": None, "skipped": True}, second
+    assert _count_audit_rows(factory, TENANT, "job.user_confirmed", "j-idem") == 1
+
+
+def test_insert_audit_event_dedupes_at_db_level(monkeypatch, tmp_path):
+    """G-AUDIT-WRITE-ATOMICITY: два прямых INSERT с одним ключом → одна строка.
+
+    Частичный UNIQUE-индекс + INSERT OR IGNORE закрывают TOCTOU-окно между
+    `event_exists` и `write_event_once`: даже минуя прикладную проверку, второй
+    INSERT с тем же ключом не создаёт дубль.
+    """
+    factory, _ = _real_sqlite(monkeypatch, tmp_path, "dedup-atomic.db")
+
+    db.insert_audit_event(
+        "e-1", TENANT, "job.user_confirmed", "job", "j-atomic", {"user_confirmed": True}
+    )
+    db.insert_audit_event(
+        "e-2", TENANT, "job.user_confirmed", "job", "j-atomic", {"user_confirmed": True}
+    )
+
+    assert _count_audit_rows(factory, TENANT, "job.user_confirmed", "j-atomic") == 1
+
+
+def test_both_writers_share_table_and_dedupe(monkeypatch, tmp_path):
+    """Оба писателя идут в одну таблицу audit_events и подчиняются идемпотентности."""
+    import audit_events as root_events
+
+    factory, _ = _real_sqlite(monkeypatch, tmp_path, "dedup-unified.db")
+
+    # корневой писатель (обёртка) → audit.event_store.write_event → audit_events
+    root_events.write_audit_event(
+        TENANT, "job.created", "job", "j-u1", {"decision_id": "d1"}
+    )
+    # внутренний идемпотентный писатель с тем же ключом → пропуск, дубля нет
+    audit_store.write_event_once(
+        TENANT, "job.created", "job", "j-u1", {"decision_id": "d1"}
+    )
+
+    assert _count_audit_rows(factory, TENANT, "job.created", "j-u1") == 1
 
 
 # ── контроли: не-подтверждённые ветки по-прежнему ничего не пишут ───────────

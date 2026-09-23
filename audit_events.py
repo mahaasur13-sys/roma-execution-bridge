@@ -1,7 +1,14 @@
-"""DecisionOS — Audit Events (root-level, sandbox-safe)."""
+"""DecisionOS — Audit Events (root-level, sandbox-safe).
 
-import uuid
-import db_adapter as db
+Единый путь записи (сведение писателей, G-AUDIT-DDL-DRIFT): единственный
+реализующий писатель аудит-событий — `audit.event_store.write_event`
+(→ db_adapter.insert_audit_event). Этот модуль оставлен как совместимая
+обёртка для существующих вызовов (router_decisions, router_jobs) — дублирующий
+uuid4+INSERT снят, а не размножен. Идемпотентность ключевых сущностей
+обеспечивается на уровне БД (частичный UNIQUE + ON CONFLICT / INSERT OR IGNORE).
+"""
+
+import audit.event_store as _store
 
 
 def write_audit_event(
@@ -11,10 +18,9 @@ def write_audit_event(
     entity_id: str,
     data: dict | None = None,
 ) -> dict:
-    """Write a single audit event to PG. Returns {id, ...}."""
-    eid = str(uuid.uuid4())
-    return db.insert_audit_event(
-        eid, tenant_id, event_type, entity_type, entity_id, data or {}
+    """Write a single audit event to PG/SQLite. Returns {id, ...}."""
+    return _store.write_event(
+        tenant_id, event_type, entity_type, entity_id, data or {}
     )
 
 

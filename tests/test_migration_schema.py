@@ -60,6 +60,7 @@ EXPECTED_TABLES = [
     "ledger_entries",
     "execution_jobs",
     "usage_events",
+    "audit_events",
     "submit_idempotency_keys",
     "invite_codes",
     "invite_usage",
@@ -126,4 +127,6 @@ def test_sqlite_ensure_helpers_are_idempotent():
     db_adapter._ensure_submit_idempotency_table(c)
     db_adapter._ensure_execution_jobs_table(c)
     db_adapter._ensure_execution_jobs_table(c)
+    db_adapter._ensure_audit_events_table(c)
+    db_adapter._ensure_audit_events_table(c)
     conn.close()
