@@ -29,8 +29,11 @@ from deps import (
     alert_dispatcher,
     limiter,
     billing_ledger,
-    PLANS,
+    plan_config,
+    PLANS as PLANS,
 )
+
+import plan_source
 
 # DecisionOS — Week 1 foundation
 from cost.gate import EnterpriseDecisionGate
@@ -46,6 +49,7 @@ from prometheus_client import (
 from monitoring.metrics import (
     track_spend_cap,
     track_spend_cap_blocked,
+    track_gate_unavailable,
 )
 from alerts import Alert, AlertLevel
 
@@ -74,10 +78,33 @@ _http_request_count = 0
 _billing_event_count = 0
 
 
+def _plan_limits_or_refusal(plan_name: str | None) -> tuple[dict | None, str | None]:
+    """Единый вывод лимитов тира для API-пути (квоты — из plan_source).
+
+    Тир вне объявленной схемы не получает молчаливый free-дефолт: вердикт —
+    `GATE_UNAVAILABLE` (fail-closed), тот же код, что у планировщика и CLI.
+    """
+    try:
+        return plan_config(plan_name), None
+    except plan_source.PlanSourceError as exc:
+        track_gate_unavailable("api.plan")
+        logger.error(
+            "GATE_UNAVAILABLE (api.plan): %s · plan=%r — решение по квоте не выдаётся",
+            exc,
+            plan_name,
+        )
+        return (
+            None,
+            f"{plan_source.GATE_UNAVAILABLE}: квота тира не установлена ({exc})",
+        )
+
+
 def _check_spend_cap(tenant_id: str, estimated_cost: float, plan_name: str = "free"):
     """Проверка spend-cap ПЕРЕД созданием job."""
-    plan = PLANS.get(plan_name, PLANS.get("free", {}))
-    cap = plan.get("spend_cap_usd", 0)
+    plan, refusal = _plan_limits_or_refusal(plan_name)
+    if plan is None:
+        return False, refusal
+    cap = plan["spend_cap_usd"]
     if cap <= 0:
         return (
             True,
@@ -150,9 +177,11 @@ def _check_spend_cap(tenant_id: str, estimated_cost: float, plan_name: str = "fr
 def _check_limits(tenant_id: str) -> tuple[bool, str]:
     """Quota check for the internal/demo submit path. Returns (allowed, reason)."""
     t = db.get_tenant(tenant_id)
-    plan_name = t.get("plan", "free") if t else "free"
-    plan = PLANS.get(plan_name, PLANS.get("free", {}))
-    max_jobs = plan.get("max_jobs_per_month", 50)
+    plan_name = t.get("plan") if t else None
+    plan, refusal = _plan_limits_or_refusal(plan_name)
+    if plan is None:
+        return False, refusal
+    max_jobs = plan["max_jobs_per_month"]
     if max_jobs < 0:
         return True, ""
     used = db.count_jobs_for_tenant_total(tenant_id)
@@ -1143,10 +1172,10 @@ async def submit_atom_cluster(payload: dict, key_info: dict = Depends(verify_api
 async def get_usage(key_info: dict = Depends(verify_api_key)):
     tenant_id = key_info["tenant_id"]
     t = db.get_tenant(tenant_id)
-    plan_name = t.get("plan", "free") if t else "free"
-    plan = PLANS.get(plan_name, PLANS.get("free", {}))
+    plan_name = t.get("plan") if t else None
+    plan, refusal = _plan_limits_or_refusal(plan_name)
     usage_data = db.get_tenant_usage_db(tenant_id)
-    max_jobs = plan.get("max_jobs_per_month", 50)
+    max_jobs = plan["max_jobs_per_month"] if plan else None
     sub_status = t.get("subscription_status", "inactive") if t else "inactive"
     return {
         "tenant_id": tenant_id,
@@ -1156,7 +1185,9 @@ async def get_usage(key_info: dict = Depends(verify_api_key)):
         "limits": {
             "max_jobs_per_month": max_jobs,
             "max_jobs_per_month_display": (
-                "unlimited" if max_jobs == -1 else str(max_jobs)
+                refusal
+                if max_jobs is None
+                else "unlimited" if max_jobs == -1 else str(max_jobs)
             ),
         },
     }
@@ -1415,11 +1446,17 @@ def _resolve_api_key(request: Request) -> dict | None:
 
 def _render_dashboard(tenant_id: str, plan_name: str, api_key: str) -> str:
     usage_data = _get_tenant_usage(tenant_id)
-    plan = PLANS.get(plan_name, PLANS.get("free", {}))
-    max_jobs = plan.get("max_jobs_per_month", 50)
+    plan, refusal = _plan_limits_or_refusal(plan_name)
+    max_jobs = plan["max_jobs_per_month"] if plan else None
     used = usage_data["total_jobs"]
-    pct = min(100, round(used / max_jobs * 100, 1)) if max_jobs > 0 else 0
-    limit_display = "∞" if max_jobs == -1 else str(max_jobs)
+    pct = (
+        min(100, round(used / max_jobs * 100, 1))
+        if max_jobs is not None and max_jobs > 0
+        else 0
+    )
+    limit_display = (
+        refusal if max_jobs is None else "∞" if max_jobs == -1 else str(max_jobs)
+    )
     bar_color = "#22c55e" if pct < 60 else "#f59e0b" if pct < 85 else "#ef4444"
 
     my_jobs = [j for j in jobs.values() if j.get("tenant_id") == tenant_id]
@@ -1649,7 +1686,7 @@ async def dashboard(request: Request):
             tenant_id = sess["tenant_id"]
             api_key_raw = sess["api_key"]
             t = db.get_tenant(tenant_id)
-            plan_name = t["plan"] if t else PLANS.get("free", {})
+            plan_name = t["plan"] if t else None
             html = _render_dashboard(tenant_id, plan_name, api_key_raw)
             return Response(content=html, media_type="text/html")
 
