@@ -1509,11 +1509,15 @@ async def _insert_audit_event_pg(eid, tid, etype, ent_type, ent_id, data_json):
                 "INSERT INTO audit_events (id, tenant_id, event_type, entity_type, entity_id, data)"
                 " VALUES (%s,%s,%s,%s,%s,%s::jsonb)"
                 " ON CONFLICT (tenant_id, event_type, entity_id)"
-                " WHERE entity_id IS NOT NULL AND entity_id <> 'unknown' DO NOTHING",
+                " WHERE entity_id IS NOT NULL AND entity_id <> 'unknown' DO NOTHING"
+                " RETURNING id",
                 (eid, tid, etype, ent_type, ent_id, data_json),
             )
+            inserted = cur.fetchone() is not None
         conn.commit()
-        return {"id": eid}
+        if inserted:
+            return {"id": eid}
+        return {"id": None, "skipped": True}
     finally:
         _pg_return(conn)
 
@@ -1522,12 +1526,14 @@ def _insert_audit_event_sqlite(eid, tid, etype, ent_type, ent_id, data_json):
     c = _sqlite_conn()
     try:
         _ensure_audit_events_table(c)
-        c.execute(
+        cur = c.execute(
             "INSERT OR IGNORE INTO audit_events (id, tenant_id, event_type, entity_type, entity_id, data)"
             " VALUES (?,?,?,?,?,?)",
             (eid, tid, etype, ent_type, ent_id, data_json),
         )
         c.commit()
+        if cur.rowcount == 0:
+            return {"id": None, "skipped": True}
         return {"id": eid}
     finally:
         c.close()

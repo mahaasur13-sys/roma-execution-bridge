@@ -44,6 +44,7 @@ DUP_ROWS = [
     ("x2", "tB", "job.user_confirmed", "job", "job-X"),
 ]
 
+
 def _pg_dsn() -> str | None:
     return os.environ.get("PG_DSN") or os.environ.get("DATABASE_URL")
 
@@ -82,30 +83,40 @@ def _reset_tables(conn) -> None:
     cur.execute("DROP TABLE IF EXISTS audit_events_dedupe_backup")
 
 
+def _cleanup(conn) -> None:
+    """Восстановить чистую migrated-форму и закрыть соединение (идемпотентно)."""
+    try:
+        _reset_tables(conn)
+        _apply_011(conn)
+    finally:
+        conn.close()
+
+
 @pytest.fixture()
 def prod_form():
-    """audit_events в прод-форме (без created_at) + дубли эпохи double-write."""
+    """audit_events в прод-форме (без created_at) + дубли эпохи double-write.
+
+    Setup обёрнут в try/finally: при ошибке подготовки (CREATE/INSERT) тестовая
+    БД не остаётся без таблицы, а соединение всегда закрывается (Minor CR).
+    """
     if not _pg_reachable():
         pytest.skip("PG not reachable — reconciling audit requires live PG; issue: P1-C · expiry: 2026-12-31")
     import psycopg2
 
     conn = psycopg2.connect(_pg_dsn())
-    _reset_tables(conn)
-    cur = conn.cursor()
-    cur.execute(PROD_FORM_SCHEMA)
-    for rid, tid, et, ent, eid in DUP_ROWS:
-        cur.execute(
-            "INSERT INTO audit_events (id,tenant_id,event_type,entity_type,entity_id,data)"
-            " VALUES (%s,%s,%s,%s,%s,%s::jsonb)",
-            (rid, tid, et, ent, eid, '{"user_confirmed": true}'),
-        )
     try:
+        _reset_tables(conn)
+        cur = conn.cursor()
+        cur.execute(PROD_FORM_SCHEMA)
+        for rid, tid, et, ent, eid in DUP_ROWS:
+            cur.execute(
+                "INSERT INTO audit_events (id,tenant_id,event_type,entity_type,entity_id,data)"
+                " VALUES (%s,%s,%s,%s,%s,%s::jsonb)",
+                (rid, tid, et, ent, eid, '{"user_confirmed": true}'),
+            )
         yield conn
     finally:
-        # восстановить чистую migrated-форму для последующих тестов
-        _reset_tables(conn)
-        _apply_011(conn)
-        conn.close()
+        _cleanup(conn)
 
 
 @pytest.mark.pg
@@ -167,21 +178,19 @@ def test_011_type_drift_fails_closed():
     import psycopg2
 
     conn = psycopg2.connect(_pg_dsn())
-    _reset_tables(conn)
-    cur = conn.cursor()
-    cur.execute(
-        "CREATE TABLE audit_events (id TEXT PRIMARY KEY, tenant_id TEXT, event_type TEXT,"
-        " entity_type TEXT, entity_id INTEGER, data JSONB)"
-    )
     try:
+        _reset_tables(conn)
+        cur = conn.cursor()
+        cur.execute(
+            "CREATE TABLE audit_events (id TEXT PRIMARY KEY, tenant_id TEXT, event_type TEXT,"
+            " entity_type TEXT, entity_id INTEGER, data JSONB)"
+        )
         with pytest.raises(Exception) as exc:
             _apply_011(conn)
         assert "schema drift" in str(exc.value)
         assert "entity_id" in str(exc.value)
     finally:
-        _reset_tables(conn)
-        _apply_011(conn)
-        conn.close()
+        _cleanup(conn)
 
 
 @pytest.mark.pg
@@ -193,34 +202,40 @@ def test_011_lock_blocks_concurrent_write():
     import psycopg2.errors
 
     conn = psycopg2.connect(_pg_dsn())
-    _reset_tables(conn)
-    cur = conn.cursor()
-    cur.execute(PROD_FORM_SCHEMA)
-    cur.execute(
-        "INSERT INTO audit_events VALUES ('a1','tA','job.user_confirmed','job','job-A','{}'::jsonb)"
-    )
-
-    holder = psycopg2.connect(_pg_dsn())
-    holder.autocommit = False
-    holder.cursor().execute("LOCK TABLE audit_events IN SHARE ROW EXCLUSIVE MODE")
-
-    writer = psycopg2.connect(_pg_dsn())
-    writer.autocommit = True
-    wcur = writer.cursor()
-    wcur.execute("SET statement_timeout = 700")
-    blocked = False
+    holder = None
+    writer = None
     try:
-        wcur.execute(
-            "INSERT INTO audit_events VALUES ('a2','tA','job.user_confirmed','job','job-A','{}'::jsonb)"
+        _reset_tables(conn)
+        cur = conn.cursor()
+        cur.execute(PROD_FORM_SCHEMA)
+        cur.execute(
+            "INSERT INTO audit_events VALUES ('a1','tA','job.user_confirmed','job','job-A','{}'::jsonb)"
         )
-    except psycopg2.errors.QueryCanceled:
-        blocked = True
-    finally:
-        holder.commit()
-        holder.close()
-        writer.close()
 
-    assert blocked, "параллельный INSERT не был заблокирован локом (TOCTOU открыт)"
-    _reset_tables(conn)
-    _apply_011(conn)
-    conn.close()
+        holder = psycopg2.connect(_pg_dsn())
+        holder.autocommit = False
+        holder.cursor().execute("LOCK TABLE audit_events IN SHARE ROW EXCLUSIVE MODE")
+
+        writer = psycopg2.connect(_pg_dsn())
+        writer.autocommit = True
+        wcur = writer.cursor()
+        wcur.execute("SET statement_timeout = 700")
+        blocked = False
+        try:
+            wcur.execute(
+                "INSERT INTO audit_events VALUES ('a2','tA','job.user_confirmed','job','job-A','{}'::jsonb)"
+            )
+        except psycopg2.errors.QueryCanceled:
+            blocked = True
+
+        assert blocked, "параллельный INSERT не был заблокирован локом (TOCTOU открыт)"
+    finally:
+        if holder is not None:
+            try:
+                holder.commit()
+            except Exception:
+                holder.rollback()
+            holder.close()
+        if writer is not None:
+            writer.close()
+        _cleanup(conn)

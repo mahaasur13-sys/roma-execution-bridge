@@ -318,13 +318,15 @@ def test_insert_audit_event_dedupes_at_db_level(monkeypatch, tmp_path):
     """
     factory, _ = _real_sqlite(monkeypatch, tmp_path, "dedup-atomic.db")
 
-    db.insert_audit_event(
+    first = db.insert_audit_event(
         "e-1", TENANT, "job.user_confirmed", "job", "j-atomic", {"user_confirmed": True}
     )
-    db.insert_audit_event(
+    second = db.insert_audit_event(
         "e-2", TENANT, "job.user_confirmed", "job", "j-atomic", {"user_confirmed": True}
     )
 
+    assert first == {"id": "e-1"}
+    assert second == {"id": None, "skipped": True}
     assert _count_audit_rows(factory, TENANT, "job.user_confirmed", "j-atomic") == 1
 
 
