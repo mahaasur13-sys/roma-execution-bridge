@@ -200,20 +200,26 @@ class ROMAGPUScheduler:
         `write_event_once` — ключ (tenant_id, event_type, entity_id) не даёт
         дублировать факт подтверждения, когда задача проходит route_job дважды
         (submit → execute_job). Повторный submit той же задачи тоже не пишет копию.
+
+        Ключ существует только у задачи с job_id (T2, фоллоу-ап тредов #93):
+        подтверждённая задача БЕЗ job_id пишется всегда (`dedupe=False`) — нет ключа,
+        нет идемпотентности, но нет и склейки разных задач под общим entity_id.
         """
         from audit.event_store import write_event_once
 
+        job_id = job.get("job_id")
         return write_event_once(
             job.get("tenant_id") or "unknown",
             "job.user_confirmed",
             "job",
-            job.get("job_id") or "unknown",
+            job_id or "unknown",
             {
                 "user_confirmed": True,
                 "decision": plan_source.REQUIRES_CONFIRMATION,
                 "decision_reason": prediction.get("decision_reason", ""),
                 "estimated_cost": prediction.get("estimated_cost", 0),
             },
+            dedupe=bool(job_id),
         )
 
     async def execute_job(self, job: dict) -> dict:
