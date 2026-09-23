@@ -187,6 +187,77 @@ def test_different_confirmed_jobs_are_not_glued(monkeypatch):
     assert {e["entity_id"] for e in confirmed} == {"j-dedup-a", "j-dedup-b"}, confirmed
 
 
+def test_confirmed_jobs_without_job_id_are_not_glued(monkeypatch):
+    """T2 (тред #93): нет job_id — нет ключа: два подтверждения → два события.
+
+    Край: задача без job_id фабрикуется напрямую (в живом пути submit её назначает).
+    Без ключа идемпотентности нет, но и склейки разных задач под общим entity_id нет.
+    """
+    _patch_tenant(monkeypatch)
+    events = _ledger(monkeypatch)
+    sched = _scheduler()
+
+    sched.route_job(_job(None, confirmed=True))
+    sched.route_job(_job(None, confirmed=True))
+
+    confirmed = _confirmed_events(events)
+    assert len(confirmed) == 2, events
+    assert {e["entity_id"] for e in confirmed} == {"unknown"}, confirmed
+
+
+# ── Trivial (тред #93): негативная кросс-тенантская изоляция через SQL ───────
+
+
+def test_cross_tenant_isolation_negative(monkeypatch, tmp_path):
+    """Trivial (тред #93): изоляция арендаторов проверяется SQL-путём адаптера.
+
+    Шпион `_ledger` сам реализует фильтр по арендатору, поэтому здесь гоняется
+    настоящий SQL: `db_adapter.insert_audit_event` / `audit_event_exists` на
+    временной sqlite-базе. Схема аудита создаётся фикстурой теста — продуктовых
+    DDL/миграций нет (G-AUDIT-DDL-DRIFT — отдельная эпоха).
+    """
+    import sqlite3
+
+    db_file = tmp_path / "ledger-isolation.db"
+
+    def factory():
+        conn = sqlite3.connect(str(db_file))
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS audit_events ("
+            "id TEXT PRIMARY KEY, tenant_id TEXT, event_type TEXT, entity_type TEXT,"
+            " entity_id TEXT, data TEXT)"
+        )
+        return conn
+
+    monkeypatch.delenv("PG_DSN", raising=False)
+    monkeypatch.setattr(db, "_USE_PG", False)
+    monkeypatch.setattr(db, "_sqlite_conn", factory)
+
+    tenant_a, tenant_b, job_id = "tenant-a", "tenant-b", "x-shared-job"
+    db.insert_audit_event(
+        "e-a", tenant_a, "job.user_confirmed", "job", job_id, {"user_confirmed": True}
+    )
+
+    assert db.audit_event_exists(tenant_a, "job.user_confirmed", job_id) is True
+    assert db.audit_event_exists(tenant_b, "job.user_confirmed", job_id) is False
+
+    db.insert_audit_event(
+        "e-b", tenant_b, "job.user_confirmed", "job", job_id, {"user_confirmed": True}
+    )
+
+    assert db.audit_event_exists(tenant_b, "job.user_confirmed", job_id) is True
+    conn = factory()
+    try:
+        rows = conn.execute(
+            "SELECT tenant_id FROM audit_events WHERE entity_id=? ORDER BY tenant_id",
+            (job_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    assert [r["tenant_id"] for r in rows] == [tenant_a, tenant_b], rows
+
+
 # ── контроли: не-подтверждённые ветки по-прежнему ничего не пишут ───────────
 
 

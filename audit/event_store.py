@@ -25,7 +25,13 @@ def event_exists(tenant_id: str, event_type: str, entity_id: str) -> bool:
 
 
 def write_event_once(
-    tenant_id: str, event_type: str, entity_type: str, entity_id: str, data: dict
+    tenant_id: str,
+    event_type: str,
+    entity_type: str,
+    entity_id: str,
+    data: dict,
+    *,
+    dedupe: bool = True,
 ) -> dict:
     """Идемпотентная запись: повторный проход не дублирует тот же факт.
 
@@ -35,7 +41,21 @@ def write_event_once(
     получалось два иммутабельных аудит-события. Здесь второй проход пропускается
     (структурно наблюдаемо возвратом `skipped: True`); чужие задачи не склеиваются —
     ключ включает entity_id.
+
+    T2 (фоллоу-ап тредов #93): при `dedupe=False` — у вызывающего нет устойчивого
+    ключа (например, у задачи нет job_id) — запись выполняется ВСЕГДА. Нет ключа,
+    нет идемпотентности, но нет и склейки чужих фактов: разные неключевые события
+    не сливаются в одно под общим entity_id.
     """
+    if not dedupe:
+        logger.debug(
+            "audit event written without idempotency key: %s tenant=%s entity=%s",
+            event_type,
+            tenant_id,
+            entity_id,
+        )
+        return write_event(tenant_id, event_type, entity_type, entity_id, data)
+
     if event_exists(tenant_id, event_type, entity_id):
         logger.debug(
             "audit event skipped (already present): %s tenant=%s entity=%s",
