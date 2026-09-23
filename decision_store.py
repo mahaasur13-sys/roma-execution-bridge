@@ -67,8 +67,20 @@ def submit_job_through_gate(
     plan_name = tenant.get("plan", "free")
 
     # 4. Quota check
+    import plan_source
+    from monitoring import metrics as _metrics
+
     job_count = db.count_jobs_by_tenant(tenant_id)
-    max_jobs = _get_plan_limit(plan_name)
+    try:
+        max_jobs = _get_plan_limit(plan_name)
+    except plan_source.PlanSourceError as exc:
+        # Источник квот недоступен: вердикт не выносится — отказ отдельным кодом,
+        # никогда не молчаливый allow (GATE_UNAVAILABLE-ряд).
+        _metrics.track_gate_unavailable("decision_store.submit")
+        reason = f"{plan_source.GATE_UNAVAILABLE}: квота тарифа не установлена ({exc})"
+        logger.error("GATE_UNAVAILABLE: submit заблокирован — %s", exc)
+        _deny(tenant_id, request_id, reason, job_count, 0)
+        raise HTTPException(status_code=402, detail=reason)
     if max_jobs != -1 and job_count >= max_jobs:
         reason = f"Plan '{plan_name}' limit: {job_count}/{max_jobs}"
         _deny(tenant_id, request_id, reason, job_count, 0)
@@ -152,11 +164,30 @@ def complete_job(job_id: str, tenant_id: str) -> dict | None:
 
 def get_tenant_usage(tenant_id: str) -> dict:
     """Return current month usage + limits."""
+    import plan_source
+
     tenant = db.get_tenant(tenant_id)
     plan_name = tenant.get("plan", "free") if tenant else "free"
-    max_jobs = _get_plan_limit(plan_name)
     job_count = db.count_jobs_by_tenant(tenant_id)
     sub_status = tenant.get("subscription_status", "inactive") if tenant else "inactive"
+
+    # Источник недоступен → лимит не выдумывается: null + honest display.
+    try:
+        max_jobs = _get_plan_limit(plan_name)
+    except plan_source.PlanSourceError as exc:
+        from monitoring import metrics as _metrics
+
+        _metrics.track_gate_unavailable("decision_store.usage")
+        logger.error(
+            "GATE_UNAVAILABLE: лимит тарифа %r не установлен — %s", plan_name, exc
+        )
+        max_jobs = None
+    if max_jobs is None:
+        display = "unavailable"
+    elif max_jobs == -1:
+        display = "unlimited"
+    else:
+        display = str(max_jobs)
 
     return {
         "tenant_id": tenant_id,
@@ -165,9 +196,7 @@ def get_tenant_usage(tenant_id: str) -> dict:
         "usage": {"total_jobs": job_count, "total_gpu_seconds": 0},
         "limits": {
             "max_jobs_per_month": max_jobs,
-            "max_jobs_per_month_display": (
-                "unlimited" if max_jobs == -1 else str(max_jobs)
-            ),
+            "max_jobs_per_month_display": display,
         },
     }
 
@@ -180,17 +209,18 @@ def count_jobs(tenant_id: str) -> int:
 
 
 def _get_plan_limit(plan_name: str) -> int:
-    """Look up max_jobs_per_month from plans.json."""
-    try:
-        import json
-        from pathlib import Path
+    """Лимит джобов/месяц — из единственного источника квот (`config/plans.json`).
 
-        plans_path = Path(__file__).parent / "plans.json"
-        plans = json.loads(plans_path.read_text())
-        plan = plans.get(plan_name, plans.get("start", {}))
-        return plan.get("max_jobs_per_month", 50)
-    except Exception:
-        return 50
+    G-QUOTA-SOURCE-FRAGMENTED: здесь читался КОРНЕВОЙ `plans.json`
+    (`Path(__file__).parent / "plans.json"`), которого в дереве нет. Доказательство
+    мёртвого чтения: `ls plans.json` → файла нет, `plans.get("start", {})` → {},
+    итог — литерал «50» из последней ветки `.get` для ЛЮБОГО тарифа, молча.
+    Значение выводится из источника; недоступность источника — отказ (fail-closed),
+    а не выдуманное число.
+    """
+    import plan_source
+
+    return plan_source.plan_limits(plan_name).jobs_per_month
 
 
 def _estimate_cost(payload: dict) -> float:

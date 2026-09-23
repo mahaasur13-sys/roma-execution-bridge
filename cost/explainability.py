@@ -7,10 +7,20 @@ GPU_RATE = 0.000086  # $ per GPU-second (PRO tier)
 
 
 class CostExplainabilityEngine:
-    def explain(self, task: str) -> dict:
+    @staticmethod
+    def _money(value) -> str:
+        """Цена может быть не установлена (нет записи клиента) — печать честная."""
+        return "n/a" if value is None else f"{value:.2f}"
+
+    def explain(self, task: str, tenant_id: str | None = None) -> dict:
         gpu_required = "gpu" in task.lower() or "train" in task.lower()
+        # G-PRICING-TIER-PATH: тариф — из записи клиента; без tenant_id решения
+        # о цене нет (предиктор отказывает кодом UNKNOWN_TENANT).
         pred = CostPredictor().predict(
-            task, gpu_required=gpu_required, plugin_type="ml_training"
+            task,
+            gpu_required=gpu_required,
+            plugin_type="ml_training",
+            tenant_id=tenant_id,
         )
         bd = pred["breakdown"]
         gpu_seconds = bd.get("gpu_seconds", 3600)
@@ -30,7 +40,12 @@ class CostExplainabilityEngine:
                 "Storage": round(bd.get("storage", 0.0), 4),
                 "Overhead": round(bd.get("overhead", 0.0), 4),
             },
-            "total_cost": round(pred["estimated_cost"], 4),
+            "total_cost": (
+                None
+                if pred["estimated_cost"] is None
+                else round(pred["estimated_cost"], 4)
+            ),
+            "decision": pred.get("decision"),
             "alternatives": alternatives,
             "decision_reasons": reasons,
             "plugin_used": plugin_info["name"],
@@ -67,7 +82,10 @@ class CostExplainabilityEngine:
         if pred.get("risk_flags"):
             reasons.append(f"Risk flags: {', '.join(pred['risk_flags'])}")
         reasons.append(f"Plugin: {plugin['name']} (GPU_ENABLED capability)")
-        reasons.append(f"Cost estimate: ${pred['estimated_cost']:.2f} (within quota)")
+        reasons.append(
+            f"Cost estimate: ${self._money(pred.get('estimated_cost'))} "
+            f"(tier: {pred.get('tier') or 'не установлен'})"
+        )
         return reasons
 
     def _plan_steps(
@@ -77,7 +95,7 @@ class CostExplainabilityEngine:
             {"phase": "validation", "description": "Input contract + security gate"},
             {
                 "phase": "cost_check",
-                "description": f"Estimate: ${pred['estimated_cost']:.2f}",
+                "description": f"Estimate: ${self._money(pred.get('estimated_cost'))}",
             },
             {"phase": "plugin_load", "description": f"Load {plugin['name']} plugin"},
             {"phase": "scheduling", "description": f"Duration ~{gpu_seconds/60:.0f}m"},

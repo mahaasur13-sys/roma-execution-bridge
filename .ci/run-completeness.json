@@ -2,12 +2,12 @@
   "note": "A-6: канон полноты набора тестов. Числа — машинный факт последнего repo-wide прогона (junitxml), не оценка. Порог никогда не понижается: любое отличие от факта прогона роняет гейт, обновление — только явным диффом этого файла вместе с изменением набора тестов.",
   "rule": "collected == executed (нулевое расхождение) И collected/passed/failures/errors/skipped == canon. Проверяет scripts/ci_run_completeness.py, вызывается из ci/coverage_gate.sh и из CI-шага scripts/ci_junit_smoke.py. Прежний порог 'collected >= 244' пропускал исчезновение 19 тестов — заменён точным равенством. G-CI-PG-CANON: скипы классифицированы машинно по причине в junitxml — admission (постоянная канона, admission_skips) и env-skip (проверка не исполнена из-за отсутствия окружения): локально допустимо 0 или env_skips_expected, при CI/GITHUB_ACTIONS — строго 0, потому что CI поднимает реальный PostgreSQL. G-CANON-ENV-PARITY: ожидания по среде объявлены явно в объекте 'profiles' (node · ci): profiles[<env>].passed/admission_skips/env_skips_max/named_admissions. Профиль берётся из окружения (CI/GITHUB_ACTIONS → ci, иначе node); среда без профиля — отказ (fail-closed). Admission-скипы обязаны быть записаны поимённо (тройка класс·симптом·issue/expiry): скип без поимённой записи и предписанная запись, которой не было, — оба случая отказ.",
   "canon": {
-    "collected": 338,
-    "passed": 332,
+    "collected": 384,
+    "passed": 378,
     "failures": 0,
     "errors": 0,
     "skipped": 6,
-    "measured_on": "2026-09-22",
+    "measured_on": "2026-09-23",
     "run_scope": "repo-wide (target=., pytest -q -p no:cacheprovider -p no:warnings)",
     "admission_skips": 6,
     "env_skips_expected": 10,
@@ -132,14 +132,62 @@
       },
       "reason": "G-CANON-ENV-PARITY (F2): плоский канон был нода-относителен — в CI он краснел контрактно (admission 8 != 6), а не по делу. Ожидания разведены по профилям среды: нода 332 + 6 admission, CI 331 + 7 admission (единственный CI-исключительный скип — R6-live контроль живого promtail-конфига, на раннере платформенных артефактов нет), env-skip в CI строго 0. Admission-скипы записаны поимённо с тройкой класс·симптом·срок; счётчик без имён больше не принимается. F1 (commits eb9700b) снял нодовую зависимость lease-контроля — тот тест теперь исполняется и в CI. +3 профильных негатива (чужая среда → отказ, admission без поимённой записи → отказ, профильный набор → зелёный): 335 -> 338.",
       "note": "История набора: 254 -> 263 -> 270 -> 276 -> 280 -> 281 -> 287 -> 331 -> 335 -> 338. Полы покрытия не менялись (36.3/62.2); floor_history не тронут. Чистая комната на ноде имеет платформенный promtail-конфиг, поэтому CI-профиль (admission=7) в ней не воспроизводится — судья профиля только CI-раннер."
+    },
+    {
+      "date": "2026-09-22-p3pricing-c1",
+      "canon": {
+        "collected": 362,
+        "passed": 356,
+        "skipped": 6,
+        "failures": 0,
+        "errors": 0
+      },
+      "reason": "G-PRICING-TIER-PATH (P3 PRICING-INTEGRITY, коммит C1): +24 проверки — тариф берётся из записи клиента (db.get_tenant) и только он; payload-тариф не авторитетен (игнорируется с логом попытки); клиент без записи получает отдельный отказ UNKNOWN_TENANT (не silent-FREE), план вне явной карты — UNKNOWN_PLAN; служебный админ-канал — только по явно подписанному источнику. Состав: 18 проверок tests/test_pricing_tier_path.py (предиктор/explainability/scheduler) + 6 проверок tests/test_roma_cli_tier_path.py (CLI: tenant из окружения, восстановленная импортируемость модуля, отказ вместо падения на не установленной цене). Нодовый профиль 356 = 332 + 24, CI-профиль 355 = 331 + 24.",
+      "note": "История набора: 254 -> 263 -> 270 -> 276 -> 280 -> 281 -> 287 -> 331 -> 335 -> 338 -> 362. Полы покрытия не менялись (36.3/62.2); floor_history не тронут. Знаменатель продукта изменился не правкой продукта: cost/predictor.py не импортировался ни одним тестом и потому не попадал в отчёт coverage, а roma_cli.py был неисполним по импорту — теперь оба модуля в области измерения."
+    },
+    {
+      "date": "2026-09-22-p3pricing-c2",
+      "canon": {
+        "collected": 371,
+        "passed": 365,
+        "skipped": 6,
+        "failures": 0,
+        "errors": 0
+      },
+      "reason": "G-PRICING-TIER-PATH · Stripe-головка (P3 PRICING-INTEGRITY, коммит C2): +9 проверок tests/test_stripe_subscription_plan.py — customer.subscription.updated доводит план до записи клиента через update_tenant_subscription (8 проверок на инъектированном хранилище + 1 живая PG-проверка записи); неизвестный клиент и план вне объявленной карты ничего не записывают; реплей того же события — одна запись и одна проводка. Нодовый профиль 365 = 356 + 9, CI-профиль 364 = 355 + 9.",
+      "note": "История набора: 254 -> 263 -> 270 -> 276 -> 280 -> 281 -> 287 -> 331 -> 335 -> 338 -> 362 -> 371. Полы покрытия не менялись (36.3/62.2); floor_history не тронут. Все 9 проверок исполняются в обеих средах (PG-проверка с маркером pg: PG живой на ноде и в CI, env-skip печатается гейтом как 0)."
+    },
+    {
+      "date": "2026-09-23-p3pricing-c3",
+      "canon": {
+        "collected": 382,
+        "passed": 376,
+        "skipped": 6,
+        "failures": 0,
+        "errors": 0
+      },
+      "reason": "G-FREE-DECISION-HEURISTIC + G-QUOTA-SOURCE-FRAGMENTED (P3 PRICING-INTEGRITY, коммит C3): вердикт FREE-тира переведён с денежной эвристики на двумерный предикат по квоте (джобы/мес и GPU-секунды) с обязательным структурным основанием; четыре подписанных источника квот сведены в config/plans.json (схема jobs_per_month + gpu_s_per_job, месячный ресурс — производное); флаг FREE_TIER_LIMIT_RISK удалён целиком, правило cost == 0 → подтверждение снято; недоступность счётчиков леджера — отдельный код GATE_UNAVAILABLE (fail-closed) с блокировкой в CLI и планировщике. +11 проверок tests/test_pricing_quota_verdict.py. 371 → 382 collected, 365 → 376 passed.",
+      "note": "История набора: 254 → 263 → 270 → 276 → 280 → 281 → 287 → 331 → 335 → 338 → 362 → 371 → 382. Полы покрытия не менялись (36.3/62.2); floor_history не тронут. Новый продуктовый модуль plan_source.py введён в область измерения явной записью scope.include (машинная проверка гейта «файл вне области» иначе роняет прогон)."
+    },
+    {
+      "date": "2026-09-23-p3pricing-c4",
+      "canon": {
+        "collected": 384,
+        "passed": 378,
+        "skipped": 6,
+        "failures": 0,
+        "errors": 0
+      },
+      "reason": "G-GATE-FAILOPEN (P3 PRICING-INTEGRITY, коммит C4): авария инициализации гейта прежде выключала проверку молча (cost_gate = None → gate_allowed = True); теперь это отдельное состояние fail-closed — код GATE_UNAVAILABLE, громкий logger.error, метрика roma_gate_unavailable_total и блокировка исполнения до ветки gpu/local; штатная инициализация поведением неизменна (негативно-регрессионный тест). +2 проверки (ось 3 в tests/test_pricing_quota_verdict.py). 382 → 384 collected, 376 → 378 passed.",
+      "note": "История набора: 254 → 263 → 270 → 276 → 280 → 281 → 287 → 331 → 335 → 338 → 362 → 371 → 382 → 384. Полы покрытия не менялись (36.3/62.2); floor_history не тронут; денежный знаменатель не сдвинулся ни на один стейтмент (billing/ не задет)."
     }
   ],
-  "measurement": "Профили среды (G-CANON-ENV-PARITY): нода 338 = 332 passed + 6 admission-скипов; CI 338 = 331 passed + 7 admission-скипов (CI-исключительный — R6-live). collected одинаков в обеих средах: набор один. Предыдущее: 335 = 329 + 6. История набора: 254 -> 263 -> 270 -> 276 -> 280 -> 281 -> 287 -> 331 -> 335 -> 338.",
+  "measurement": "Профили среды (G-CANON-ENV-PARITY): нода 384 = 378 passed + 6 admission-скипов; CI 384 = 377 passed + 7 admission-скипов (CI-исключительный — R6-live). collected одинаков в обеих средах: набор один. Предыдущее: 382 = 376 + 6. История набора: 254 → 263 → 270 → 276 → 280 → 281 → 287 → 331 → 335 → 338 → 362 → 371 → 382 → 384.",
   "profiles": {
     "node": {
       "label": "node",
       "env": "node",
-      "passed": 332,
+      "passed": 378,
       "admission_skips": 6,
       "env_skips_max": 10,
       "named_admissions": [
@@ -190,7 +238,7 @@
     "ci": {
       "label": "CI",
       "env": "ci",
-      "passed": 331,
+      "passed": 377,
       "admission_skips": 7,
       "env_skips_max": 0,
       "named_admissions": [
