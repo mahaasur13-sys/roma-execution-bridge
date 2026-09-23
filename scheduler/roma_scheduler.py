@@ -195,10 +195,15 @@ class ROMAGPUScheduler:
         Новых таблиц/файлов/секретов нет: событие пишется в append-only
         audit-леджер (`audit_events.data`) тем же путём, что и прочие решения,
         и несёт `user_confirmed: true`.
-        """
-        from audit.event_store import write_event
 
-        return write_event(
+        Идемпотентность (G-CONFIRM-LEDGER-DOUBLE-WRITE, P3.9): запись идёт через
+        `write_event_once` — ключ (tenant_id, event_type, entity_id) не даёт
+        дублировать факт подтверждения, когда задача проходит route_job дважды
+        (submit → execute_job). Повторный submit той же задачи тоже не пишет копию.
+        """
+        from audit.event_store import write_event_once
+
+        return write_event_once(
             job.get("tenant_id") or "unknown",
             "job.user_confirmed",
             "job",

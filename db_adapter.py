@@ -1504,6 +1504,45 @@ def _insert_audit_event_sqlite(eid, tid, etype, ent_type, ent_id, data_json):
         c.close()
 
 
+def audit_event_exists(tenant_id, event_type, entity_id) -> bool:
+    """Идемпотентность аудит-метки: есть ли уже событие (tenant, тип, сущность).
+
+    G-CONFIRM-LEDGER-DOUBLE-WRITE (P3.9): append-only леджер не должен получать
+    вторую копию одного и того же факта (подтверждённая задача проходила
+    route_job дважды). Новых таблиц/DDL нет — читаем существующим запросом.
+    """
+    if _pg_enabled():
+        return _run_async(_audit_event_exists_pg(tenant_id, event_type, entity_id))
+    return _audit_event_exists_sqlite(tenant_id, event_type, entity_id)
+
+
+async def _audit_event_exists_pg(tid, etype, ent_id) -> bool:
+    conn = _pg_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM audit_events"
+                " WHERE tenant_id=%s AND event_type=%s AND entity_id=%s LIMIT 1",
+                (tid, etype, ent_id),
+            )
+            return cur.fetchone() is not None
+    finally:
+        _pg_return(conn)
+
+
+def _audit_event_exists_sqlite(tid, etype, ent_id) -> bool:
+    c = _sqlite_conn()
+    try:
+        cur = c.execute(
+            "SELECT 1 FROM audit_events"
+            " WHERE tenant_id=? AND event_type=? AND entity_id=? LIMIT 1",
+            (tid, etype, ent_id),
+        )
+        return cur.fetchone() is not None
+    finally:
+        c.close()
+
+
 def get_tenant_usage_db(tenant_id: str) -> dict:
     if _pg_enabled():
         return _run_async(_get_tenant_usage_db_pg(tenant_id))
