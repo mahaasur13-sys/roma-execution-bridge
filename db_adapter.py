@@ -762,12 +762,11 @@ def _ensure_audit_events_table(c) -> None:
     c.execute("""
         CREATE TABLE IF NOT EXISTS audit_events (
             id          TEXT PRIMARY KEY,
-            tenant_id   TEXT NOT NULL,
-            event_type  TEXT NOT NULL,
-            entity_type TEXT NOT NULL,
-            entity_id   TEXT NOT NULL,
-            data        TEXT NOT NULL DEFAULT '{}',
-            created_at  TEXT DEFAULT (datetime('now'))
+            tenant_id   TEXT,
+            event_type  TEXT,
+            entity_type TEXT,
+            entity_id   TEXT,
+            data        TEXT
         )
     """)
     c.execute("""
