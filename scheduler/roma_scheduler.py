@@ -13,6 +13,8 @@ from gpu_worker.connector import get_gpu_connector
 from cost.gate import EnterpriseDecisionGate as DecisionGate, GateResult
 from cost.predictor import CostPredictor, UNKNOWN_TENANT
 from queue_manager.queue_manager import QueueManager
+import plan_source
+from monitoring import metrics as gate_metrics
 
 logger = logging.getLogger("roma.scheduler")
 
@@ -64,6 +66,22 @@ class ROMAGPUScheduler:
             return {
                 "status": "rejected",
                 "reason": UNKNOWN_TENANT,
+                "detail": prediction.get("decision_reason", ""),
+                "estimated_cost": None,
+            }
+
+        # G-GATE-FAILOPEN (C3): недоступность счётчиков квоты — блокировка ДО ветки
+        # gpu/local, отдельным кодом. Без неё вердикт GATE_UNAVAILABLE из предиктора
+        # не имел бы силы: исполнение уходило бы в локальную ветку.
+        if prediction.get("decision") == plan_source.GATE_UNAVAILABLE:
+            gate_metrics.track_gate_unavailable("scheduler.route")
+            logger.error(
+                "GATE_UNAVAILABLE (scheduler.route): %s — исполнение блокируется",
+                prediction.get("decision_reason", ""),
+            )
+            return {
+                "status": "rejected",
+                "reason": plan_source.GATE_UNAVAILABLE,
                 "detail": prediction.get("decision_reason", ""),
                 "estimated_cost": None,
             }

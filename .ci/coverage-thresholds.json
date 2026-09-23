@@ -69,6 +69,7 @@
       "openapi_gen.py",
       "operator_sdk",
       "org",
+      "plan_source.py",
       "plugins",
       "policy",
       "policy_engine.py",
@@ -122,6 +123,13 @@
     ]
   },
   "scope_history": [
+    {
+      "date": "2026-09-23",
+      "scope": "product-only",
+      "change": "в область измерения явно введён новый продуктовый модуль plan_source.py (единственный источник квот). Гейт упал машинной проверкой 'файл вне области и вне exclude' — молчаливого включения новых корневых модулей нет, поэтому запись обязательна.",
+      "reason": "P3 PRICING-INTEGRITY C3: квоты сведены в один источник; модуль читается продуктом (db_adapter, auth/quota_engine, tenancy, cost/predictor, decision_store) и покрыт тестами. Полы не менялись (36.3/62.2).",
+      "commit": "P3 PRICING-INTEGRITY C3/C4"
+    },
     {
       "date": "2026-09-21",
       "scope": "whole-repo (--cov=. без явной области)",

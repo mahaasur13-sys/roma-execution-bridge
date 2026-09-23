@@ -28,6 +28,7 @@ if str(BASE_DIR) not in sys.path:
 # тарифный путь CLI не был проверяем ни одним прогоном.
 from cost.predictor import CostPredictor
 from cost.gate import EnterpriseDecisionGate, GateResult
+import plan_source
 from cost.estimator import RuntimeEstimator
 from cost.explainability import CostExplainabilityEngine
 from plugins.plugin_runtime import PluginRuntime
@@ -111,6 +112,15 @@ class ROMA_CLI:
             self._print_unpriced(prediction)
             return 1
 
+        # G-GATE-FAILOPEN: вердикт гейта — блокировка ДО отправки (до ветки
+        # gpu/local): недоступные счётчики квот не превращаются в разрешение.
+        if prediction.get("decision") == plan_source.GATE_UNAVAILABLE:
+            print(
+                f"\n🚫 ИСПОЛНЕНИЕ ЗАБЛОКИРОВАНО: {plan_source.GATE_UNAVAILABLE} — "
+                f"{prediction.get('decision_reason', 'источник квот/счётчики недоступны')}"
+            )
+            return 1
+
         # Вывод базовой информации
         print(f"\n💰 Ожидаемая стоимость: ${prediction['estimated_cost']:.2f}")
         print(
@@ -135,7 +145,10 @@ class ROMA_CLI:
         action = prediction.get("decision")
 
         if action == "REJECTED":
-            print(f"\n🚫 ОТКЛОНЕНО: {prediction.get('decision_reason', action)}")
+            print(
+                f"\n🚫 ОТКЛОНЕНО [{prediction.get('decision_category')}]: "
+                f"{prediction.get('decision_reason', action)}"
+            )
             return 1
 
         if action == "REQUIRES_CONFIRMATION":

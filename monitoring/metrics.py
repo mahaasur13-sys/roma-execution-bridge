@@ -99,6 +99,19 @@ def track_spend_cap_blocked(tenant_id: str, plan_name: str) -> None:
     spend_cap_blocked_total.labels(tenant_id=tenant_id, plan=plan_name).inc()
 
 
+# --- GATE_UNAVAILABLE — гейт недоступен, исполнение блокируется (fail-closed) ---
+gate_unavailable_total = Counter(
+    "roma_gate_unavailable_total",
+    "Execution blocked because the decision gate is unavailable (fail-closed)",
+    ["scope"],
+)
+
+
+def track_gate_unavailable(scope: str) -> None:
+    """Счётчик fail-closed отказа: авария гейта обязана быть видна снаружи, не молчать."""
+    gate_unavailable_total.labels(scope=scope).inc()
+
+
 # --- NEW — reconciliation-cron + alerts (P1b) — добавлено в 266283e FIX ---
 roma_ledger_computed_balance = Gauge(
     "roma_ledger_computed_balance", "SUM(DEBIT) ledger_entries", ["tenant_id"]
@@ -130,6 +143,7 @@ roma_tokens_total = tokens_total
 roma_billing_cost_total = billing_cost_total
 roma_job_cost = job_cost
 roma_spend_cap_blocked_total = spend_cap_blocked_total
+roma_gate_unavailable_total = gate_unavailable_total
 # если есть spend_cap_pct в старом — алиас тоже
 try:
     roma_spend_cap_pct = spend_cap_pct

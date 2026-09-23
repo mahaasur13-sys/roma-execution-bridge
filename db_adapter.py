@@ -2158,45 +2158,45 @@ def _list_decision_records_sqlite(tenant_id, result, date_from, date_to, limit, 
 
 # ── Plans loader (shared between gate and API) ──
 
-_PLAN_DEFAULTS: dict = {
-    "free": {"max_jobs": 10, "max_gpu_hours": 0, "name": "Free"},
-    "start": {"max_jobs": 50, "max_gpu_hours": 10, "name": "Start"},
-    "pro": {"max_jobs": 150, "max_gpu_hours": 50, "name": "Pro"},
-    "enterprise": {"max_jobs": -1, "max_gpu_hours": -1, "name": "Enterprise"},
-}
-
 
 def _load_plans() -> dict:
-    """Load pricing plans from `config/plans.json`, normalized for callers.
+    """Тарифы — из единственного источника `config/plans.json` (`plan_source`).
 
-    Single source of truth: on-disk plans use `max_jobs_per_month`, while the
-    gate and API read `max_jobs`. Every default plan is always present (merged),
-    so an unknown or partially specified plan can never silently inherit
-    unlimited quota. A negative `max_jobs` means unlimited.
+    G-QUOTA-SOURCE-FRAGMENTED: локальная таблица литералов `_PLAN_DEFAULTS`
+    УДАЛЕНА — она была вторым источником и разъезжалась с файлом
+    (free jobs 10 vs 50, pro jobs 150 vs 1000, gpu-h 50 vs производное).
+    Каждый тариф описывается двумя полями источника (`jobs_per_month`,
+    `gpu_s_per_job`); месячный GPU-ресурс здесь ПРОИЗВОДНЫЙ (jobs × per_job),
+    отдельным хранимым значением не существует. Ключи `max_jobs` /
+    `max_gpu_hours` — представление источника для существующих потребителей,
+    а не самостоятельные значения. Отрицательное число = безлимит.
+    Источник недоступен → пустой словарь и громкий warning: квоты не
+    выдумываются (потребитель обязан отказать, а не подставить «что-нибудь»).
     """
-    import json
-    from pathlib import Path
+    import plan_source
 
-    plan_path = Path(__file__).resolve().parent / "config" / "plans.json"
-    loaded: dict = {}
     try:
-        if plan_path.exists():
-            loaded = json.loads(plan_path.read_text())
-    except Exception:
-        logger.warning("plans.json unreadable at %s — using defaults", plan_path)
-        loaded = {}
+        loaded = plan_source.load_plans()
+    except plan_source.PlanSourceError as exc:
+        logger.warning("источник квот недоступен (%s) — планы не подставляются", exc)
+        return {}
 
-    plans = {name: dict(cfg) for name, cfg in _PLAN_DEFAULTS.items()}
-    for name, cfg in (loaded or {}).items():
+    plans: dict = {}
+    for name, cfg in loaded.items():
         if not isinstance(cfg, dict):
             continue
+        try:
+            limits = plan_source.plan_limits(name)
+        except plan_source.PlanSourceError as exc:
+            logger.warning("тариф %r неполон (%s) — пропущен", name, exc)
+            continue
         entry = dict(cfg)
-        # On-disk plans express the quota as `max_jobs_per_month`; callers read
-        # `max_jobs`. Normalize before merging defaults so the on-disk value wins
-        # over the default instead of being shadowed by it.
-        if "max_jobs" not in entry and "max_jobs_per_month" in entry:
-            entry["max_jobs"] = entry["max_jobs_per_month"]
-        plans[name] = {**plans.get(name, {}), **entry}
+        entry["max_jobs"] = limits.jobs_per_month
+        entry["max_jobs_per_month"] = limits.jobs_per_month
+        entry["gpu_s_per_job"] = limits.gpu_s_per_job
+        entry["gpu_s_per_month"] = limits.gpu_s_per_month
+        entry["max_gpu_hours"] = limits.gpu_hours_per_month
+        plans[name] = entry
     return plans
 
 
