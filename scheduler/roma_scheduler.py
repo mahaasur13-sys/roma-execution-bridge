@@ -10,8 +10,8 @@ from typing import Optional
 
 from scheduler.gpu_policy_engine_v2 import GPUPolicyEngineV2
 from gpu_worker.connector import get_gpu_connector
-from cost.gate import EnterpriseDecisionGate as DecisionGate, GateResult
-from cost.predictor import CostPredictor, UNKNOWN_TENANT
+from cost.gate import EnterpriseDecisionGate as DecisionGate
+from cost.predictor import CostPredictor
 from queue_manager.queue_manager import QueueManager
 from monitoring import metrics as gate_metrics
 import plan_source
@@ -92,23 +92,17 @@ class ROMAGPUScheduler:
             policy_engine=self.policy_engine,
         )
 
-        if prediction.get("decision") == UNKNOWN_TENANT:
-            # Клиент без записи — отдельный отказ: решение и цена по выдуманному
-            # free-тарифу не считаются (не silent-FREE).
+        # G-GATE-DENY-LOCAL-BYPASS: вердикт предиктора нормализуется ВСЕМ спектром
+        # решений одним предикатом. Прежде разбирались только два кода
+        # (UNKNOWN_TENANT, GATE_UNAVAILABLE), а REJECTED/QUOTA_* проходили мимо:
+        # отказ по квоте попадал в маршрут queued и исполнялся. Отказ любого члена
+        # семейства — rejected ДО выбора ветки local/gpu.
+        verdict = prediction.get("decision")
+        verdict_category = prediction.get("decision_category")
+        if plan_source.is_rejection(verdict, verdict_category):
             return {
                 "status": "rejected",
-                "reason": UNKNOWN_TENANT,
-                "detail": prediction.get("decision_reason", ""),
-                "estimated_cost": None,
-            }
-
-        # G-GATE-FAILOPEN: недоступность гейта/счётчиков — блокировка ДО ветки
-        # gpu/local, отдельным кодом. Прежде эта ветка не существовала, и отказ
-        # инициализации гейта уходил в исполнение как разрешение.
-        if prediction.get("decision") == plan_source.GATE_UNAVAILABLE:
-            return {
-                "status": "rejected",
-                "reason": plan_source.GATE_UNAVAILABLE,
+                "reason": verdict_category or verdict,
                 "detail": prediction.get("decision_reason", ""),
                 "estimated_cost": None,
             }
@@ -133,16 +127,20 @@ class ROMAGPUScheduler:
             gate_decision = getattr(
                 gate_result.result, "value", str(gate_result.result)
             )
-            gate_allowed = gate_decision != GateResult.DENIED.value
+            gate_allowed = not plan_source.is_rejection(gate_decision)
             gate_reason = gate_result.reason
 
+        # Единый страж спектра: решение гейта проверяется ДО выбора ветки. Прежде
+        # страж стоял ВНУТРИ gpu-ветки, и DENIED исполнялся локально (у local-ветки
+        # стража не было вовсе).
+        if not gate_allowed:
+            return {
+                "status": "rejected",
+                "reason": gate_reason,
+                "estimated_cost": prediction.get("estimated_cost", 0),
+            }
+
         if gpu_required and self.gpu_connector.is_available():
-            if not gate_allowed:
-                return {
-                    "status": "rejected",
-                    "reason": gate_reason,
-                    "estimated_cost": prediction.get("estimated_cost", 0),
-                }
             execution_target = "gpu_worker"
         else:
             execution_target = "local"

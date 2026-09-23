@@ -41,6 +41,42 @@ QUOTA_JOBS_EXHAUSTED = "QUOTA_JOBS_EXHAUSTED"
 QUOTA_JOB_ESTIMATE_EXCEEDS_PER_JOB = "QUOTA_JOB_ESTIMATE_EXCEEDS_PER_JOB"
 QUOTA_MONTHLY_GPU_EXHAUSTED = "QUOTA_MONTHLY_GPU_EXHAUSTED"
 
+UNKNOWN_TENANT = "UNKNOWN_TENANT"
+
+# Объявленные разрешающие формы вердикта: всё вне этого множества — отказ
+# (fail-closed хвост: неизвестное будущее не становится разрешением).
+GATE_ALLOWED = "allowed"  # GateResult.ALLOWED.value (cost/gate.py)
+REQUIRES_CONFIRMATION = "REQUIRES_CONFIRMATION"
+ALLOWED_VERDICTS = frozenset({APPROVED, REQUIRES_CONFIRMATION, GATE_ALLOWED})
+
+# G-GATE-DENY-LOCAL-BYPASS: семейство отказов. Прежде отказ распознавался двумя
+# кодами (UNKNOWN_TENANT, GATE_UNAVAILABLE), а вердикт REJECTED/QUOTA_* в маршруте
+# не разбирался вовсе — отказ по квоте уходил в маршрут queued и исполнялся.
+REJECTION_DECISIONS = frozenset(
+    {
+        UNKNOWN_TENANT,
+        GATE_UNAVAILABLE,
+        REJECTED,
+        QUOTA_JOBS_EXHAUSTED,
+        QUOTA_JOB_ESTIMATE_EXCEEDS_PER_JOB,
+        QUOTA_MONTHLY_GPU_EXHAUSTED,
+    }
+)
+
+
+def is_rejection(decision: str | None, category: str | None = None) -> bool:
+    """Единый предикат отказа по всему спектру решений, а не по двум знакомым кодам.
+
+    Отказом считается: любой объявленный код семейства отказов (в поле решения или
+    категории) и ЛЮБАЯ форма вне объявленных разрешающих — fail-closed хвост:
+    неизвестное решение блокирует исполнение, а не разрешает его. Пустое
+    решение — тоже отказ.
+    """
+    for code in (decision, category):
+        if code and code in REJECTION_DECISIONS:
+            return True
+    return (decision or "") not in ALLOWED_VERDICTS
+
 
 class PlanSourceError(RuntimeError):
     """Источник квот недоступен или тир вне объявленной схемы (fail-closed)."""
