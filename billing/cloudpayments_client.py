@@ -187,28 +187,9 @@ class CloudPaymentsError(Exception):
         self.response = response
 
 
-# ── price configuration ────────────────────────────────────────
-
-PLANS: dict[str, dict[str, Any]] = {
-    "free": {
-        "name": "Free",
-        "amount": 0,
-        "currency": "RUB",
-        "jobs_per_month": 50,
-        "gpu_hours": 0,
-    },
-    "pro": {
-        "name": "Pro",
-        "amount": 4900,  # ₽4,900/month
-        "currency": "RUB",
-        "jobs_per_month": 500,
-        "gpu_hours": 20,
-    },
-    "enterprise": {
-        "name": "Enterprise",
-        "amount": 29900,  # ₽29,900/month
-        "currency": "RUB",
-        "jobs_per_month": 999_999,
-        "gpu_hours": 200,
-    },
-}
+# G-QUOTA-SOURCE-REMNANTS (P3.6, коммит C2): здесь жила СВОЯ таблица квот `PLANS`
+# (free 50/0h · pro 500/20h · ent 999999/200h) — независимый источник тарифных лимитов,
+# разошедшийся с подписанным `config/plans.json` (pro: 1000 джобов против 500 здесь).
+# Таблица удалена как мёртвая: ни один модуль её не импортировал (импортируются только
+# `CloudPaymentsConfig` и `CloudPaymentsClient`), внутри модуля она не читалась —
+# доказательство свипом в сообщении коммита. Цены тиров живут в `main.CLOUDPAYMENTS_PLANS`.

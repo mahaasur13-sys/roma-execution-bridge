@@ -6,6 +6,13 @@
     "price_monthly": 0,
     "features": ["50 jobs/month", "Community support"]
   },
+  "start": {
+    "name": "Start",
+    "jobs_per_month": 50,
+    "gpu_s_per_job": 3600,
+    "price_monthly": 49,
+    "features": ["50 jobs/month", "GPU access"]
+  },
   "pro": {
     "name": "Pro",
     "jobs_per_month": 1000,

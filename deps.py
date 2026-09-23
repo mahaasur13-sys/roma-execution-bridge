@@ -16,6 +16,7 @@ import logging
 import os
 
 import db_adapter as db
+import plan_source
 from fastapi import Header, HTTPException, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -44,32 +45,47 @@ ADMIN_IP_ALLOWLIST = os.environ.get(
 # ── Billing ─────────────────────────────────────────────────────────────
 billing_ledger = BillingLedger()
 
-PLANS: dict = {
-    "free": {
-        "max_jobs_per_month": 50,
-        "max_gpu_seconds": 300,
-        "spend_cap_usd": 0.50,
-        "overage_rate": 0.0,
-    },
-    "start": {
-        "max_jobs_per_month": 50,
-        "max_gpu_seconds": 3600,
-        "spend_cap_usd": 5.00,
-        "overage_rate": 0.000005,
-    },
-    "pro": {
-        "max_jobs_per_month": 150,
-        "max_gpu_seconds": 36000,
-        "spend_cap_usd": 50.00,
-        "overage_rate": 0.000003,
-    },
-    "enterprise": {
-        "max_jobs_per_month": -1,
-        "max_gpu_seconds": -1,
-        "spend_cap_usd": -1.0,
-        "overage_rate": 0.0,
-    },
+# G-MONEY-CAP-LITERALS: денежная политика (spend-cap и ставка сверх лимита) — НЕ квота.
+# Источник квот (`config/plans.json`) этих полей не покрывает и не должен: денежный
+# лимит и месячная квота — разные оси (вердикт владельца, чекпойнт P3.6 №1).
+_MONEY_POLICY: dict[str, dict[str, float]] = {
+    "free": {"spend_cap_usd": 0.50, "overage_rate": 0.0},
+    "start": {"spend_cap_usd": 5.00, "overage_rate": 0.000005},
+    "pro": {"spend_cap_usd": 50.00, "overage_rate": 0.000003},
+    "enterprise": {"spend_cap_usd": -1.0, "overage_rate": 0.0},
 }
+
+
+def plan_config(plan_name: str | None) -> dict:
+    """Лимиты тира для API-пути: квоты — из `plan_source`, деньги — из money-политики.
+
+    Собственной таблицы квот и собственной арифметики здесь нет: тир, отсутствующий
+    в источнике, — отказ `PlanSourceError` (fail-closed), а не молчаливый free-дефолт.
+    Потребители обязаны превратить этот отказ в вердикт `GATE_UNAVAILABLE`, а не в
+    разрешение.
+    """
+    limits = plan_source.plan_limits(plan_name)
+    money = _MONEY_POLICY.get((plan_name or "").strip().lower(), {})
+    return {
+        "max_jobs_per_month": limits.jobs_per_month,
+        "gpu_s_per_job": limits.gpu_s_per_job,
+        "gpu_s_per_month": limits.gpu_s_per_month,
+        "gpu_hours_per_month": limits.gpu_hours_per_month,
+        "spend_cap_usd": money.get("spend_cap_usd", 0.0),
+        "overage_rate": money.get("overage_rate", 0.0),
+    }
+
+
+def _derive_plans() -> dict:
+    """PLANS — вывод из единственного источника, а не собственная таблица квот.
+
+    Оставлен для дисплеев и совместимости; принуждающие потребители обязаны
+    пользоваться `plan_config`, чтобы отсутствующий тир получался отказом.
+    """
+    return {name: plan_config(name) for name in plan_source.load_plans()}
+
+
+PLANS: dict = _derive_plans()
 
 
 def verify_api_key(x_api_key: str = Header(None)) -> dict:
