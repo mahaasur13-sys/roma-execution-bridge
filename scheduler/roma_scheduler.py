@@ -13,8 +13,8 @@ from gpu_worker.connector import get_gpu_connector
 from cost.gate import EnterpriseDecisionGate as DecisionGate, GateResult
 from cost.predictor import CostPredictor, UNKNOWN_TENANT
 from queue_manager.queue_manager import QueueManager
-import plan_source
 from monitoring import metrics as gate_metrics
+import plan_source
 
 logger = logging.getLogger("roma.scheduler")
 
@@ -23,6 +23,10 @@ ALLOWED_BINARIES = {"python", "python3"}
 
 
 class ROMAGPUScheduler:
+    # G-GATE-FAILOPEN: состояние доступности гейта. Классовый дефолт — чтобы
+    # собранный через __new__ планировщик (тесты) не терял инвариант «гейт доступен».
+    gate_unavailable_reason: str | None = None
+
     def __init__(self):
         _qm = QueueManager()
         self.policy_engine = GPUPolicyEngineV2()
@@ -41,14 +45,42 @@ class ROMAGPUScheduler:
             self.policy_engine.register_node("gpu-node-1")
         try:
             self.cost_gate = DecisionGate()
+            self.gate_unavailable_reason = None
         except Exception as e:
-            logger.warning("DecisionGate init failed: %s, cost gate disabled", e)
+            # G-GATE-FAILOPEN: авария инициализации гейта прежде выключала проверку
+            # молча (`self.cost_gate = None` → `gate_allowed = True`), то есть отказ
+            # гейта превращался в разрешение исполнения. Теперь это отдельное
+            # состояние fail-closed: блокировка кодом GATE_UNAVAILABLE, громкий лог
+            # и метрика наружу; тихого allow нет.
+            gate_metrics.track_gate_unavailable("scheduler.init")
+            logger.error(
+                "GATE_UNAVAILABLE (scheduler.init): инициализация гейта отказала "
+                "(%s: %s) — исполнение блокируется",
+                type(e).__name__,
+                e,
+            )
             self.cost_gate = None
+            self.gate_unavailable_reason = f"decision gate unavailable: {e}"
         self.predictor = CostPredictor()
         self.local_mode = os.getenv("ROMA_EXECUTION_MODE", "local")
 
     def route_job(self, job: dict) -> dict:
         gpu_required = job.get("gpu_required", True)
+
+        # G-GATE-FAILOPEN: недоступный гейт блокирует исполнение до разрешения тарифа
+        # и до любых веток (включая gpu/local): мёртвая проверка не «разрешает».
+        if self.gate_unavailable_reason is not None:
+            gate_metrics.track_gate_unavailable("scheduler.route_fail_closed")
+            logger.error(
+                "GATE_UNAVAILABLE (scheduler.route): %s — исполнение блокируется",
+                self.gate_unavailable_reason,
+            )
+            return {
+                "status": "rejected",
+                "reason": plan_source.GATE_UNAVAILABLE,
+                "detail": self.gate_unavailable_reason,
+                "estimated_cost": None,
+            }
 
         # G-PRICING-TIER-PATH: тариф берётся из записи клиента внутри предиктора;
         # payload-поле tenant_tier больше не подаётся как авторитетный тариф.
@@ -70,22 +102,16 @@ class ROMAGPUScheduler:
                 "estimated_cost": None,
             }
 
-        # G-GATE-FAILOPEN (C3): недоступность счётчиков квоты — блокировка ДО ветки
-        # gpu/local, отдельным кодом. Без неё вердикт GATE_UNAVAILABLE из предиктора
-        # не имел бы силы: исполнение уходило бы в локальную ветку.
+        # G-GATE-FAILOPEN: недоступность гейта/счётчиков — блокировка ДО ветки
+        # gpu/local, отдельным кодом. Прежде эта ветка не существовала, и отказ
+        # инициализации гейта уходил в исполнение как разрешение.
         if prediction.get("decision") == plan_source.GATE_UNAVAILABLE:
-            gate_metrics.track_gate_unavailable("scheduler.route")
-            logger.error(
-                "GATE_UNAVAILABLE (scheduler.route): %s — исполнение блокируется",
-                prediction.get("decision_reason", ""),
-            )
             return {
                 "status": "rejected",
                 "reason": plan_source.GATE_UNAVAILABLE,
                 "detail": prediction.get("decision_reason", ""),
                 "estimated_cost": None,
             }
-
         # R5b: контракт EnterpriseDecisionGate.evaluate(tenant_id, payload) -> GateDecision;
         # решение читается из полей dataclass, а не как из словаря ("REJECTED" контракт не отдаёт).
         payload = {
@@ -94,10 +120,11 @@ class ROMAGPUScheduler:
             "plugin_type": job.get("plan_tier", "PRO"),
         }
         if self.cost_gate is None:
+            # Резервный ход того же класса: гейта нет — разрешения нет.
             gate_decision, gate_allowed, gate_reason = (
-                "disabled",
-                True,
-                "cost gate disabled",
+                plan_source.GATE_UNAVAILABLE,
+                False,
+                self.gate_unavailable_reason or "decision gate unavailable",
             )
         else:
             gate_result = self.cost_gate.evaluate(

@@ -236,6 +236,62 @@ def test_ledger_unavailable_blocks_cli_submission(monkeypatch, capsys):
     assert sent == [], sent
 
 
+# ── ось 3: C4 — авария инициализации гейта ───────────────────────────────────
+
+
+def test_gate_init_failure_is_fail_closed(monkeypatch):
+    """RED→GREEN: авария init давала allowed=True ('cost gate disabled'); теперь блок."""
+    import cost.gate as gate_mod
+    import scheduler.roma_scheduler as sched_mod
+
+    _patch_tenant(monkeypatch, {"tenant_id": "t-sched", "plan": "pro"})
+
+    class Boom:
+        def __init__(self, *a, **kw):
+            raise RuntimeError("forced init failure")
+
+    monkeypatch.setattr(gate_mod, "EnterpriseDecisionGate", Boom)
+    monkeypatch.setattr(sched_mod, "DecisionGate", Boom)
+
+    sched = sched_mod.ROMAGPUScheduler()
+    route = sched.route_job(
+        {
+            "job_id": "j-init",
+            "task_type": "inference",
+            "gpu_required": False,
+            "tenant_id": "t-sched",
+        }
+    )
+
+    assert route["status"] == "rejected", route
+    assert route["reason"] == GATE_UNAVAILABLE
+    assert "forced init failure" in route["detail"]
+
+
+def test_normal_gate_init_is_unchanged(monkeypatch):
+    """Негативно-регрессионный: штатная инициализация — прежнее поведение."""
+    import scheduler.roma_scheduler as sched_mod
+
+    _patch_tenant(monkeypatch, {"tenant_id": "t-sched", "plan": "pro"})
+
+    sched = sched_mod.ROMAGPUScheduler()
+
+    assert sched.cost_gate is not None
+    assert sched.gate_unavailable_reason is None
+
+    route = sched.route_job(
+        {
+            "job_id": "j-ok",
+            "task_type": "inference",
+            "gpu_required": False,
+            "tenant_id": "t-sched",
+        }
+    )
+
+    assert route["status"] == "queued", route
+    assert route["execution_target"] == "local"
+
+
 # ── ось 4: единственный источник квот ────────────────────────────────────────
 
 
