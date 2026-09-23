@@ -1,13 +1,14 @@
 """G-AUDIT-DDL-DRIFT (reconciling): прод-безопасность migrations/011_audit_events.sql.
 
-Акт 2 аудита P3.10 (v3): на проде таблица `audit_events` могла существовать из
+Акт 2 аудита P3.10 (v4): на проде таблица `audit_events` могла существовать из
 рантайм-бутстрапа со схемой БЕЗ `created_at` (факт из INSERT db_adapter.py) и с
 историей эпохи double-write (дубли по `(tenant_id, event_type, entity_id)`).
-Миграция обязана: не падать на CREATE (IF NOT EXISTS); сверить сигнатуру
-(имена + типы + PK(id)) fail-closed; заблокировать параллельные записи (TOCTOU);
-снять дубли keep-«ранняя» по ctid с backup-таблицей и протоколом; сохранить
-безключевые (`entity_id='unknown'`) и кросс-тенантные строки; создать частичный
-UNIQUE; повторный накат — no-op.
+Миграция обязана: не падать на CREATE (IF NOT EXISTS); сверить сигнатуру в обе
+стороны (имена+типы+PK ровно (id)+лишние NOT NULL-без-default) fail-closed;
+заблокировать параллельные записи (TOCTOU); снять дубли keep-«ранняя» по ctid с
+backup-таблицей и протоколом, NULL-ключи исключены (согласовано с частичным UNIQUE);
+сохранить безключевые (`entity_id='unknown'`) и кросс-тенантные строки; создать
+частичный UNIQUE; повторный накат — no-op.
 """
 
 from __future__ import annotations
@@ -43,7 +44,6 @@ DUP_ROWS = [
     ("x1", "tA", "job.user_confirmed", "job", "job-X"),   # (c) один job_id у разных tenant
     ("x2", "tB", "job.user_confirmed", "job", "job-X"),
 ]
-
 
 def _pg_dsn() -> str | None:
     return os.environ.get("PG_DSN") or os.environ.get("DATABASE_URL")
@@ -92,13 +92,16 @@ def _cleanup(conn) -> None:
         conn.close()
 
 
+def _split_migration(body: str):
+    """Разбить тело 011 на «до индекса» (CREATE + DO-блок с LOCK/DELETE) и «индекс»."""
+    marker = "CREATE UNIQUE INDEX IF NOT EXISTS audit_events_dedupe_uidx"
+    idx = body.rindex(marker)
+    return body[:idx], body[idx:]
+
+
 @pytest.fixture()
 def prod_form():
-    """audit_events в прод-форме (без created_at) + дубли эпохи double-write.
-
-    Setup обёрнут в try/finally: при ошибке подготовки (CREATE/INSERT) тестовая
-    БД не остаётся без таблицы, а соединение всегда закрывается (Minor CR).
-    """
+    """audit_events в прод-форме (без created_at) + дубли эпохи double-write."""
     if not _pg_reachable():
         pytest.skip("PG not reachable — reconciling audit requires live PG; issue: P1-C · expiry: 2026-12-31")
     import psycopg2
@@ -137,7 +140,6 @@ def test_011_reconciles_prod_form_with_duplicates(prod_form):
     cur.execute("SELECT count(*) FROM audit_events WHERE entity_id='job-X'")
     assert cur.fetchone()[0] == 2
 
-    # снятый дубль попал в backup
     cur.execute("SELECT id FROM audit_events_dedupe_backup")
     assert [r[0] for r in cur.fetchall()] == ["a2"]
 
@@ -194,8 +196,89 @@ def test_011_type_drift_fails_closed():
 
 
 @pytest.mark.pg
+def test_011_extra_required_column_fails_closed():
+    """Лишняя NOT NULL-колонка без default (created_at) → fail-closed."""
+    if not _pg_reachable():
+        pytest.skip("PG not reachable — reconciling audit requires live PG; issue: P1-C · expiry: 2026-12-31")
+    import psycopg2
+
+    conn = psycopg2.connect(_pg_dsn())
+    try:
+        _reset_tables(conn)
+        cur = conn.cursor()
+        cur.execute(
+            "CREATE TABLE audit_events (id TEXT PRIMARY KEY, tenant_id TEXT, event_type TEXT,"
+            " entity_type TEXT, entity_id TEXT, data JSONB, created_at TIMESTAMP NOT NULL)"
+        )
+        with pytest.raises(Exception) as exc:
+            _apply_011(conn)
+        assert "extra required columns" in str(exc.value)
+    finally:
+        _cleanup(conn)
+
+
+@pytest.mark.pg
+def test_011_composite_pk_fails_closed():
+    """Составной PRIMARY KEY (id, tenant_id) → fail-closed."""
+    if not _pg_reachable():
+        pytest.skip("PG not reachable — reconciling audit requires live PG; issue: P1-C · expiry: 2026-12-31")
+    import psycopg2
+
+    conn = psycopg2.connect(_pg_dsn())
+    try:
+        _reset_tables(conn)
+        cur = conn.cursor()
+        cur.execute(
+            "CREATE TABLE audit_events (id TEXT, tenant_id TEXT, event_type TEXT,"
+            " entity_type TEXT, entity_id TEXT, data JSONB, PRIMARY KEY (id, tenant_id))"
+        )
+        with pytest.raises(Exception) as exc:
+            _apply_011(conn)
+        assert "ровно (id)" in str(exc.value)
+    finally:
+        _cleanup(conn)
+
+
+@pytest.mark.pg
+def test_011_null_keys_not_deduped():
+    """NULL-ключи (tenant_id IS NULL) дедуп не трогает; частичный UNIQUE их допускает."""
+    if not _pg_reachable():
+        pytest.skip("PG not reachable — reconciling audit requires live PG; issue: P1-C · expiry: 2026-12-31")
+    import psycopg2
+
+    conn = psycopg2.connect(_pg_dsn())
+    try:
+        _reset_tables(conn)
+        cur = conn.cursor()
+        cur.execute(PROD_FORM_SCHEMA)
+        cur.execute(
+            "INSERT INTO audit_events VALUES ('n1',NULL,'job.user_confirmed','job','job-N','{}'::jsonb)"
+        )
+        cur.execute(
+            "INSERT INTO audit_events VALUES ('n2',NULL,'job.user_confirmed','job','job-N','{}'::jsonb)"
+        )
+        _apply_011(conn)
+
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute("SELECT count(*) FROM audit_events WHERE entity_id='job-N'")
+        assert cur.fetchone()[0] == 2  # NULL-ключи не склеены дедупом
+        cur.execute(
+            "SELECT 1 FROM pg_indexes WHERE tablename='audit_events' AND indexname='audit_events_dedupe_uidx'"
+        )
+        assert cur.fetchone() is not None
+    finally:
+        _cleanup(conn)
+
+
+@pytest.mark.pg
 def test_011_lock_blocks_concurrent_write():
-    """TOCTOU: под LOCK SHARE ROW EXCLUSIVE параллельный INSERT блокируется."""
+    """TOCTOU: LOCK миграции (не ручной) блокирует параллельный INSERT до индекса.
+
+    Миграция исполняется в соединении-держателе до CREATE INDEX (LOCK удерживается);
+    конкурентный INSERT между DELETE и INDEX обязан упереться в лок. Мутация-пруф:
+    при удалении LOCK TABLE из 011 тест краснеет (INSERT не блокируется).
+    """
     if not _pg_reachable():
         pytest.skip("PG not reachable — reconciling audit requires live PG; issue: P1-C · expiry: 2026-12-31")
     import psycopg2
@@ -211,10 +294,16 @@ def test_011_lock_blocks_concurrent_write():
         cur.execute(
             "INSERT INTO audit_events VALUES ('a1','tA','job.user_confirmed','job','job-A','{}'::jsonb)"
         )
+        cur.execute(
+            "INSERT INTO audit_events VALUES ('a2','tA','job.user_confirmed','job','job-A','{}'::jsonb)"
+        )
+
+        pre, index_stmt = _split_migration(MIGRATION_011.read_text())
 
         holder = psycopg2.connect(_pg_dsn())
         holder.autocommit = False
-        holder.cursor().execute("LOCK TABLE audit_events IN SHARE ROW EXCLUSIVE MODE")
+        hcur = holder.cursor()
+        hcur.execute(pre)  # CREATE + DO-блок (LOCK + DELETE) — LOCK удерживается
 
         writer = psycopg2.connect(_pg_dsn())
         writer.autocommit = True
@@ -223,12 +312,15 @@ def test_011_lock_blocks_concurrent_write():
         blocked = False
         try:
             wcur.execute(
-                "INSERT INTO audit_events VALUES ('a2','tA','job.user_confirmed','job','job-A','{}'::jsonb)"
+                "INSERT INTO audit_events VALUES ('a3','tA','job.user_confirmed','job','job-A','{}'::jsonb)"
             )
         except psycopg2.errors.QueryCanceled:
             blocked = True
 
-        assert blocked, "параллельный INSERT не был заблокирован локом (TOCTOU открыт)"
+        assert blocked, "LOCK миграции не заблокировал параллельный INSERT (TOCTOU открыт)"
+
+        hcur.execute(index_stmt)  # CREATE INDEX под удерживаемым локом
+        holder.commit()
     finally:
         if holder is not None:
             try:
