@@ -32,6 +32,11 @@ class RomaTaskInput(BaseModel):
     instance_type: str = Field(
         default="any", description="GPU type: any, RTX 3060, A100, H100"
     )
+    # G-CONFIRM-PASSTHROUGH-SCHED: подтверждение крупной сметы. Строгий boolean;
+    # отсутствие/иные формы флага подтверждением не считаются.
+    confirmed: bool = Field(
+        default=False, description="Подтверждение крупной сметы (REQUIRES_CONFIRMATION)"
+    )
 
 
 class RomaTaskResponse(BaseModel):

@@ -43,6 +43,20 @@ QUOTA_MONTHLY_GPU_EXHAUSTED = "QUOTA_MONTHLY_GPU_EXHAUSTED"
 
 UNKNOWN_TENANT = "UNKNOWN_TENANT"
 
+# G-CONFIRM-PASSTHROUGH-SCHED (решение владельца B, 2026-09-23): подтверждение
+# крупной сметы — отказ-контракт, а не «роутится как прежде». Код отказа объявлен
+# отдельно и намеренно НЕ входит ни в спектр предиктора (REJECTION_DECISIONS), ни
+# в разрешающие формы (ALLOWED_VERDICTS): это решение маршрута, а не вердикт гейта.
+CONFIRMATION_REQUIRED = "CONFIRMATION_REQUIRED"
+
+# Имя поля задачи, которым клиент подтверждает крупную смету, и контракт повтора
+# (одна и та же задача, строгий boolean).
+CONFIRMATION_FLAG = "confirmed"
+CONFIRMATION_RESUBMIT_HINT = (
+    "повторите ту же задачу с полем confirmed: true (строгий boolean) — "
+    "подтверждение крупной сметы; иные формы флага подтверждением не считаются"
+)
+
 # Объявленные разрешающие формы вердикта: всё вне этого множества — отказ
 # (fail-closed хвост: неизвестное будущее не становится разрешением).
 GATE_ALLOWED = "allowed"  # GateResult.ALLOWED.value (cost/gate.py)

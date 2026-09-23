@@ -106,6 +106,41 @@ class ROMAGPUScheduler:
                 "detail": prediction.get("decision_reason", ""),
                 "estimated_cost": None,
             }
+        # G-CONFIRM-PASSTHROUGH-SCHED (решение владельца B, 2026-09-23): вердикт
+        # REQUIRES_CONFIRMATION — отказ-контракт, а не «маршрутизируется как прежде».
+        # Без строгого boolean `confirmed: true` в самой задаче исполнения нет; любая
+        # иная форма флага (строка/1/None/отсутствие) — тоже отказ (fail-closed).
+        # Недоступный леджер подтверждения блокирует исполнение тем же классом
+        # GATE_UNAVAILABLE: подтверждение обязано быть аудируемым фактом.
+        if verdict == plan_source.REQUIRES_CONFIRMATION:
+            if job.get(plan_source.CONFIRMATION_FLAG) is not True:
+                return {
+                    "status": "rejected",
+                    "reason": plan_source.CONFIRMATION_REQUIRED,
+                    "detail": prediction.get("decision_reason", ""),
+                    "hint": plan_source.CONFIRMATION_RESUBMIT_HINT,
+                    "estimated_cost": prediction.get("estimated_cost", 0),
+                }
+            try:
+                self._record_user_confirmation(job, prediction)
+            except Exception as exc:  # noqa: BLE001 — леджер не доказал подтверждение
+                gate_metrics.track_gate_unavailable("scheduler.confirm_ledger")
+                logger.error(
+                    "GATE_UNAVAILABLE (scheduler.confirm_ledger): подтверждение не "
+                    "записано (%s: %s) — исполнение блокируется",
+                    type(exc).__name__,
+                    exc,
+                )
+                return {
+                    "status": "rejected",
+                    "reason": plan_source.GATE_UNAVAILABLE,
+                    "detail": f"confirmation ledger unavailable: {type(exc).__name__}",
+                    "estimated_cost": prediction.get("estimated_cost", 0),
+                }
+            user_confirmed = True
+        else:
+            user_confirmed = False
+
         # R5b: контракт EnterpriseDecisionGate.evaluate(tenant_id, payload) -> GateDecision;
         # решение читается из полей dataclass, а не как из словаря ("REJECTED" контракт не отдаёт).
         payload = {
@@ -151,7 +186,30 @@ class ROMAGPUScheduler:
             "job_id": job.get("job_id"),
             "estimated_cost": prediction.get("estimated_cost", 0),
             "gate_decision": gate_decision,
+            "user_confirmed": user_confirmed,
         }
+
+    def _record_user_confirmation(self, job: dict, prediction: dict) -> dict:
+        """Подтверждение крупной сметы — аудируемый факт в существующем леджере.
+
+        Новых таблиц/файлов/секретов нет: событие пишется в append-only
+        audit-леджер (`audit_events.data`) тем же путём, что и прочие решения,
+        и несёт `user_confirmed: true`.
+        """
+        from audit.event_store import write_event
+
+        return write_event(
+            job.get("tenant_id") or "unknown",
+            "job.user_confirmed",
+            "job",
+            job.get("job_id") or "unknown",
+            {
+                "user_confirmed": True,
+                "decision": plan_source.REQUIRES_CONFIRMATION,
+                "decision_reason": prediction.get("decision_reason", ""),
+                "estimated_cost": prediction.get("estimated_cost", 0),
+            },
+        )
 
     async def execute_job(self, job: dict) -> dict:
         route = self.route_job(job)
