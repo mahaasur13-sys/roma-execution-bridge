@@ -10,6 +10,7 @@ import zlib
 from uuid import uuid4
 
 from billing.pg_connection import get_pg_manager, PGUnavailableError
+from cost.money_policy import reject_nullable_money
 
 logger = logging.getLogger("roma.billing.ledger")
 
@@ -68,6 +69,10 @@ class PGBillingLedger:
         currency: str = "USD",
         metadata: dict = None,
     ) -> None:
+        # NOT NULL-договор (MONEY_WHITELIST_POLICY): amount/currency — обязательные
+        # money-колонки; None отклоняется до INSERT с именем таблицы/колонки.
+        reject_nullable_money("ledger_entries", "amount", amount)
+        reject_nullable_money("ledger_entries", "currency", currency)
         entry_type = entry_type.upper()
         meta_json = json.dumps(metadata or {})
         ledger_id = f"led-{int(time.time() * 1000)}-{hash(tenant_id + entry_type + str(amount)) & 0xFFFFF:05x}"
