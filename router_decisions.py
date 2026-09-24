@@ -111,8 +111,8 @@ async def create_decision(payload: dict, x_api_key: str = Header(None)):
 
 @router.get("/{decision_id}")
 async def get_decision(decision_id: str, x_api_key: str = Header(None)):
-    _tenant_id = _tenant_from_key(x_api_key)
-    rec = db.get_decision_record(decision_id)
+    tenant_id = _tenant_from_key(x_api_key)
+    rec = db.get_decision_record(decision_id, tenant_id)
     if not rec:
         raise HTTPException(404, "Decision not found")
     return {
