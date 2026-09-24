@@ -4,10 +4,8 @@
 # Замер 2026-09-21 (A-7: факт из единственного прогона 74ade31):
 #   product-only 31.732% (4902/15448 stmts)  ← область гейта (floor 31.7, отсечение ВНИЗ)
 #   whole-repo   42.476% (7994/18820)         ← справочно, печатается для аудита дрейфа
-#   money path   48.940% (485/991)            — billing/* + ledger/idempotency (floor 48.9)
+#   money-скоуп и money-колонки: см. cost/money_policy.py (MONEY_WHITELIST_POLICY)
 #   запас до пола: 0.034 п.п. продукта (~5 покрытых строк) — новый непокрытый код уронит гейт, это ожидаемо
-#   lowest: billing/metering.py, billing/invoicing.py, billing/stripe_client.py,
-#           billing/aggregator.py — 0% (не покрыты ни одним тестом)
 #
 # Правило: порог НИКОГДА не понижается. Поднимать — только вместе с новыми тестами.
 # A-7: храповик проверяется МЕХАНИЧЕСКИ — текущий пол сверяется с floor_history

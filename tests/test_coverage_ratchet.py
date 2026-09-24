@@ -102,7 +102,8 @@ def _coverage(
     """Синтетическое измерение покрытия: product и money управляются раздельно.
 
     Продукт = (заглушки + денежный файл), деньги = ТОЛЬКО файл billing/_synthetic.py
-    (единственный путь под money_scope: prefix billing/ без ledger/idempotenc в имени).
+    (путь под money_scope по PREFIX-оси `billing/`; ось name_contains `ledger`/`idempotenc`
+    пинуется consistency-тестом tests/test_money_whitelist_policy.py).
     """
     include = _thresholds()["scope"]["include"]
     money_entry, bulk_entry = "billing", "alerts"
