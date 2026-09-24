@@ -2540,7 +2540,7 @@ def _find_tenant_by_key_pg(api_key: str) -> dict | None:
         conn.commit()
         cur.close()
         if row:
-            result = {"tenant_id": row[0], "name": row[1], "tier": row[2]}
+            result = {"tenant_id": row[0], "name": row[1], "plan": row[2]}
     except Exception:
         conn.rollback()
         _pg_return(conn, close_on_error=True)
