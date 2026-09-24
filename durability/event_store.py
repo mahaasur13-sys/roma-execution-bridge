@@ -121,7 +121,6 @@ class EventStore:
             # счётчик не должен «съесть» номер неудавшейся записи (монотонность
             # сохранённых sequence без дыр).
             next_seq = self._sequence + 1
-            event.sequence = next_seq
 
             try:
                 conn.execute(
@@ -132,7 +131,7 @@ class EventStore:
                         event.job_id,
                         json.dumps(event.payload),
                         event.timestamp,
-                        event.sequence,
+                        next_seq,
                     ),
                 )
                 conn.commit()
@@ -148,6 +147,10 @@ class EventStore:
                     logger.exception("SQLite rollback failed after append failure")
                 raise
 
+            # Присвоения — только после успешного commit: объект события получает
+            # номер, который стор реально потребил (иначе при неудаче он носит
+            # «несъеденный» sequence).
+            event.sequence = next_seq
             self._sequence = next_seq
 
         return event

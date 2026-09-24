@@ -287,3 +287,26 @@ def test_append_rollback_failure_does_not_mask_original_error(tmp_path):
 
     # пробрашена именно ИСХОДНАЯ ошибка, а не rollback-овская
     assert ei.value is commit_err
+
+
+def test_append_event_sequence_assigned_only_after_commit(tmp_path):
+    """event.sequence присваивается только после успешного commit."""
+    es = EventStore(db_path=str(tmp_path / "e.db"))
+    real = es._conn
+
+    # фаза 1: commit падает — event.sequence НЕ присваивается (остаётся default)
+    es._conn = _FailingCommitConn(real, fail_times=1)
+    ev_fail = Event(
+        event_type=EventType.JOB_QUEUED.value, job_id="job-1", payload={"i": "bad"}
+    )
+    with pytest.raises(sqlite3.OperationalError):
+        es.append(ev_fail)
+    assert ev_fail.sequence == 0, "несъеденный номер не должен присваиваться объекту"
+
+    # фаза 2: успешный append — sequence присваивается (== 1, без дыры)
+    es._conn = real
+    ev_ok = Event(
+        event_type=EventType.JOB_STARTED.value, job_id="job-1", payload={"i": "good"}
+    )
+    es.append(ev_ok)
+    assert ev_ok.sequence == 1
