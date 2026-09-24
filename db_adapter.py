@@ -2313,7 +2313,7 @@ def count_jobs_active_for_tenant(tenant_id: str) -> int:
 # (duplicate `_load_plans` removed — the plans loader above is the single source)
 
 
-def get_decision_record(decision_id: str) -> dict | None:
+def get_decision_record(decision_id: str, tenant_id: str) -> dict | None:
     if _pg_enabled():
 
         async def _get():
@@ -2321,8 +2321,8 @@ def get_decision_record(decision_id: str) -> dict | None:
             try:
                 with conn.cursor() as cur:
                     cur.execute(
-                        "SELECT id, request_id, tenant_id, gate_result, gate_reason, quota_remaining, estimated_cost, decided_at FROM decision_records WHERE id=%s",
-                        (decision_id,),
+                        "SELECT id, request_id, tenant_id, gate_result, gate_reason, quota_remaining, estimated_cost, decided_at FROM decision_records WHERE id=%s AND tenant_id=%s",
+                        (decision_id, tenant_id),
                     )
                     row = cur.fetchone()
                     if row:
@@ -2345,8 +2345,8 @@ def get_decision_record(decision_id: str) -> dict | None:
         c = _sqlite_conn()
         try:
             row = c.execute(
-                "SELECT id, request_id, tenant_id, gate_result, gate_reason, quota_remaining, estimated_cost, decided_at FROM decision_records WHERE id=?",
-                (decision_id,),
+                "SELECT id, request_id, tenant_id, gate_result, gate_reason, quota_remaining, estimated_cost, decided_at FROM decision_records WHERE id=? AND tenant_id=?",
+                (decision_id, tenant_id),
             ).fetchone()
             return (
                 {

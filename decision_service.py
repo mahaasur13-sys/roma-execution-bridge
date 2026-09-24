@@ -131,7 +131,7 @@ def evaluate_decision(
 #  GET /v1/decisions/{id}
 # ────────────────────────────────────────
 def get_decision(decision_id: str, tenant_id: str) -> dict | None:
-    rec = db.get_decision_record(decision_id)
+    rec = db.get_decision_record(decision_id, tenant_id)
     if not rec:
         return None
     if rec["tenant_id"] != tenant_id:
