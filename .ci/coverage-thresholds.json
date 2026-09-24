@@ -91,10 +91,8 @@
       "scripts",
       "support_chat",
       "tenancy",
-      "tier_gate.py",
       "tier_profiles.py",
       "validator",
-      "white_label.py",
       "worker.py"
     ],
     "exclude": [
