@@ -112,22 +112,34 @@ class EventStore:
     def append(self, event: Event) -> Event:
         """Append an event to the log. Returns the event with sequence number."""
         with self._lock:
-            self._sequence += 1
-            event.sequence = self._sequence
-
             conn = self._conn
-            conn.execute(
-                "INSERT INTO events (event_id, event_type, job_id, payload, timestamp, sequence) VALUES (?, ?, ?, ?, ?, ?)",
-                (
-                    event.event_id,
-                    event.event_type,
-                    event.job_id,
-                    json.dumps(event.payload),
-                    event.timestamp,
-                    event.sequence,
-                ),
-            )
-            conn.commit()
+            # Вычисляем следующий sequence, но НЕ двигаем self._sequence до
+            # успешного commit: упавший commit обязан откатиться (rollback), и
+            # счётчик не должен «съесть» номер неудавшейся записи (монотонность
+            # сохранённых sequence без дыр).
+            next_seq = self._sequence + 1
+            event.sequence = next_seq
+
+            try:
+                conn.execute(
+                    "INSERT INTO events (event_id, event_type, job_id, payload, timestamp, sequence) VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        event.event_id,
+                        event.event_type,
+                        event.job_id,
+                        json.dumps(event.payload),
+                        event.timestamp,
+                        event.sequence,
+                    ),
+                )
+                conn.commit()
+            except Exception:
+                # Без rollback открытая транзакция тлеет: следующий успешный
+                # commit утащит недописанное событие (data-integrity).
+                conn.rollback()
+                raise
+
+            self._sequence = next_seq
 
         return event
 

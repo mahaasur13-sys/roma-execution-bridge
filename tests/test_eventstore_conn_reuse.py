@@ -40,8 +40,23 @@ def _append_batch(es: EventStore, n: int = N_APPENDS, job_id: str = "job-1") -> 
         )
 
 
-def _fd_count() -> int:
-    return len(os.listdir("/proc/self/fd"))
+def _db_fd_count(db_path: str) -> int:
+    """Число открытых fd, указывающих на файл БД.
+
+    Точнее, чем общий `len(os.listdir('/proc/self/fd'))`: тот счётчик process-wide
+    дёргается на ±1 от посторонних fd pytest/рантайма (временные файлы, bytecode),
+    а утечка соединений EventStore видна именно как рост fd на сам файл БД.
+    """
+    n = 0
+    fd_dir = "/proc/self/fd"
+    for fd in os.listdir(fd_dir):
+        try:
+            target = os.readlink(os.path.join(fd_dir, fd))
+        except OSError:
+            continue
+        if db_path in target:
+            n += 1
+    return n
 
 
 def test_eventstore_single_connection_reused(monkeypatch, tmp_path):
@@ -66,16 +81,17 @@ def test_eventstore_single_connection_reused(monkeypatch, tmp_path):
     reason="требуется Linux /proc/self/fd · issue: EVENTSTORE-CONN · expiry: 2026-12-31",
 )
 def test_eventstore_fd_stable_over_appends(tmp_path):
-    """fd не должен расти за 500 append (нет churn-дескрипторов)."""
-    es = EventStore(db_path=str(tmp_path / "events.db"))
-    fd_after_init = _fd_count()
+    """fd на файл БД не должен расти за 500 append (нет churn-дескрипторов)."""
+    db_path = str(tmp_path / "events.db")
+    es = EventStore(db_path=db_path)
+    fd_after_init = _db_fd_count(db_path)
 
     _append_batch(es)
-    fd_after_appends = _fd_count()
+    fd_after_appends = _db_fd_count(db_path)
 
     assert (
         fd_after_appends == fd_after_init
-    ), f"fd вырос на {fd_after_appends - fd_after_init} за {N_APPENDS} append"
+    ), f"fd на файл БД вырос на {fd_after_appends - fd_after_init} за {N_APPENDS} append"
 
 
 def test_eventstore_no_stray_connections(tmp_path):
@@ -139,3 +155,91 @@ def test_eventstore_roundtrip_and_reopen(tmp_path):
     es2 = EventStore(db_path=db_path)
     assert es2.get_latest_sequence() == 3
     assert len(es2.replay(0)) == 3
+
+
+class _FailingCommitConn:
+    """Обёртка над sqlite3.Connection: commit падает заданное число раз.
+
+    `sqlite3.Connection` — иммутабельный C-тип (нельзя monkeypatch'ить ни инстанс,
+    ни класс), поэтому провал commit симулируется делегирующей обёрткой: всё, кроме
+    `commit`, прозрачно уходит в реальное соединение.
+    """
+
+    def __init__(self, conn, fail_times: int):
+        self._conn = conn
+        self._fail = fail_times
+
+    def commit(self):
+        if self._fail > 0:
+            self._fail -= 1
+            raise sqlite3.OperationalError("database is locked")
+        return self._conn.commit()
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
+def test_append_commit_failure_rolls_back_and_next_append_clean(tmp_path):
+    """Упавший commit обязан откатиться: следующая запись не утащит недописанное.
+
+    (а) после исключения последующий append хранит ТОЛЬКО своё событие;
+    (в) повторный append после ошибки не дублирует payload.
+    """
+    es = EventStore(db_path=str(tmp_path / "events.db"))
+    es._conn = _FailingCommitConn(es._conn, fail_times=1)
+
+    with pytest.raises(sqlite3.OperationalError):
+        es.append(
+            Event(
+                event_type=EventType.JOB_QUEUED.value,
+                job_id="job-1",
+                payload={"i": "bad"},
+            )
+        )
+
+    es.append(
+        Event(
+            event_type=EventType.JOB_STARTED.value,
+            job_id="job-1",
+            payload={"i": "good"},
+        )
+    )
+
+    rows = es.replay(0)
+    assert (
+        len(rows) == 1
+    ), f"ожидалось ровно 1 событие (откаченного нет), получено {len(rows)}"
+    assert rows[0].payload == {"i": "good"}
+    assert rows[0].event_type == EventType.JOB_STARTED.value
+    # (в) нет дублей: откаченный payload не просочился
+    assert [r.payload for r in rows] == [{"i": "good"}]
+
+
+def test_append_sequence_not_consumed_on_failed_commit(tmp_path):
+    """(б) self._sequence двигается только после успешного commit — без дыр."""
+    es = EventStore(db_path=str(tmp_path / "events.db"))
+    es._conn = _FailingCommitConn(es._conn, fail_times=1)
+
+    with pytest.raises(sqlite3.OperationalError):
+        es.append(
+            Event(
+                event_type=EventType.JOB_QUEUED.value,
+                job_id="job-1",
+                payload={"i": "bad"},
+            )
+        )
+
+    # номер неудавшейся записи НЕ съеден
+    assert es.get_latest_sequence() == 0
+
+    good = Event(
+        event_type=EventType.JOB_STARTED.value,
+        job_id="job-1",
+        payload={"i": "good"},
+    )
+    es.append(good)
+
+    assert es.get_latest_sequence() == 1
+    assert good.sequence == 1
+    rows = es.replay(0)
+    assert [r.sequence for r in rows] == [1]
