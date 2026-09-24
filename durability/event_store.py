@@ -72,12 +72,17 @@ class EventStore:
         )
         self._lock = threading.RLock()
         self._sequence = 0
+        # Fix B: reuse a single connection for the store's lifetime. The old
+        # `_get_conn()` opened a fresh sqlite3 connection on every append/replay
+        # and never closed it — a connection churn (open/GC-finalize per call),
+        # not a deterministic fd leak. Same pattern as event_sourcing.py.
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
 
         self._init_db()
 
     def _init_db(self):
         """Create tables if not exists."""
-        conn = self._get_conn()
+        conn = self._conn
         conn.execute("""
             CREATE TABLE IF NOT EXISTS events (
                 event_id TEXT PRIMARY KEY,
@@ -104,28 +109,37 @@ class EventStore:
         max_seq = cursor.fetchone()[0]
         self._sequence = max_seq or 0
 
-    def _get_conn(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.db_path, check_same_thread=False)
-
     def append(self, event: Event) -> Event:
         """Append an event to the log. Returns the event with sequence number."""
         with self._lock:
-            self._sequence += 1
-            event.sequence = self._sequence
+            conn = self._conn
+            # Вычисляем следующий sequence, но НЕ двигаем self._sequence до
+            # успешного commit: упавший commit обязан откатиться (rollback), и
+            # счётчик не должен «съесть» номер неудавшейся записи (монотонность
+            # сохранённых sequence без дыр).
+            next_seq = self._sequence + 1
+            event.sequence = next_seq
 
-            conn = self._get_conn()
-            conn.execute(
-                "INSERT INTO events (event_id, event_type, job_id, payload, timestamp, sequence) VALUES (?, ?, ?, ?, ?, ?)",
-                (
-                    event.event_id,
-                    event.event_type,
-                    event.job_id,
-                    json.dumps(event.payload),
-                    event.timestamp,
-                    event.sequence,
-                ),
-            )
-            conn.commit()
+            try:
+                conn.execute(
+                    "INSERT INTO events (event_id, event_type, job_id, payload, timestamp, sequence) VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        event.event_id,
+                        event.event_type,
+                        event.job_id,
+                        json.dumps(event.payload),
+                        event.timestamp,
+                        event.sequence,
+                    ),
+                )
+                conn.commit()
+            except Exception:
+                # Без rollback открытая транзакция тлеет: следующий успешный
+                # commit утащит недописанное событие (data-integrity).
+                conn.rollback()
+                raise
+
+            self._sequence = next_seq
 
         return event
 
@@ -150,26 +164,26 @@ class EventStore:
         Replay all events from from_sequence (exclusive) to latest.
         Optionally filter by event types.
         """
-        conn = self._get_conn()
-        query = "SELECT * FROM events WHERE sequence > ? ORDER BY sequence ASC"
-        args = [from_sequence]
+        with self._lock:
+            query = "SELECT * FROM events WHERE sequence > ? ORDER BY sequence ASC"
+            args = [from_sequence]
 
-        if event_filter:
-            placeholders = ",".join("?" * len(event_filter))
-            query = f"SELECT * FROM events WHERE sequence > ? AND event_type IN ({placeholders}) ORDER BY sequence ASC"
-            args = [from_sequence] + event_filter
+            if event_filter:
+                placeholders = ",".join("?" * len(event_filter))
+                query = f"SELECT * FROM events WHERE sequence > ? AND event_type IN ({placeholders}) ORDER BY sequence ASC"
+                args = [from_sequence] + event_filter
 
-        rows = conn.execute(query, args).fetchall()
-        return [self._row_to_event(row) for row in rows]
+            rows = self._conn.execute(query, args).fetchall()
+            return [self._row_to_event(row) for row in rows]
 
     def get_events_for_job(self, job_id: str) -> List[Event]:
         """Get all events for a specific job."""
-        conn = self._get_conn()
-        rows = conn.execute(
-            "SELECT * FROM events WHERE job_id = ? ORDER BY sequence ASC",
-            (job_id,),
-        ).fetchall()
-        return [self._row_to_event(row) for row in rows]
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM events WHERE job_id = ? ORDER BY sequence ASC",
+                (job_id,),
+            ).fetchall()
+            return [self._row_to_event(row) for row in rows]
 
     def get_latest_sequence(self) -> int:
         """Get the latest event sequence number."""
@@ -232,8 +246,12 @@ class EventStore:
         return [e.to_dict() for e in self.replay(from_sequence=from_seq)]
 
     def close(self):
-        """Close connection (no-op for SQLite but needed for interface)."""
-        pass
+        """Close the store's single connection (paired with __init__)."""
+        with self._lock:
+            try:
+                self._conn.close()
+            except AttributeError:
+                pass
 
 
 class DurabilityLayer:
