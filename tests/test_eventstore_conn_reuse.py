@@ -243,3 +243,47 @@ def test_append_sequence_not_consumed_on_failed_commit(tmp_path):
     assert good.sequence == 1
     rows = es.replay(0)
     assert [r.sequence for r in rows] == [1]
+
+
+def test_append_rollback_failure_does_not_mask_original_error(tmp_path):
+    """Сбой rollback() не должен маскировать исходную ошибку commit()."""
+
+    class CommitBoom(Exception):
+        pass
+
+    class RollbackBoom(Exception):
+        pass
+
+    es = EventStore(db_path=str(tmp_path / "e.db"))
+    real = es._conn
+    commit_err = CommitBoom("commit failed")
+    rollback_err = RollbackBoom("rollback failed")
+
+    class FlakyConn:
+        def __init__(self, real_conn, commit_exc, rollback_exc):
+            self._real = real_conn
+            self._ce = commit_exc
+            self._re = rollback_exc
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+        def commit(self):
+            raise self._ce
+
+        def rollback(self):
+            raise self._re
+
+    es._conn = FlakyConn(real, commit_err, rollback_err)
+
+    with pytest.raises(CommitBoom) as ei:
+        es.append(
+            Event(
+                event_type=EventType.JOB_QUEUED.value,
+                job_id="job-1",
+                payload={"i": "bad"},
+            )
+        )
+
+    # пробрашена именно ИСХОДНАЯ ошибка, а не rollback-овская
+    assert ei.value is commit_err
