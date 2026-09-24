@@ -4,6 +4,7 @@ Every state change is captured as an immutable event.
 """
 
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
@@ -11,6 +12,8 @@ from enum import Enum
 from dataclasses import dataclass, field
 import threading
 import sqlite3
+
+logger = logging.getLogger("roma.durability")
 
 
 class EventType(str, Enum):
@@ -136,7 +139,13 @@ class EventStore:
             except Exception:
                 # Без rollback открытая транзакция тлеет: следующий успешный
                 # commit утащит недописанное событие (data-integrity).
-                conn.rollback()
+                try:
+                    conn.rollback()
+                except Exception:
+                    # Вторичная ошибка rollback() не должна маскировать исходную
+                    # ошибку execute/commit: логируем, а наружу пробрасываем
+                    # исходную (bare raise восстанавливает exc_info).
+                    logger.exception("SQLite rollback failed after append failure")
                 raise
 
             self._sequence = next_seq
