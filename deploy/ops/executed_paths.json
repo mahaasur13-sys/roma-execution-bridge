@@ -16,6 +16,14 @@
       "service": "alert-relay",
       "severity": "critical",
       "why": "канал доставки алертов в Telegram; его отказ делает молчаливыми все остальные алерты"
+    },
+    {
+      "name": "zo-deploy-agent",
+      "repo_path": "deploy/ops/zo_deploy_agent.py",
+      "executed_path": "/home/workspace/artifacts/zo-deploy-agent/zo_deploy_agent.py",
+      "service": "zo-deploy-agent",
+      "severity": "critical",
+      "why": "единственный путь, которым код из master попадает на прод-Zo: инбаунд-SSH до машины недостижим, выкат делает сама машина по зелёному CI"
     }
   ],
   "checks": [
