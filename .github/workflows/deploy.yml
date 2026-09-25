@@ -47,6 +47,8 @@ jobs:
             exit 1
           fi
           eval "$(ssh-agent -s)" >/dev/null
+          echo "SSH_AUTH_SOCK=${SSH_AUTH_SOCK}" >> "$GITHUB_ENV"
+          echo "SSH_AGENT_PID=${SSH_AGENT_PID}" >> "$GITHUB_ENV"
           ssh-add "$KEY_FILE" >/dev/null 2>&1 || { echo "::error::ssh-add failed"; exit 1; }
 
       - name: Deploy to Zo
