@@ -19,6 +19,7 @@ from support_chat.models import (
 from support_chat.service import SupportTicketService
 from support_chat.chat_service import ChatService
 from support_chat.settings import SupportSettings
+from support_chat.db import get_session_factory
 
 
 @pytest.fixture
@@ -33,7 +34,8 @@ def chat_service() -> ChatService:
 
 @pytest.fixture
 def service(chat_service: ChatService) -> SupportTicketService:
-    return SupportTicketService(chat_service=chat_service)
+    sf = get_session_factory("sqlite:///:memory:")
+    return SupportTicketService(chat_service=chat_service, session_factory=sf)
 
 
 class TestTicketCreation:
@@ -112,12 +114,8 @@ class TestTicketCreation:
         t2_tickets = service.list_tickets("t2")
         assert t1_tickets.total == 1
         assert t2_tickets.total == 1
-        assert (
-            service.get_ticket(
-                str(list(service._tickets.values())[0].ticket_id), tenant_id="t2"
-            )
-            is None
-        )
+        t1_ticket_id = t1_tickets.tickets[0]["ticket_id"]
+        assert service.get_ticket(t1_ticket_id, tenant_id="t2") is None
 
 
 class TestMessages:
@@ -236,3 +234,100 @@ class TestModels:
             CsatRating(ticket_id=uuid4(), tenant_id="t1", score=0, rated_by="u1")
         with pytest.raises(Exception):
             CsatRating(ticket_id=uuid4(), tenant_id="t1", score=6, rated_by="u1")
+
+
+class TestPersistence:
+
+    @pytest.mark.asyncio
+    async def test_13_restart_persistence(self, tmp_path) -> None:
+        """P-1 БЛОКЕР-4: ticket survives a service restart (new engine, same DB)."""
+        db_url = f"sqlite:///{tmp_path}/support.db"
+        sf1 = get_session_factory(db_url)
+        service1 = SupportTicketService(session_factory=sf1)
+
+        req = CreateTicketRequest(
+            tenant_id="t1",
+            subject="Persists across restart",
+            body="created before restart",
+            priority=TicketPriority.HIGH,
+        )
+        result = await service1.create_ticket(req, "user1")
+        tid = result.ticket_id
+
+        # "restart": brand-new engine/session factory over the same DB file.
+        sf2 = get_session_factory(db_url)
+        service2 = SupportTicketService(session_factory=sf2)
+        ticket = service2.get_ticket(str(tid), tenant_id="t1")
+
+        assert ticket is not None
+        assert ticket.ticket_id == tid
+        assert ticket.subject == "Persists across restart"
+        assert ticket.status == TicketStatus.OPEN
+        assert ticket.priority == TicketPriority.HIGH
+
+    @pytest.mark.asyncio
+    async def test_14_fail_closed_db_unavailable(self, tmp_path) -> None:
+        """Fail-closed: unreachable DB raises — no silent in-memory fallback."""
+        db_url = f"sqlite:///{tmp_path}/no_such_dir/support.db"
+        sf = get_session_factory(db_url)
+        service = SupportTicketService(session_factory=sf)
+
+        req = CreateTicketRequest(tenant_id="t1", subject="should fail")
+        with pytest.raises(Exception):
+            await service.create_ticket(req, "user1")
+
+    @pytest.mark.asyncio
+    async def test_15_status_transition_race(self, service) -> None:
+        """Race: stale expected status → refusal (0 rows), status unchanged; success → exactly one."""
+        from sqlalchemy import update as sa_update
+
+        from support_chat.db_models import SupportTicketModel
+
+        req = CreateTicketRequest(tenant_id="t1", subject="Race")
+        ticket = await service.create_ticket(req, "user1")
+        tid = str(ticket.ticket_id)
+
+        # 1) successful transition → exactly one winner
+        updated = await service.transition_status(tid, TicketStatus.IN_PROGRESS)
+        assert updated.status == TicketStatus.IN_PROGRESS
+
+        # 2) concurrent winner moves in_progress → waiting_customer
+        with service._session_factory() as session:
+            session.execute(
+                sa_update(SupportTicketModel)
+                .where(
+                    SupportTicketModel.ticket_id == ticket.ticket_id,
+                    SupportTicketModel.status == "in_progress",
+                )
+                .values(status="waiting_customer")
+            )
+            session.commit()
+
+        # 3) stale reader believes in_progress → optimistic update matches 0 rows
+        with service._session_factory() as session:
+            result = session.execute(
+                sa_update(SupportTicketModel)
+                .where(
+                    SupportTicketModel.ticket_id == ticket.ticket_id,
+                    SupportTicketModel.status == "in_progress",
+                )
+                .values(status="resolved")
+            )
+            session.commit()
+            assert result.rowcount == 0
+
+        assert service.get_ticket(tid).status == TicketStatus.WAITING_CUSTOMER
+
+    @pytest.mark.asyncio
+    async def test_16_utc_roundtrip(self, service) -> None:
+        """UTC round-trip: written timestamps read back as tz-aware UTC."""
+        from datetime import timedelta
+
+        req = CreateTicketRequest(tenant_id="t1", subject="UTC")
+        ticket = await service.create_ticket(req, "user1")
+        got = service.get_ticket(str(ticket.ticket_id), tenant_id="t1")
+        assert got is not None
+        assert got.created_at.tzinfo is not None
+        assert got.created_at.utcoffset() == timedelta(0)
+        assert got.updated_at.tzinfo is not None
+        assert got.updated_at.utcoffset() == timedelta(0)
