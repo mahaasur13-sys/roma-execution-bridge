@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from structlog import get_logger
+from sqlalchemy import update
 
 from support_chat.chat_service import ChatService
 from support_chat.db import get_session_factory
@@ -53,6 +54,15 @@ def _coerce_uuid(value: object) -> UUID | None:
         return None
 
 
+def _as_utc(value: datetime | None) -> datetime | None:
+    """Normalise a model datetime to tz-aware UTC (SQLite stores naive datetimes)."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _ticket_to_model(ticket: SupportTicket) -> SupportTicketModel:
     return SupportTicketModel(
         ticket_id=ticket.ticket_id,
@@ -86,9 +96,9 @@ def _model_to_ticket(model: SupportTicketModel) -> SupportTicket:
         context_id=model.context_id,
         context_data=model.context_data or {},
         created_by=model.created_by,
-        created_at=model.created_at,
-        updated_at=model.updated_at,
-        resolved_at=model.resolved_at,
+        created_at=_as_utc(model.created_at),
+        updated_at=_as_utc(model.updated_at),
+        resolved_at=_as_utc(model.resolved_at),
         tags=model.tags or [],
     )
 
@@ -310,6 +320,7 @@ class SupportTicketService:
     ) -> SupportTicket:
         self._ensure_tables()
         tid = _coerce_uuid(ticket_id)
+        now = datetime.now(timezone.utc)
         with self._session_factory() as session:
             model = session.get(SupportTicketModel, tid)
             if model is None:
@@ -320,11 +331,24 @@ class SupportTicketService:
                 raise ValueError(
                     f"Cannot transition from {current.value} to {new_status.value}"
                 )
-            model.status = new_status.value
-            model.updated_at = datetime.now(timezone.utc)
+            values: dict = {"status": new_status.value, "updated_at": now}
             if new_status == TicketStatus.RESOLVED:
-                model.resolved_at = datetime.now(timezone.utc)
+                values["resolved_at"] = now
+            result = session.execute(
+                update(SupportTicketModel)
+                .where(
+                    SupportTicketModel.ticket_id == tid,
+                    SupportTicketModel.status == current.value,
+                )
+                .values(**values)
+            )
+            if result.rowcount == 0:
+                raise ValueError(
+                    f"Cannot transition from {current.value} to {new_status.value} "
+                    "(status changed concurrently)"
+                )
             session.commit()
+            session.refresh(model)
             ticket = _model_to_ticket(model)
 
         await self._chat.add_system_message(

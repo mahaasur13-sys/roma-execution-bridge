@@ -53,7 +53,9 @@ def get_engine(url: str | None = None) -> Engine:
                 resolved, connect_args=connect_args, poolclass=StaticPool
             )
         return create_engine(resolved, connect_args=connect_args)
-    return create_engine(resolved, pool_pre_ping=True)
+    return create_engine(
+        resolved, pool_pre_ping=True, connect_args={"connect_timeout": 5}
+    )
 
 
 def get_session_factory(url: str | None = None):

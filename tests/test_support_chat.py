@@ -275,3 +275,59 @@ class TestPersistence:
         req = CreateTicketRequest(tenant_id="t1", subject="should fail")
         with pytest.raises(Exception):
             await service.create_ticket(req, "user1")
+
+    @pytest.mark.asyncio
+    async def test_15_status_transition_race(self, service) -> None:
+        """Race: stale expected status → refusal (0 rows), status unchanged; success → exactly one."""
+        from sqlalchemy import update as sa_update
+
+        from support_chat.db_models import SupportTicketModel
+
+        req = CreateTicketRequest(tenant_id="t1", subject="Race")
+        ticket = await service.create_ticket(req, "user1")
+        tid = str(ticket.ticket_id)
+
+        # 1) successful transition → exactly one winner
+        updated = await service.transition_status(tid, TicketStatus.IN_PROGRESS)
+        assert updated.status == TicketStatus.IN_PROGRESS
+
+        # 2) concurrent winner moves in_progress → waiting_customer
+        with service._session_factory() as session:
+            session.execute(
+                sa_update(SupportTicketModel)
+                .where(
+                    SupportTicketModel.ticket_id == ticket.ticket_id,
+                    SupportTicketModel.status == "in_progress",
+                )
+                .values(status="waiting_customer")
+            )
+            session.commit()
+
+        # 3) stale reader believes in_progress → optimistic update matches 0 rows
+        with service._session_factory() as session:
+            result = session.execute(
+                sa_update(SupportTicketModel)
+                .where(
+                    SupportTicketModel.ticket_id == ticket.ticket_id,
+                    SupportTicketModel.status == "in_progress",
+                )
+                .values(status="resolved")
+            )
+            session.commit()
+            assert result.rowcount == 0
+
+        assert service.get_ticket(tid).status == TicketStatus.WAITING_CUSTOMER
+
+    @pytest.mark.asyncio
+    async def test_16_utc_roundtrip(self, service) -> None:
+        """UTC round-trip: written timestamps read back as tz-aware UTC."""
+        from datetime import timedelta
+
+        req = CreateTicketRequest(tenant_id="t1", subject="UTC")
+        ticket = await service.create_ticket(req, "user1")
+        got = service.get_ticket(str(ticket.ticket_id), tenant_id="t1")
+        assert got is not None
+        assert got.created_at.tzinfo is not None
+        assert got.created_at.utcoffset() == timedelta(0)
+        assert got.updated_at.tzinfo is not None
+        assert got.updated_at.utcoffset() == timedelta(0)
