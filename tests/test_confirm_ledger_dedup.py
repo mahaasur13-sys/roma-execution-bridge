@@ -17,6 +17,8 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 import audit.event_store as audit_store
 import db_adapter as db
 import plan_source
@@ -328,6 +330,25 @@ def test_insert_audit_event_dedupes_at_db_level(monkeypatch, tmp_path):
     assert first == {"id": "e-1"}
     assert second == {"id": None, "skipped": True}
     assert _count_audit_rows(factory, TENANT, "job.user_confirmed", "j-atomic") == 1
+
+
+def test_insert_audit_event_foreign_conflict_raises(monkeypatch, tmp_path):
+    """G-AUDIT-WRITE-ATOMICITY (PR #95 :1535): чужой конфликт (PK по id) пробрасывается.
+
+    INSERT OR IGNORE гасил ВСЕ конфликты; узкий ON CONFLICT-таргет под
+    audit_events_dedupe_uidx гасит только дедуп-ключ — PK-конфликт = ошибка.
+    """
+    import sqlite3
+
+    factory, _ = _real_sqlite(monkeypatch, tmp_path, "dedup-foreign.db")
+
+    db.insert_audit_event(
+        "dup-id", TENANT, "job.created", "job", "job-A", {"user_confirmed": True}
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        db.insert_audit_event(
+            "dup-id", TENANT, "job.created", "job", "job-B", {"user_confirmed": True}
+        )
 
 
 def test_both_writers_share_table_and_dedupe(monkeypatch, tmp_path):

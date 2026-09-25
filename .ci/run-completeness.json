@@ -2,16 +2,16 @@
   "note": "A-6: канон полноты набора тестов. Числа — машинный факт последнего repo-wide прогона (junitxml), не оценка. Порог никогда не понижается: любое отличие от факта прогона роняет гейт, обновление — только явным диффом этого файла вместе с изменением набора тестов.",
   "rule": "collected == executed (нулевое расхождение) И collected/passed/failures/errors/skipped == canon. Проверяет scripts/ci_run_completeness.py, вызывается из ci/coverage_gate.sh и из CI-шага scripts/ci_junit_smoke.py. Прежний порог 'collected >= 244' пропускал исчезновение 19 тестов — заменён точным равенством. G-CI-PG-CANON: скипы классифицированы машинно по причине в junitxml — admission (постоянная канона, admission_skips) и env-skip (проверка не исполнена из-за отсутствия окружения): локально допустимо 0 или env_skips_expected, при CI/GITHUB_ACTIONS — строго 0, потому что CI поднимает реальный PostgreSQL. G-CANON-ENV-PARITY: ожидания по среде объявлены явно в объекте 'profiles' (node · ci): profiles[<env>].passed/admission_skips/env_skips_max/named_admissions. Профиль берётся из окружения (CI/GITHUB_ACTIONS → ci, иначе node); среда без профиля — отказ (fail-closed). Admission-скипы обязаны быть записаны поимённо (тройка класс·симптом·issue/expiry): скип без поимённой записи и предписанная запись, которой не было, — оба случая отказ.",
   "canon": {
-    "collected": 462,
-    "passed": 456,
+    "collected": 466,
+    "passed": 460,
     "failures": 0,
     "errors": 0,
     "skipped": 6,
     "measured_on": "2026-09-24",
     "run_scope": "repo-wide (target=., pytest -q -p no:cacheprovider -p no:warnings)",
     "admission_skips": 6,
-    "env_skips_expected": 18,
-    "skip_classes": "admission=6 (живой GPU-воркер + 5 плейсхолдеров submit-роутера) · env-skip=18 (PG-зависимые при отсутствии PG_DSN)"
+    "env_skips_expected": 21,
+    "skip_classes": "admission=6 (живой GPU-воркер + 5 плейсхолдеров submit-роутера) · env-skip=21 (PG-зависимые при отсутствии PG_DSN)"
   },
   "history": [
     {
@@ -322,6 +322,13 @@
       "passed": 455,
       "skipped": 6,
       "change": "G-QUOTA-SOURCE-REMNANTS-2 / Q-1 (plan→tier): db_adapter._find_tenant_by_key_pg возвращал {\"tier\": row[2]} при SELECT plan; выровнено на {\"plan\": row[2]} (как sqlite-ветка). +1 тест tests/test_quota_plan_tier_key.py (обе ветки возвращают 'plan', 'tier' отсутствует; PG моком курсора). collected 460 → 461; node passed 454 → 455; CI passed 453 → 454; money 752/1113 — клятва, не тронут (фикс вне money-скоупа, db_adapter вне billing/)."
+    },
+    {
+      "date": "2026-09-25-012-reconcile",
+      "collected": 466,
+      "passed": 460,
+      "skipped": 6,
+      "change": "012 (реконсилирующий дедуп) + тесты: collected 462→466, passed 456→460, env_skips 18→21"
     }
   ],
   "measurement": "Профили среды (G-CANON-ENV-PARITY): нода 461 = 455 passed + 6 admission-скипов; CI 461 = 454 passed + 7 admission-скипов (CI-исключительный — R6-live). collected одинаков в обеих средах: набор один. Предыдущее: 460 = 454 + 6 (нода) / 453 + 7 (CI). История набора: 254 → 263 → 270 → 276 → 280 → 281 → 287 → 331 → 335 → 338 → 362 → 371 → 382 → 384 → 396 → 412 → 417 → 423 → 429 → 431 → 434 → 436 → 438 → 441 → 449 → 451 → 456 → 458 → 459 → 460 → 461.",
@@ -329,9 +336,9 @@
     "node": {
       "label": "node",
       "env": "node",
-      "passed": 456,
+      "passed": 460,
       "admission_skips": 6,
-      "env_skips_max": 18,
+      "env_skips_max": 21,
       "named_admissions": [
         {
           "test": "tests/test_gpu_integration_smoke.py::test_live_gpu_worker_health",
@@ -380,7 +387,7 @@
     "ci": {
       "label": "CI",
       "env": "ci",
-      "passed": 455,
+      "passed": 459,
       "admission_skips": 7,
       "env_skips_max": 0,
       "named_admissions": [
