@@ -23,7 +23,8 @@ GitHub Actions НА машину Zo по SSH. У раннера нет ни ма
     молча (класс G-PHANTOM-ENTRY-WRITE); новые untracked-файлы выкат не блокируют;
   * инвариант «HEAD == то, что исполняет сервис»: любой отказ ПОСЛЕ fast-forward
     откатывает дерево к последнему рабочему SHA;
-  * память об отказе постоянна (по SHA) — повторов нет; снятие памяти `--retry-all`,
+  * память об отказе постоянна (по SHA) — повторов нет; снятие памяти `--retry-all`;
+    первый алерт об отказе уходит сразу, стоячий — раз в сутки и не раньше часа после отказа;
     плюс один напоминающий алерт в сутки, пока выкат стоит;
   * миграции ДО рестарта и с самопроверкой: если после `run_migrations.py` в
     schema_migrations остались неотмеченные файлы, выкат блокируется — код не поднимается,
@@ -97,6 +98,17 @@ def now_iso() -> str:
         .isoformat(timespec="seconds")
         .replace("+00:00", "Z")
     )
+
+
+def _age_s(iso: str) -> float:
+    """Возраст отметки времени в секундах (для «не будить повторно»)."""
+    if not iso:
+        return 0.0
+    try:
+        seen = datetime.datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    except Exception:  # noqa: BLE001
+        return 0.0
+    return (datetime.datetime.now(datetime.timezone.utc) - seen).total_seconds()
 
 
 def emit(event: str, **fields) -> None:
@@ -518,7 +530,10 @@ def cycle(state: dict, *, dry_run: bool, rollback_on_unhealthy: bool, heartbeat_
             emit("heartbeat", deployed_sha=deployed[:8], remote_sha=sha[:8], in_sync=True)
         return state
     if sha in state.get("failed", {}):
-        if notice_due(state, "failed_memory:" + sha, 86400):
+        # первый алерт об отказе уже ушёл в момент отказа; стоячий — не раньше часа спустя,
+        # иначе владелец получает два сообщения об одном и том же в течение минуты.
+        stale = _age_s(state.get("last_failed_notice") or state["failed"][sha].get("ts") or "") >= 3600
+        if stale and notice_due(state, "failed_memory:" + sha, 86400):
             entry = state["failed"][sha]
             alert(
                 "ROMA deploy-agent: выкат стоит",
