@@ -1527,8 +1527,10 @@ def _insert_audit_event_sqlite(eid, tid, etype, ent_type, ent_id, data_json):
     try:
         _ensure_audit_events_table(c)
         cur = c.execute(
-            "INSERT OR IGNORE INTO audit_events (id, tenant_id, event_type, entity_type, entity_id, data)"
-            " VALUES (?,?,?,?,?,?)",
+            "INSERT INTO audit_events (id, tenant_id, event_type, entity_type, entity_id, data)"
+            " VALUES (?,?,?,?,?,?)"
+            " ON CONFLICT (tenant_id, event_type, entity_id)"
+            " WHERE entity_id IS NOT NULL AND entity_id <> 'unknown' DO NOTHING",
             (eid, tid, etype, ent_type, ent_id, data_json),
         )
         c.commit()
