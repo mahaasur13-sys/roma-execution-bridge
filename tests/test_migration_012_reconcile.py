@@ -173,3 +173,48 @@ def test_012_ignores_identity_column():
         assert cur.fetchone()[0] == 1
     finally:
         _cleanup(conn)
+
+
+@pytest.mark.pg
+def test_012_no_dups_unknown_and_null_variants():
+    """Нет дублей, но есть entity_id='unknown' и NULL-варианты → 012 rc=0, 0 изменений, без отказа.
+
+    Предикат дедупа исключает unknown и NULL-ключи (согласовано с частичным UNIQUE),
+    поэтому «грязный» по ключам набор не трогается.
+    """
+    if not _pg_reachable():
+        pytest.skip(
+            "PG not reachable — reconciling audit requires live PG; "
+            "issue: P1-C · expiry: 2026-12-31"
+        )
+    import psycopg2
+
+    conn = psycopg2.connect(_pg_dsn())
+    try:
+        _reset_tables(conn)
+        cur = conn.cursor()
+        cur.execute(PROD_FORM_SCHEMA)
+        rows = [
+            # (id, tenant_id, event_type, entity_type, entity_id, created_at)
+            ("u1", "tA", "job.user_confirmed", "job", "unknown", "2026-09-20T10:00:00Z"),
+            ("n1", None, "job.user_confirmed", "job", "job-N", "2026-09-20T10:00:00Z"),
+            ("n2", "tA", None, "job", "job-M", "2026-09-20T10:00:00Z"),
+            ("n3", "tA", "job.user_confirmed", "job", None, "2026-09-20T10:00:00Z"),
+            ("a1", "tA", "job.user_confirmed", "job", "job-A", "2026-09-20T10:00:00Z"),
+        ]
+        for rid, tid, et, ent, eid, ts in rows:
+            cur.execute(
+                "INSERT INTO audit_events (id,tenant_id,event_type,entity_type,entity_id,data,created_at)"
+                " VALUES (%s,%s,%s,%s,%s,'{}'::jsonb,%s)",
+                (rid, tid, et, ent, eid, ts),
+            )
+        _apply_012(conn)  # rc=0, без отказа
+
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute("SELECT count(*) FROM audit_events")
+        assert cur.fetchone()[0] == 5  # 0 изменений — все строки живы
+        cur.execute("SELECT count(*) FROM audit_events_dedupe_backup")
+        assert cur.fetchone()[0] == 0  # backup пуст
+    finally:
+        _cleanup(conn)
