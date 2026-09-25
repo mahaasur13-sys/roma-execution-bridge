@@ -19,6 +19,7 @@ from support_chat.models import (
 from support_chat.service import SupportTicketService
 from support_chat.chat_service import ChatService
 from support_chat.settings import SupportSettings
+from support_chat.db import get_session_factory
 
 
 @pytest.fixture
@@ -33,7 +34,8 @@ def chat_service() -> ChatService:
 
 @pytest.fixture
 def service(chat_service: ChatService) -> SupportTicketService:
-    return SupportTicketService(chat_service=chat_service)
+    sf = get_session_factory("sqlite:///:memory:")
+    return SupportTicketService(chat_service=chat_service, session_factory=sf)
 
 
 class TestTicketCreation:
@@ -112,12 +114,8 @@ class TestTicketCreation:
         t2_tickets = service.list_tickets("t2")
         assert t1_tickets.total == 1
         assert t2_tickets.total == 1
-        assert (
-            service.get_ticket(
-                str(list(service._tickets.values())[0].ticket_id), tenant_id="t2"
-            )
-            is None
-        )
+        t1_ticket_id = t1_tickets.tickets[0]["ticket_id"]
+        assert service.get_ticket(t1_ticket_id, tenant_id="t2") is None
 
 
 class TestMessages:
@@ -236,3 +234,44 @@ class TestModels:
             CsatRating(ticket_id=uuid4(), tenant_id="t1", score=0, rated_by="u1")
         with pytest.raises(Exception):
             CsatRating(ticket_id=uuid4(), tenant_id="t1", score=6, rated_by="u1")
+
+
+class TestPersistence:
+
+    @pytest.mark.asyncio
+    async def test_13_restart_persistence(self, tmp_path) -> None:
+        """P-1 БЛОКЕР-4: ticket survives a service restart (new engine, same DB)."""
+        db_url = f"sqlite:///{tmp_path}/support.db"
+        sf1 = get_session_factory(db_url)
+        service1 = SupportTicketService(session_factory=sf1)
+
+        req = CreateTicketRequest(
+            tenant_id="t1",
+            subject="Persists across restart",
+            body="created before restart",
+            priority=TicketPriority.HIGH,
+        )
+        result = await service1.create_ticket(req, "user1")
+        tid = result.ticket_id
+
+        # "restart": brand-new engine/session factory over the same DB file.
+        sf2 = get_session_factory(db_url)
+        service2 = SupportTicketService(session_factory=sf2)
+        ticket = service2.get_ticket(str(tid), tenant_id="t1")
+
+        assert ticket is not None
+        assert ticket.ticket_id == tid
+        assert ticket.subject == "Persists across restart"
+        assert ticket.status == TicketStatus.OPEN
+        assert ticket.priority == TicketPriority.HIGH
+
+    @pytest.mark.asyncio
+    async def test_14_fail_closed_db_unavailable(self, tmp_path) -> None:
+        """Fail-closed: unreachable DB raises — no silent in-memory fallback."""
+        db_url = f"sqlite:///{tmp_path}/no_such_dir/support.db"
+        sf = get_session_factory(db_url)
+        service = SupportTicketService(session_factory=sf)
+
+        req = CreateTicketRequest(tenant_id="t1", subject="should fail")
+        with pytest.raises(Exception):
+            await service.create_ticket(req, "user1")

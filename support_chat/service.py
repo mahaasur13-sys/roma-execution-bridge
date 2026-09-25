@@ -1,12 +1,15 @@
-"""Support Chat — SupportTicketService."""
+"""Support Chat — SupportTicketService (DB-backed ticket store)."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from uuid import UUID
 
 from structlog import get_logger
 
 from support_chat.chat_service import ChatService
+from support_chat.db import get_session_factory
+from support_chat.db_models import SupportTicketModel
 from support_chat.models import (
     AssignTicketRequest,
     ChatMessage,
@@ -21,6 +24,7 @@ from support_chat.models import (
     TicketAttachment,
     TicketDetailResponse,
     TicketListResponse,
+    TicketPriority,
     TicketStatus,
 )
 from support_chat.settings import SupportSettings
@@ -40,22 +44,91 @@ VALID_STATUS_TRANSITIONS: dict[TicketStatus, list[TicketStatus]] = {
 }
 
 
+def _coerce_uuid(value: object) -> UUID | None:
+    if isinstance(value, UUID):
+        return value
+    try:
+        return UUID(str(value))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+def _ticket_to_model(ticket: SupportTicket) -> SupportTicketModel:
+    return SupportTicketModel(
+        ticket_id=ticket.ticket_id,
+        tenant_id=ticket.tenant_id,
+        subject=ticket.subject,
+        body=ticket.body,
+        status=ticket.status.value,
+        priority=ticket.priority.value,
+        assigned_agent_id=ticket.assigned_agent_id,
+        context_type=ticket.context_type,
+        context_id=ticket.context_id,
+        context_data=ticket.context_data,
+        created_by=ticket.created_by,
+        created_at=ticket.created_at,
+        updated_at=ticket.updated_at,
+        resolved_at=ticket.resolved_at,
+        tags=ticket.tags,
+    )
+
+
+def _model_to_ticket(model: SupportTicketModel) -> SupportTicket:
+    return SupportTicket(
+        ticket_id=model.ticket_id,
+        tenant_id=model.tenant_id,
+        subject=model.subject,
+        body=model.body,
+        status=TicketStatus(model.status),
+        priority=TicketPriority(model.priority),
+        assigned_agent_id=model.assigned_agent_id,
+        context_type=model.context_type,
+        context_id=model.context_id,
+        context_data=model.context_data or {},
+        created_by=model.created_by,
+        created_at=model.created_at,
+        updated_at=model.updated_at,
+        resolved_at=model.resolved_at,
+        tags=model.tags or [],
+    )
+
+
 class SupportTicketService:
     def __init__(
         self,
         chat_service: ChatService | None = None,
         settings: SupportSettings | None = None,
+        session_factory=None,
     ) -> None:
         self._chat = chat_service or ChatService()
         self._settings = settings or SupportSettings()
-        self._tickets: dict[str, SupportTicket] = {}
+        self._session_factory = session_factory or get_session_factory()
+        self._tables_ready = False
+        # Secondary collections remain in-memory (out of scope for P-1 БЛОКЕР-4):
+        # participants / attachments / csat are auxiliary to the ticket record.
         self._participants: dict[str, list[ChatParticipant]] = {}
         self._attachments: dict[str, list[TicketAttachment]] = {}
         self._csat: dict[str, CsatRating] = {}
 
+    def _ensure_tables(self) -> None:
+        if self._tables_ready:
+            return
+        engine = self._session_factory.kw.get("bind")
+        if engine is not None:
+            from support_chat.db_models import Base
+
+            Base.metadata.create_all(engine)
+        self._tables_ready = True
+
+    def _persist_ticket(self, ticket: SupportTicket) -> None:
+        with self._session_factory() as session:
+            session.add(_ticket_to_model(ticket))
+            session.commit()
+
     async def create_ticket(
         self, request: CreateTicketRequest, user_id: str
     ) -> CreateTicketResponse:
+        self._ensure_tables()
         ticket = SupportTicket(
             tenant_id=request.tenant_id,
             subject=request.subject,
@@ -67,7 +140,7 @@ class SupportTicketService:
             created_by=user_id,
         )
         tid = str(ticket.ticket_id)
-        self._tickets[tid] = ticket
+        self._persist_ticket(ticket)
 
         participant = ChatParticipant(
             ticket_id=ticket.ticket_id,
@@ -107,9 +180,27 @@ class SupportTicketService:
         )
 
     async def add_message(self, request: CreateMessageRequest) -> ChatMessage:
-        ticket = self._tickets.get(str(request.ticket_id))
-        if not ticket:
-            raise ValueError(f"Ticket {request.ticket_id} not found")
+        self._ensure_tables()
+        tid = _coerce_uuid(request.ticket_id)
+        status_changed = False
+        with self._session_factory() as session:
+            model = session.get(SupportTicketModel, tid)
+            if model is None:
+                raise ValueError(f"Ticket {request.ticket_id} not found")
+            if (
+                TicketStatus(model.status) == TicketStatus.WAITING_CUSTOMER
+                and request.sender_role == ParticipantRole.TENANT_USER
+            ):
+                model.status = TicketStatus.IN_PROGRESS.value
+                status_changed = True
+            model.updated_at = datetime.now(timezone.utc)
+            session.commit()
+
+        if status_changed:
+            await self._chat.add_system_message(
+                request.ticket_id, "Customer replied — status → in_progress"
+            )
+
         msg = ChatMessage(
             ticket_id=request.ticket_id,
             sender_id=request.sender_id,
@@ -119,26 +210,22 @@ class SupportTicketService:
             is_internal=request.is_internal,
             attachment_ids=request.attachment_ids,
         )
-        if (
-            ticket.status == TicketStatus.WAITING_CUSTOMER
-            and request.sender_role == ParticipantRole.TENANT_USER
-        ):
-            ticket.status = TicketStatus.IN_PROGRESS
-            await self._chat.add_system_message(
-                request.ticket_id, "Customer replied — status → in_progress"
-            )
-        ticket.updated_at = datetime.now(timezone.utc)
         return await self._chat.add_message(msg)
 
     async def assign_agent(
         self, ticket_id: str, request: AssignTicketRequest
     ) -> SupportTicket:
-        ticket = self._tickets.get(ticket_id)
-        if not ticket:
-            raise ValueError(f"Ticket {ticket_id} not found")
-        ticket.assigned_agent_id = request.agent_id
-        ticket.status = TicketStatus.IN_PROGRESS
-        ticket.updated_at = datetime.now(timezone.utc)
+        self._ensure_tables()
+        tid = _coerce_uuid(ticket_id)
+        with self._session_factory() as session:
+            model = session.get(SupportTicketModel, tid)
+            if model is None:
+                raise ValueError(f"Ticket {ticket_id} not found")
+            model.assigned_agent_id = request.agent_id
+            model.status = TicketStatus.IN_PROGRESS.value
+            model.updated_at = datetime.now(timezone.utc)
+            session.commit()
+            ticket = _model_to_ticket(model)
 
         participant = ChatParticipant(
             ticket_id=ticket.ticket_id,
@@ -158,8 +245,16 @@ class SupportTicketService:
     def get_ticket(
         self, ticket_id: str, tenant_id: str | None = None
     ) -> SupportTicket | None:
-        ticket = self._tickets.get(ticket_id)
-        if ticket and tenant_id and ticket.tenant_id != tenant_id:
+        self._ensure_tables()
+        tid = _coerce_uuid(ticket_id)
+        if tid is None:
+            return None
+        with self._session_factory() as session:
+            model = session.get(SupportTicketModel, tid)
+            if model is None:
+                return None
+            ticket = _model_to_ticket(model)
+        if tenant_id and ticket.tenant_id != tenant_id:
             return None
         return ticket
 
@@ -170,15 +265,23 @@ class SupportTicketService:
         page: int = 1,
         page_size: int = 20,
     ) -> TicketListResponse:
-        tickets = [t for t in self._tickets.values() if t.tenant_id == tenant_id]
-        if status:
-            tickets = [t for t in tickets if t.status == status]
-        total = len(tickets)
-        start = (page - 1) * page_size
+        self._ensure_tables()
+        with self._session_factory() as session:
+            q = session.query(SupportTicketModel).filter(
+                SupportTicketModel.tenant_id == tenant_id
+            )
+            if status is not None:
+                q = q.filter(SupportTicketModel.status == status.value)
+            total = q.count()
+            rows = (
+                q.order_by(SupportTicketModel.created_at.asc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+                .all()
+            )
+            tickets = [_model_to_ticket(m) for m in rows]
         return TicketListResponse(
-            tickets=[
-                t.model_dump(mode="json") for t in tickets[start : start + page_size]
-            ],
+            tickets=[t.model_dump(mode="json") for t in tickets],
             total=total,
             page=page,
             page_size=page_size,
@@ -205,23 +308,32 @@ class SupportTicketService:
     async def transition_status(
         self, ticket_id: str, new_status: TicketStatus
     ) -> SupportTicket:
-        ticket = self._tickets.get(ticket_id)
-        if not ticket:
-            raise ValueError(f"Ticket {ticket_id} not found")
-        allowed = VALID_STATUS_TRANSITIONS.get(ticket.status, [])
-        if new_status not in allowed:
-            raise ValueError(f"Cannot transition from {ticket.status} to {new_status}")
-        ticket.status = new_status
-        ticket.updated_at = datetime.now(timezone.utc)
-        if new_status == TicketStatus.RESOLVED:
-            ticket.resolved_at = datetime.now(timezone.utc)
+        self._ensure_tables()
+        tid = _coerce_uuid(ticket_id)
+        with self._session_factory() as session:
+            model = session.get(SupportTicketModel, tid)
+            if model is None:
+                raise ValueError(f"Ticket {ticket_id} not found")
+            current = TicketStatus(model.status)
+            allowed = VALID_STATUS_TRANSITIONS.get(current, [])
+            if new_status not in allowed:
+                raise ValueError(
+                    f"Cannot transition from {current.value} to {new_status.value}"
+                )
+            model.status = new_status.value
+            model.updated_at = datetime.now(timezone.utc)
+            if new_status == TicketStatus.RESOLVED:
+                model.resolved_at = datetime.now(timezone.utc)
+            session.commit()
+            ticket = _model_to_ticket(model)
+
         await self._chat.add_system_message(
             ticket.ticket_id, f"Status → {new_status.value}"
         )
         logger.info(
             "support_ticket_transition",
             ticket_id=ticket_id,
-            old_status=ticket.status.value,
+            old_status=current.value,
             new_status=new_status.value,
         )
         return ticket
@@ -229,7 +341,7 @@ class SupportTicketService:
     async def submit_csat(
         self, ticket_id: str, request: CsatSubmitRequest, user_id: str
     ) -> CsatRating:
-        ticket = self._tickets.get(ticket_id)
+        ticket = self.get_ticket(ticket_id)
         if not ticket:
             raise ValueError(f"Ticket {ticket_id} not found")
         rating = CsatRating(
