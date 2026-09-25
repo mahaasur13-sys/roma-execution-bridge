@@ -1,79 +1,98 @@
--- 012_audit_events_reconcile_order.sql
--- G-AUDIT-MIGRATION-HARDENING (PR #95 thread :50): ctid — физическая позиция версии
--- строки, а не порядок создания. Повторный согласующий дедуп с достоверным порядком
--- (created_at, id); 011 НЕ редактируется (уже применён). Идемпотентен: повтор = 0.
+-- 012_audit_events_reconcile_order.sql (reconciling, v1)
+-- Закрывает три Major-треда CodeRabbit на применённой 011 (PR #95), не переписывая её.
+-- Прод-PG 15.18: 011 применена, uidx создан, дедуп удалил 0 строк, строк 515 (514 + smoke Z-2a).
+--
+-- :128 (ctid как порядок) — ФИКС ПО СУЩЕСТВУ: `ctid` = физическая позиция версии строки,
+--      после UPDATE/MOVE потомок может получить ctid раньше «родителя». Достоверного признака
+--      порядка создания у исторических строк НЕТ, поэтому 012 НЕ удаляет дубли и НЕ называет
+--      выбранную строку «самой ранней». Правило сохранения: исторические записи сохраняются
+--      все; при обнаружении групп дублей миграция падает fail-closed со списком ключей —
+--      решение принимает человек (никаких ALTER/DELETE вслепую).
+-- :69  (автозаполняемые колонки) — сигнатура сверяется корректно: NOT NULL-колонки с
+--      is_identity='YES' или is_generated='ALWAYS' заполняются сами и НЕ считаются
+--      обязательными полями шестиколоночного INSERT; они допустимы как «лишние».
+-- :80  (потеря значений доп. колонок) — резервная таблица хранит ПОЛНУЮ строку
+--      (`to_jsonb(a)`), а не шесть колонок: любая доп. колонка (например request_id)
+--      не теряется. Удаления в 012 нет вовсе, поэтому потерь нет по построению.
+--
+-- Инвариант: идемпотентно; повторный прогон — no-op; 0 ALTER существующих колонок.
 
-CREATE TABLE IF NOT EXISTS audit_events_dedupe_backup (
-    id          TEXT,
+BEGIN;
+
+-- (1) Таблица (create-if-absent) — та же сигнатура, что в 011 и в SQLite-бутстрапе.
+CREATE TABLE IF NOT EXISTS audit_events (
+    id          TEXT PRIMARY KEY,
     tenant_id   TEXT,
     event_type  TEXT,
     entity_type TEXT,
     entity_id   TEXT,
-    data        JSONB
+    data        TEXT
 );
 
+-- (2) Сверка сигнатуры fail-closed в обе стороны (имена + типы), но с корректным
+--     исключением автозаполняемых колонок (тред :69).
 DO $$
 DECLARE
-    has_created_at boolean;
-    order_expr text;
-    backup_before bigint;
-    backup_after bigint;
-    newly_backed bigint;
-    deleted bigint;
+    extra_required text;
+    expected text[] := ARRAY['id', 'tenant_id', 'event_type', 'entity_type', 'entity_id', 'data'];
 BEGIN
-    -- прод-форма рантайм-бутстрапа имеет created_at; каноническая 6-колоночная — нет.
-    SELECT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'audit_events'
-          AND column_name = 'created_at'
-    ) INTO has_created_at;
-    order_expr := CASE WHEN has_created_at THEN 'created_at, id' ELSE 'id' END;
+    SELECT string_agg(column_name || '(' || data_type || ')', ', ' ORDER BY column_name)
+      INTO extra_required
+      FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name   = 'audit_events'
+       AND column_name <> ALL (expected)
+       AND is_nullable = 'NO'
+       AND column_default IS NULL
+       AND coalesce(is_identity, 'NO')  <> 'YES'     -- sequence-backed: заполняется сама
+       AND coalesce(is_generated, 'NEVER') <> 'ALWAYS'; -- generated: вычисляется сама
 
-    -- LOCK до конца транзакции (дисциплина 011) — записи исключены на время дедупа.
-    LOCK TABLE audit_events IN SHARE ROW EXCLUSIVE MODE;
-
-    SELECT count(*) INTO backup_before FROM audit_events_dedupe_backup;
-
-    -- (1) backup снятых-дублей (только ещё не попавших); авто-колонки не вставляются.
-    EXECUTE format($f$
-        INSERT INTO audit_events_dedupe_backup (id, tenant_id, event_type, entity_type, entity_id, data)
-        SELECT a.id, a.tenant_id, a.event_type, a.entity_type, a.entity_id, a.data
-        FROM (
-            SELECT id, tenant_id, event_type, entity_type, entity_id, data,
-                   row_number() OVER (
-                       PARTITION BY tenant_id, event_type, entity_id ORDER BY %s
-                   ) AS rn
-            FROM audit_events
-            WHERE tenant_id IS NOT NULL AND event_type IS NOT NULL
-              AND entity_id IS NOT NULL AND entity_id <> 'unknown'
-        ) a
-        WHERE a.rn > 1
-          AND NOT EXISTS (SELECT 1 FROM audit_events_dedupe_backup b WHERE b.id = a.id)
-    $f$, order_expr);
-    GET DIAGNOSTICS newly_backed = ROW_COUNT;
-    SELECT count(*) INTO backup_after FROM audit_events_dedupe_backup;
-
-    -- (2) DELETE дублей: survivor = самое раннее по (created_at, id) / (id).
-    EXECUTE format($f$
-        DELETE FROM audit_events a
-        USING (
-            SELECT id, row_number() OVER (
-                PARTITION BY tenant_id, event_type, entity_id ORDER BY %s
-            ) AS rn
-            FROM audit_events
-            WHERE tenant_id IS NOT NULL AND event_type IS NOT NULL
-              AND entity_id IS NOT NULL AND entity_id <> 'unknown'
-        ) r
-        WHERE a.id = r.id AND r.rn > 1
-    $f$, order_expr);
-    GET DIAGNOSTICS deleted = ROW_COUNT;
-
-    -- (3) cross-check: каждый удалённый ряд обязан быть в backup.
-    IF deleted <> newly_backed THEN
-        RAISE EXCEPTION 'audit_events dedup 012 cross-check: deleted % <> newly-backed-up %',
-            deleted, newly_backed;
+    IF extra_required IS NOT NULL THEN
+        RAISE EXCEPTION
+            'audit_events: обязательные дополнительные колонки: %. Миграция не трогает схему вслепую (012).',
+            extra_required;
     END IF;
-
-    RAISE NOTICE 'audit_events dedup 012: order=%, backup % -> % (newly %), deleted %',
-        order_expr, backup_before, backup_after, newly_backed, deleted;
 END $$;
+
+-- (3) Lossless-резерв: полная строка в JSONB (тред :80). Заполняется только при ручном
+--     разборе дублей (оператором): автоудаления в 012 нет, поэтому потери невозможны.
+CREATE TABLE IF NOT EXISTS audit_events_dedupe_backup_full (
+    id        text,
+    row_json  jsonb       NOT NULL,
+    backed_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- (4) Группы дублей: НЕ удаляем и не угадываем порядок (тред :128) — фиксируем и отказываем.
+DO $$
+DECLARE
+    dup_groups int;
+    dup_keys   text;
+BEGIN
+    SELECT count(*), string_agg(k, ' | ' ORDER BY k)
+      INTO dup_groups, dup_keys
+      FROM (
+            SELECT tenant_id || '/' || event_type || '/' || entity_id AS k
+              FROM audit_events
+             WHERE entity_id IS NOT NULL AND entity_id <> 'unknown'
+             GROUP BY tenant_id, event_type, entity_id
+            HAVING count(*) > 1
+           ) q;
+
+    IF dup_groups > 0 THEN
+        -- Резервная копия внутри этой же транзакции откатилась бы вместе с RAISE —
+        -- поэтому НЕ пишем сюда и НЕ обещаем: удаления нет вовсе, строки сохранены на месте.
+        RAISE EXCEPTION
+            'audit_events: % групп дублей — достоверного порядка создания нет, автоудаление запрещено (012). Строки не удалены (остались на месте, доп. колонки сохранены). Ключи: %',
+            dup_groups, dup_keys;
+    END IF;
+END $$;
+
+-- (5) Частичный UNIQUE (как в 011/N2b и в SQLite-бутстрапе).
+CREATE UNIQUE INDEX IF NOT EXISTS audit_events_dedupe_uidx
+    ON audit_events (tenant_id, event_type, entity_id)
+    WHERE entity_id IS NOT NULL AND entity_id <> 'unknown';
+
+COMMENT ON INDEX audit_events_dedupe_uidx IS
+    'Дедуп ключевых событий. 012: порядок создания исторических строк недоказуем (ctid не признак) — автоудаление запрещено, разбор дублей только вручную.';
+
+COMMIT;

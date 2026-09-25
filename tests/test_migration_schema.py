@@ -113,6 +113,18 @@ def test_migrations_create_expected_tables():
         for table in EXPECTED_TABLES:
             cur.execute("SELECT to_regclass(%s)", (f"public.{table}",))
             assert cur.fetchone()[0] is not None, f"table {table} not created"
+
+        # Книга: 012 обязана быть отмечена после прогона (иначе следующий прогон
+        # применит её повторно или, хуже, промолчит о неприменённой).
+        cur.execute(
+            "SELECT 1 FROM schema_migrations WHERE filename = %s",
+            ("012_audit_events_reconcile_order.sql",),
+        )
+        assert cur.fetchone() is not None, "012 не отмечена в schema_migrations"
+
+        # Контракт 012: частичный UNIQUE по дедупу существует (fail-closed-версия).
+        cur.execute("SELECT to_regclass('public.audit_events_dedupe_uidx')")
+        assert cur.fetchone()[0] is not None, "индекс audit_events_dedupe_uidx не создан"
     finally:
         conn.close()
 
