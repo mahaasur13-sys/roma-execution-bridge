@@ -7,7 +7,7 @@ ROMA использует GitHub Actions для автоматического �
 ## Pipeline
 
 ```
-Push to master → CI (test + lint + helm) → Deploy to Zo → Health check
+Push to master → CI (test + lint + helm) → машина Zo сама тянет master → вердикт `deploy/zo`
 ```
 
 ## Workflows
@@ -22,23 +22,29 @@ Push to master → CI (test + lint + helm) → Deploy to Zo → Health check
 | `lint` | Ruff linter | 2 min |
 | `helm-validate` | Helm lint + template + HPA/PDB validation | 3 min |
 
-### deploy.yml — Deploy to Zo
+### deploy.yml — Deploy to Zo (pull-модель, вердикт)
 
 **Triggers:** после успешного CI, или `workflow_dispatch`
 
+Раннер **не ходит** на машину Zo (у него нет до неё DNS/маршрута — `Temporary failure in name
+resolution`, exit 255). Выкат делает сама машина: Zo user service `zo-deploy-agent`
+(канон `deploy/ops/zo_deploy_agent.py`) тянет `master`, когда CI по этому SHA зелёный, применяет
+миграции, рестартит `roma-execution-bridge` и ставит commit status `deploy/zo`. Этот workflow
+читает вердикт по своему SHA.
+
 | Step | Description |
 |------|-------------|
-| Setup SSH | `ZO_SSH_KEY` secret |
-| Deploy | `git pull` → restart service |
-| Health check | `curl /health` |
+| Gate | устаревшие SHA (перекрытые новым master) пропускаются |
+| Verdict | ждём commit status `deploy/zo` (15 мин): `success` → зелёный, `failure`/`error` → красный с причиной |
+| Health check | `curl /health` публичного адреса |
+
+Секретов для выката не требуется: на машине стоит аутентифицированный `gh` CLI.
 
 ## GitHub Secrets
 
-| Secret | Description |
-|--------|-------------|
-| `ZO_HOST` | Zo server hostname |
-| `ZO_USER` | SSH username |
-| `ZO_SSH_KEY` | Private SSH key |
+`ZO_HOST` / `ZO_USER` / `ZO_SSH_KEY` — **легаси, не используются**: инбаунд-SSH до машины Zo
+с раннера недостижим по построению, выкат идёт pull-моделью (агент на Zo). Эти секреты можно
+удалить; новых не требуется.
 
 ## Local Deploy
 
@@ -61,5 +67,5 @@ Push to master → CI (test + lint + helm) → Deploy to Zo → Health check
 | Problem | Solution |
 |---------|----------|
 | CI fails on `pip install` | Check `pyproject.toml` dependencies |
-| Deploy SSH fails | Verify `ZO_SSH_KEY` in GitHub Secrets |
+| `Deploy to Zo` красный | Это вердикт машины Zo: смотри `description` commit status `deploy/zo` и `/var/lib/roma-deploy-agent/deploy-agent.log` |
 | Health check fails after deploy | Check service logs: `tail -f /dev/shm/roma-execution-bridge.log` |
