@@ -43,6 +43,23 @@ def _strip_txn_wrappers(sql: str) -> str:
     )
 
 
+LEDGER_DDL = (
+    "CREATE TABLE IF NOT EXISTS schema_migrations ("
+    " filename TEXT PRIMARY KEY,"
+    " applied_at timestamptz NOT NULL DEFAULT now())"
+)
+
+
+def ensure_ledger(conn) -> None:
+    """Create the `schema_migrations` ledger if absent (idempotent).
+
+    Narrow alternative to `main()`: restores only the book-keeping table, without
+    applying any pending migration. The runner stays the single owner of this DDL.
+    """
+    with conn.cursor() as cur:
+        cur.execute(LEDGER_DDL)
+
+
 def main() -> int:
     dsn = _dsn()
     if not dsn:
@@ -58,11 +75,7 @@ def main() -> int:
     try:
         conn.autocommit = True
         cur = conn.cursor()
-        cur.execute(
-            "CREATE TABLE IF NOT EXISTS schema_migrations ("
-            " filename TEXT PRIMARY KEY,"
-            " applied_at timestamptz NOT NULL DEFAULT now())"
-        )
+        cur.execute(LEDGER_DDL)
 
         files = _migration_files()
         applied = skipped = 0

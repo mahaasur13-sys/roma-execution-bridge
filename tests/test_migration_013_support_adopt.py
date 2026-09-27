@@ -57,13 +57,15 @@ def _ensure_migration_ledger(conn) -> None:
     """Книга `schema_migrations` создаётся раннером и сносится тестом 012.
 
     013 обеспечивает предусловие сам (независимость от порядка прогона) и делает
-    это каноническим инициализатором раннера, а не собственной копией DDL.
+    это каноническим инициализатором ledger'а раннера, а не собственной копией DDL.
+    Полный `main()` здесь не запускается сознательно: он применил бы все
+    неприменённые миграции, то есть подменил бы предмет проверки.
     """
     with conn.cursor() as cur:
         cur.execute("SELECT to_regclass('public.schema_migrations')")
         if cur.fetchone()[0] is not None:
             return
-    _load_runner().main()
+    _load_runner().ensure_ledger(conn)
 
 
 def _pg_dsn() -> str | None:
