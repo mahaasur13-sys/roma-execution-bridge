@@ -11,6 +11,7 @@ create_all). Проверяем adoption-файл: создаёт недоста
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import os
 import re
 import sys
@@ -42,6 +43,27 @@ SUPPORT_INDEXES = (
     "idx_support_attachments_ticket",
     "idx_support_csat_ticket",
 )
+
+
+def _load_runner():
+    """Канонический инициализатор книги миграций — тот же runner, что в CI и в test_migration_schema."""
+    spec = importlib.util.spec_from_file_location("run_migrations", str(REPO_ROOT / "scripts" / "run_migrations.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _ensure_migration_ledger(conn) -> None:
+    """Книга `schema_migrations` создаётся раннером и сносится тестом 012.
+
+    013 обеспечивает предусловие сам (независимость от порядка прогона) и делает
+    это каноническим инициализатором раннера, а не собственной копией DDL.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT to_regclass('public.schema_migrations')")
+        if cur.fetchone()[0] is not None:
+            return
+    _load_runner().main()
 
 
 def _pg_dsn() -> str | None:
@@ -86,6 +108,7 @@ def _apply_013(conn) -> None:
 def _reset_objects(conn) -> None:
     """Снести объекты adoption-миграции (только на тестовом DSN)."""
     _require_test_dsn()
+    _ensure_migration_ledger(conn)
     with conn.cursor() as cur:
         for table in SUPPORT_TABLES:
             cur.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
@@ -144,7 +167,7 @@ def test_013_source_is_additive_only() -> None:
 @pytest.mark.pg
 def test_013_creates_objects_when_absent() -> None:
     if not _pg_reachable():
-        pytest.skip("PostgreSQL DSN не задан или недоступен")
+        pytest.skip("PG недоступен — проверки 013 требуют живого PostgreSQL; issue: P1-C · expiry: 2026-12-31")
     import psycopg2
 
     conn = psycopg2.connect(_require_test_dsn())
@@ -161,7 +184,7 @@ def test_013_creates_objects_when_absent() -> None:
 def test_013_reapply_is_noop() -> None:
     """Повторный накат = 0 изменений, rc=0 (идемпотентность)."""
     if not _pg_reachable():
-        pytest.skip("PostgreSQL DSN не задан или недоступен")
+        pytest.skip("PG недоступен — проверки 013 требуют живого PostgreSQL; issue: P1-C · expiry: 2026-12-31")
     import psycopg2
 
     conn = psycopg2.connect(_require_test_dsn())
@@ -179,7 +202,7 @@ def test_013_reapply_is_noop() -> None:
 def test_013_preserves_existing_rows() -> None:
     """Усыновление существующей схемы: данные и идентификаторы не теряются."""
     if not _pg_reachable():
-        pytest.skip("PostgreSQL DSN не задан или недоступен")
+        pytest.skip("PG недоступен — проверки 013 требуют живого PostgreSQL; issue: P1-C · expiry: 2026-12-31")
     import psycopg2
 
     conn = psycopg2.connect(_require_test_dsn())
