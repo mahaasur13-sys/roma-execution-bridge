@@ -10,6 +10,7 @@ create_all). Проверяем adoption-файл: создаёт недоста
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import sys
@@ -211,7 +212,19 @@ def test_013_preserves_existing_rows() -> None:
         assert row is not None and row[0] == str(ticket_id), "ticket_id должен сохраниться"
         assert messages == 1, "сообщение должно остаться"
     finally:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM support_tickets WHERE tenant_id = 'qb4-adopt'")
-        conn.commit()
-        conn.close()
+        primary = sys.exc_info()[1]
+        try:
+            conn.rollback()
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM support_tickets WHERE tenant_id = %s",
+                    ("qb4-adopt",),
+                )
+            conn.commit()
+        except Exception:
+            with contextlib.suppress(Exception):
+                conn.rollback()
+            if primary is None:
+                raise
+        finally:
+            conn.close()
