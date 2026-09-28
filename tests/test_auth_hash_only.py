@@ -32,17 +32,31 @@ def _sha256(value: str) -> str:
 
 
 class _FakePgCursor:
-    """Курсор-запись: возвращает заданную строку и запоминает выполненные SQL."""
+    """Курсор-запись: запоминает SQL и параметры; строку отдаёт только при совпадении параметра.
 
-    def __init__(self, row):
+    T1 (CodeRabbit #114): раньше курсор возвращал тенанта при ЛЮБОМ параметре, поэтому тест
+    не ловил регрессию к plaintext-lookup. Теперь при ``keyed_on`` строка возвращается
+    только если единственный параметр равен ожидаемому (обычно — хеш ключа).
+    """
+
+    def __init__(self, row, keyed_on=None):
         self._row = row
+        self._keyed_on = keyed_on
+        self._match = keyed_on is None
         self.executed: list[str] = []
+        self.params: list[tuple] = []
 
     def execute(self, sql, params=None):
         self.executed.append(sql)
+        recorded = tuple(params) if params else ()
+        self.params.append(recorded)
+        if self._keyed_on is not None:
+            self._match = recorded == (self._keyed_on,)
 
     def fetchone(self):
-        return self._row
+        if self._keyed_on is None:
+            return self._row
+        return self._row if self._match else None
 
     def close(self):
         pass
@@ -62,8 +76,8 @@ class _FakePgConn:
         pass
 
 
-def _install_pg(monkeypatch, row):
-    cur = _FakePgCursor(row)
+def _install_pg(monkeypatch, row, keyed_on=None):
+    cur = _FakePgCursor(row, keyed_on=keyed_on)
     monkeypatch.setattr(dba, "_pg_conn", lambda: _FakePgConn(cur))
     monkeypatch.setattr(dba, "_pg_return", lambda conn, **kw: None)
     monkeypatch.setattr(dba, "_bump_tenant_lookup", lambda method: None)
@@ -95,14 +109,33 @@ def test_pg_lookup_never_issues_plaintext_sql(monkeypatch):
 
 
 def test_pg_hash_key_is_authenticated(monkeypatch):
-    """Валидный hash-ключ возвращает tenant_id/name/plan без plaintext-полей."""
-    _install_pg(monkeypatch, ("tenant-1", "Tenant One", "pro"))
+    """Валидный hash-ключ возвращает tenant_id/name/plan без plaintext-полей.
+
+    T1: курсор отдаёт строку ТОЛЬКО если в SQL ушёл хеш ключа, а не сам ключ.
+    """
+    cur = _install_pg(
+        monkeypatch, ("tenant-1", "Tenant One", "pro"), keyed_on=_sha256("valid-key")
+    )
 
     result = dba._find_tenant_by_key_pg("valid-key")
 
     assert result == {"tenant_id": "tenant-1", "name": "Tenant One", "plan": "pro"}
     assert "api_key" not in result
     assert "tier" not in result
+
+    # В параметры обязан уйти sha256(ключа), и нигде не должно быть plaintext.
+    assert cur.params == [(_sha256("valid-key"),)]
+    flat = [str(v) for params in cur.params for v in params]
+    assert "valid-key" not in flat
+
+
+def test_pg_wrong_key_is_not_authenticated(monkeypatch):
+    """T1 negative: при неверном ключе (другой хеш в параметре) tenant не находится."""
+    _install_pg(
+        monkeypatch, ("tenant-1", "Tenant One", "pro"), keyed_on=_sha256("valid-key")
+    )
+
+    assert dba._find_tenant_by_key_pg("wrong-key") is None
 
 
 def test_sqlite_seed_stores_hash_not_plaintext(tmp_path, monkeypatch):
