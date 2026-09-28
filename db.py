@@ -135,12 +135,13 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id);
     """)
     # G-SEC4: tenants.api_key_hash added for hash-only lookup; additive, idempotent.
-    try:
+    # Scope is explicit (PRAGMA probe rather than a blanket except): any other
+    # OperationalError is raised instead of being silently swallowed.
+    cols = {row[1] for row in c.execute("PRAGMA table_info(tenants)").fetchall()}
+    if "api_key_hash" not in cols:
         c.execute(
             "ALTER TABLE tenants ADD COLUMN api_key_hash TEXT NOT NULL DEFAULT ''"
         )
-    except sqlite3.OperationalError:
-        pass
     c.commit()
     c.close()
 
