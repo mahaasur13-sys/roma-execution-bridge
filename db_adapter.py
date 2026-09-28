@@ -856,9 +856,10 @@ async def _seed_tenants_pg(api_keys):
     async with pool.acquire() as conn:
         for key, info in api_keys.items():
             await conn.execute(
-                "INSERT INTO tenants (id, api_key, name, plan, subscription_status) VALUES ($1,$2,$3,'free','inactive') ON CONFLICT (id) DO NOTHING",
+                "INSERT INTO tenants (id, api_key, api_key_hash, name, plan, subscription_status) "
+                "VALUES ($1,'',$2,$3,'free','inactive') ON CONFLICT (id) DO NOTHING",
                 info.get("tenant_id", ""),
-                key,
+                _hash_api_key(key),
                 info.get("name", info.get("tenant_id", "")),
             )
 
@@ -2510,35 +2511,6 @@ def _find_tenant_by_key_pg(api_key: str) -> dict | None:
             conn.rollback()
         if row:
             _bump_tenant_lookup("hash")
-        else:
-            _bump_tenant_lookup("plaintext")
-            logger.warning(
-                "tenant.lookup.fallback: plaintext path hit (unhashed tenant)"
-            )
-            try:
-                cur.execute(
-                    "SELECT id, name, plan FROM tenants "
-                    "WHERE api_key = %s AND (api_key_hash IS NULL OR api_key_hash = '')",
-                    (api_key,),
-                )
-                row = cur.fetchone()
-            except psycopg2.errors.UndefinedColumn:
-                conn.rollback()
-                cur.execute(
-                    "SELECT id, name, plan FROM tenants WHERE api_key = %s",
-                    (api_key,),
-                )
-                row = cur.fetchone()
-            if row:
-                try:
-                    cur.execute(
-                        "UPDATE tenants SET api_key_hash = %s "
-                        "WHERE id = %s AND (api_key_hash IS NULL OR api_key_hash = '')",
-                        (digest, row[0]),
-                    )
-                    conn.commit()
-                except psycopg2.errors.UndefinedColumn:
-                    conn.rollback()
         conn.commit()
         cur.close()
         if row:
@@ -2551,15 +2523,16 @@ def _find_tenant_by_key_pg(api_key: str) -> dict | None:
     return result
 
 
-def _find_tenant_by_key_sqlite(api_key_hash: str) -> dict | None:
+def _find_tenant_by_key_sqlite(api_key: str) -> dict | None:
+    digest = _hash_api_key(api_key)
     with _sqlite_conn() as conn:
         row = conn.execute(
-            "SELECT id, name, plan, api_key FROM tenants WHERE api_key = ?",
-            (api_key_hash,),
+            "SELECT id, name, plan FROM tenants WHERE api_key_hash = ?",
+            (digest,),
         ).fetchone()
     if not row:
         return None
-    return {"tenant_id": row[0], "name": row[1], "plan": row[2], "api_key": row[3]}
+    return {"tenant_id": row[0], "name": row[1], "plan": row[2]}
 
 
 # ── Email Verification ──────────────────────────────────────

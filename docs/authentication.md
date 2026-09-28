@@ -11,27 +11,17 @@ ROMA использует аутентификацию через заголов
 3. Неверный/отсутствующий ключ → **401 Unauthorized**
 4. Валидный ключ → запрос обрабатывается
 
-## Тестовые ключи
+## Хранение ключей
 
-На время Фазы 0 используются тестовые ключи из `config/api_keys.json`:
+Ключи тенантов хранятся в PostgreSQL (`tenants`) **только в виде хеша** (`api_key_hash` = `sha256(raw_key)`). Открытый (plaintext) ключ в БД не сохраняется: колонка `tenants.api_key` остаётся пустой и не участвует в аутентификации.
 
-| Ключ | Назначение |
-|------|------------|
-| `roma-demo-key-2026` | Основной демо-ключ |
-| `roma-test-key-alpha` | Для тестирования |
-| `roma-test-key-bravo` | Для тестирования |
+- Ключ выдаётся один раз — при создании тенанта; в БД пишется только его хеш.
+- Проверка запроса: `verify_api_key()` сравнивает `sha256(X-API-Key)` с `tenants.api_key_hash`.
+- Plaintext-fallback и ленивый backfill удалены (G-SEC4): ключ, у которого нет хеша, не аутентифицируется.
 
 ## Связь ключа и Tenant
 
-Каждый API-ключ привязан к `tenant_id` через `config/api_keys.json`:
-
-```json
-{
-  "roma-demo-key-2026": {"tenant_id": "tenant-demo", "name": "Demo Key"},
-  "roma-test-key-alpha": {"tenant_id": "tenant-alpha", "name": "Alpha Test Key"},
-  "roma-test-key-bravo": {"tenant_id": "tenant-bravo", "name": "Bravo Test Key"}
-}
-```
+Каждый ключ сопоставляется с `tenant_id` через таблицу `tenants` (по `api_key_hash`), а не через файл.
 
 **Tenant isolation:**
 - Каждый tenant видит только свои задачи
@@ -44,8 +34,8 @@ ROMA использует аутентификацию через заголов
 # 1. Сгенерировать ключ
 python3 -c "import uuid; print('roma-key-' + uuid.uuid4().hex[:12])"
 
-# 2. Добавить в config/api_keys.json
-# 3. Перезапустить сервис
+# 2. Записать в БД только sha256(ключа) в tenants.api_key_hash
+# 3. Ключ выдать тенанту один раз (plaintext в БД не сохранять)
 ```
 
 ## Публичные эндпоинты (без ключа)
@@ -100,7 +90,7 @@ HTTP 401
 
 ```bash
 curl -X POST https://roma-execution-bridge-asurdev.zocomputer.io/submit \
-  -H "X-API-Key: roma-demo-key-2026" \
+  -H "X-API-Key: <your_api_key>" \
   -H "Content-Type: application/json" \
   -d '{"task": "Train model"}'
 ```
@@ -120,30 +110,13 @@ HTTP 202
 
 ## Безопасность
 
-- API-ключи **маскируются** в логах: `roma-demo-key-2026` → `roma***2026`
-- Файл `config/api_keys.json` не включается в публичные ответы
-- В будущем ключи будут храниться в PostgreSQL с хешированием
+- API-ключи **маскируются** в логах (первые/последние символы)
+- Хранилище ключей — PostgreSQL `tenants.api_key_hash` (sha256): plaintext отсутствует и в БД, и в ответах
 
 ## Добавление нового ключа
 
-Отредактируйте `config/api_keys.json`:
-
-```json
-{
-  "keys": [
-    "roma-demo-key-2026",
-    "roma-test-key-alpha",
-    "roma-test-key-bravo",
-    "ваш-новый-ключ"
-  ]
-}
-```
-
-Перезапустите сервис:
-
-```bash
-# Сервис перезапускается автоматически при обновлении через update_user_service
-```
+Ключ создаётся при онбординге тенанта; в БД записывается только `sha256(ключа)`.
+`config/api_keys.json` — устаревший артефакт, кодом не читается, источником истины не является.
 
 ## OAuth2 (Google / GitHub)
 
