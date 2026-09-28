@@ -16,7 +16,7 @@ https://roma-execution-bridge-asurdev.zocomputer.io
 X-API-Key: <your_api_key>
 ```
 
-Тестовые ключи доступны в `config/api_keys.json`.
+Ключи хранятся в PostgreSQL (`tenants.api_key_hash`, sha256); открытый ключ выдаётся один раз при создании тенанта.
 
 ### Поведение
 

@@ -121,10 +121,9 @@ def seed_tenants(conn, api_keys: dict) -> None:
         digest = hashlib.sha256((key or "").encode("utf-8")).hexdigest()
         cur.execute(
             "INSERT INTO tenants (id, api_key, api_key_hash, name, plan, subscription_status) "
-            "VALUES (%s,%s,%s,%s,'free','inactive') ON CONFLICT (id) DO NOTHING",
+            "VALUES (%s,'',%s,%s,'free','inactive') ON CONFLICT (id) DO NOTHING",
             (
                 info.get("tenant_id", ""),
-                key,
                 digest,
                 info.get("name", info.get("tenant_id", "")),
             ),

@@ -26,7 +26,8 @@ def init_db() -> None:
     c.executescript("""
         CREATE TABLE IF NOT EXISTS tenants (
             id TEXT PRIMARY KEY,
-            api_key TEXT NOT NULL,
+            api_key TEXT NOT NULL DEFAULT '',
+            api_key_hash TEXT NOT NULL DEFAULT '',
             name TEXT NOT NULL DEFAULT '',
             plan TEXT NOT NULL DEFAULT 'free',
             stripe_customer_id TEXT,
@@ -133,19 +134,29 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
         CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id);
     """)
+    # G-SEC4: tenants.api_key_hash added for hash-only lookup; additive, idempotent.
+    try:
+        c.execute(
+            "ALTER TABLE tenants ADD COLUMN api_key_hash TEXT NOT NULL DEFAULT ''"
+        )
+    except sqlite3.OperationalError:
+        pass
     c.commit()
     c.close()
 
 
 def seed_tenants(api_keys: dict[str, dict]) -> None:
+    import hashlib
+
     c = _conn()
     for key, info in api_keys.items():
         tenant_id = info.get("tenant_id", "")
         name = info.get("name", tenant_id)
+        digest = hashlib.sha256((key or "").encode("utf-8")).hexdigest()
         c.execute(
-            """INSERT OR IGNORE INTO tenants (id, api_key, name, plan, subscription_status)
-               VALUES (?, ?, ?, 'free', 'inactive')""",
-            (tenant_id, key, name),
+            """INSERT OR IGNORE INTO tenants (id, api_key, api_key_hash, name, plan, subscription_status)
+               VALUES (?, '', ?, ?, 'free', 'inactive')""",
+            (tenant_id, digest, name),
         )
     c.commit()
     c.close()

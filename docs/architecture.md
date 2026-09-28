@@ -41,7 +41,7 @@ ROMA — это FastAPI-сервис на Python, запущенный как п
 
 ### 2. Аутентификация
 
-Заголовок `X-API-Key` проверяется FastAPI-зависимостью `verify_api_key()`. Ключи хранятся в `config/api_keys.json`.
+Заголовок `X-API-Key` проверяется FastAPI-зависимостью `verify_api_key()`. Ключи хранятся в PostgreSQL `tenants.api_key_hash` (sha256); plaintext в БД не хранится.
 
 - `/health` и `/metrics` — публичные (без ключа)
 - Все остальные эндпоинты требуют валидный ключ
@@ -57,7 +57,7 @@ ROMA — это FastAPI-сервис на Python, запущенный как п
 
 Попытка доступа к чужой задаче возвращает **404** (не 403) — чтобы не раскрывать существование `job_id` в других tenant'ах.
 
-Файл ключей: `config/api_keys.json` (ключ → {tenant_id, name})
+Сопоставление ключа и tenant: `tenants.api_key_hash` (sha256(ключа) → tenant_id).
 
 ### 3. Очередь задач
 
