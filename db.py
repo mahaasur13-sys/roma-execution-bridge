@@ -142,6 +142,19 @@ def init_db() -> None:
         c.execute(
             "ALTER TABLE tenants ADD COLUMN api_key_hash TEXT NOT NULL DEFAULT ''"
         )
+    # G-SEC4/M1: legacy dev/test rows keep a plaintext key with no hash — backfill the
+    # hash once and clear the plaintext. Idempotent: a re-run matches no rows.
+    import hashlib
+
+    legacy = c.execute(
+        "SELECT id, api_key FROM tenants "
+        "WHERE coalesce(api_key, '') <> '' AND coalesce(api_key_hash, '') = ''"
+    ).fetchall()
+    for row in legacy:
+        c.execute(
+            "UPDATE tenants SET api_key_hash = ?, api_key = '' WHERE id = ?",
+            (hashlib.sha256((row[1] or "").encode("utf-8")).hexdigest(), row[0]),
+        )
     c.commit()
     c.close()
 
