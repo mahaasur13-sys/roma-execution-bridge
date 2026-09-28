@@ -57,13 +57,15 @@ def _ensure_migration_ledger(conn) -> None:
     """Книга `schema_migrations` создаётся раннером и сносится тестом 012.
 
     013 обеспечивает предусловие сам (независимость от порядка прогона) и делает
-    это каноническим инициализатором раннера, а не собственной копией DDL.
+    это каноническим инициализатором ledger'а раннера, а не собственной копией DDL.
+    Полный `main()` здесь не запускается сознательно: он применил бы все
+    неприменённые миграции, то есть подменил бы предмет проверки.
     """
     with conn.cursor() as cur:
         cur.execute("SELECT to_regclass('public.schema_migrations')")
         if cur.fetchone()[0] is not None:
             return
-    _load_runner().main()
+    _load_runner().ensure_ledger(conn)
 
 
 def _pg_dsn() -> str | None:
@@ -251,3 +253,68 @@ def test_013_preserves_existing_rows() -> None:
                 raise
         finally:
             conn.close()
+
+
+def test_ensure_migration_ledger_restores_only_ledger(monkeypatch) -> None:
+    """Регресс изоляции 013: предусловие восстанавливает ТОЛЬКО книгу миграций.
+
+    Закрепляет дефект «CodeRabbit line 66»: helper вызывал полный `run_migrations.main()`,
+    который накатил бы все неприменённые миграции — то есть сам предмет проверки 013, —
+    и тест зеленел бы собственной подготовкой. Здесь `main()` падает, если его тронут,
+    а единственным исполненным DDL остаётся ledger раннера.
+    """
+    runner = _load_runner()
+
+    def _main_must_not_run() -> int:
+        raise AssertionError("main() раннера не должен быть предусловием теста 013")
+
+    monkeypatch.setattr(runner, "main", _main_must_not_run)
+    monkeypatch.setattr(sys.modules[__name__], "_load_runner", lambda: runner)
+
+    executed = []
+
+    class _AbsentCursor:
+        def execute(self, sql, params=None) -> None:
+            executed.append(" ".join(str(sql).split()))
+
+        def fetchone(self):
+            return (None,)  # книги нет — её снёс test_migration_012
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc) -> bool:
+            return False
+
+    class _AbsentConn:
+        def cursor(self):
+            return _AbsentCursor()
+
+    _ensure_migration_ledger(_AbsentConn())
+    assert executed == [
+        "SELECT to_regclass('public.schema_migrations')",
+        " ".join(runner.LEDGER_DDL.split()),
+    ], executed
+
+    ledger_calls = []
+    monkeypatch.setattr(runner, "ensure_ledger", ledger_calls.append)
+
+    class _PresentCursor:
+        def execute(self, sql, params=None) -> None:
+            return None
+
+        def fetchone(self):
+            return ("schema_migrations",)  # книга на месте
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc) -> bool:
+            return False
+
+    class _PresentConn:
+        def cursor(self):
+            return _PresentCursor()
+
+    _ensure_migration_ledger(_PresentConn())
+    assert ledger_calls == [], "при существующей книге раннер не должен вызываться"
