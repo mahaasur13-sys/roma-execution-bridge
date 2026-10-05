@@ -150,8 +150,18 @@ class CloudPaymentsClient:
         """
         Verify HMAC-SHA256 webhook signature from CloudPayments.
 
-        Uses ONLY CLOUDPAYMENTS_WEBHOOK_SECRET. The API secret must never be used
-        as a fallback (fail closed: no webhook secret -> False).
+        Pinned contract (F-002, behaviour unchanged):
+
+        * the raw request body is signed with HMAC-SHA256;
+        * the digest is HEX-encoded (``hexdigest()``), not base64;
+        * the ONLY accepted key is CLOUDPAYMENTS_WEBHOOK_SECRET
+          (CLOUDPAYMENTS_API_SECRET is never a fallback);
+        * fail closed: missing signature header or missing webhook secret -> False.
+
+        UNVERIFIED: nothing in this repo (code or docs) proves which digest
+        encoding and which key CloudPayments itself uses for the ``Content-HMAC``
+        header. See ``docs/CloudPayments-setup.md``; do not change the format
+        here without provider proof or a captured real notification.
         """
         if not signature_header:
             return False

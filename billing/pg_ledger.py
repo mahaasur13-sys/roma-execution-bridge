@@ -68,7 +68,13 @@ class PGBillingLedger:
         amount: float,
         currency: str = "USD",
         metadata: dict = None,
-    ) -> None:
+    ) -> str:
+        """Record an entry and return its ``ledger_id`` (NF-1).
+
+        The id is generated before the in-memory mirror and the best-effort PG
+        write, so the caller always gets a non-empty id — even when PG is down
+        and only the in-memory entry survives.
+        """
         # NOT NULL-договор (MONEY_WHITELIST_POLICY): amount/currency — обязательные
         # money-колонки; None отклоняется до INSERT с именем таблицы/колонки.
         reject_nullable_money("ledger_entries", "amount", amount)
@@ -98,11 +104,13 @@ class PGBillingLedger:
             )
         except PGUnavailableError:
             pass
+        return ledger_id
 
     def credit(
         self, tenant_id: str, amount: float, currency: str = "USD", **meta
-    ) -> None:
-        self.append(tenant_id, "CREDIT", amount, currency, meta)
+    ) -> str:
+        """Credit a tenant and return the resulting ``ledger_id`` (never None)."""
+        return self.append(tenant_id, "CREDIT", amount, currency, meta)
 
     def debit(
         self, tenant_id: str, amount: float, currency: str = "USD", **meta

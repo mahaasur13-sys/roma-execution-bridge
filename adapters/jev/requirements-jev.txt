@@ -1,0 +1,12 @@
+# Опциональные зависимости sidecar-адаптера Jev (эпоха G-JEV-BRIDGE).
+#
+# ЯДРУ ROMA ЭТО НЕ НУЖНО: файл не читается ни pyproject.toml, ни CI, ни ядром.
+# Адаптер работает и без SDK — тогда используется stdlib-путь на официальный
+# endpoint POST https://api.typesafe.ai/v1/systemone.
+#
+# Установка только по желанию оператора, в отдельное окружение:
+#   python -m venv .venv-jev && .venv-jev/bin/pip install -r adapters/jev/requirements-jev.txt
+#
+# Пин намеренно не зафиксирован версией: SDK в этой эпохе не проверялся против
+# живого сервиса, а ложный пин создал бы вид проверенной зависимости.
+typesafe-sdk

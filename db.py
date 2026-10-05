@@ -669,15 +669,20 @@ def list_tenants() -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def is_invoice_processed(invoice_id: str) -> bool:
-    """Проверяет, был ли уже обработан данный InvoiceId."""
+def is_invoice_processed(invoice_id: str, tenant_id: str = "") -> bool:
+    """Проверяет, был ли уже обработан данный InvoiceId.
+
+    F-005: при непустом ``tenant_id`` проверка ограничена этим тенантом —
+    счёт, записанный за другим тенантом, не гасит событие текущего.
+    """
     if not invoice_id:
         return False
     c = _conn()
     try:
         c.execute(
-            "SELECT 1 FROM processed_invoices WHERE invoice_id = ? LIMIT 1",
-            (invoice_id,),
+            "SELECT 1 FROM processed_invoices WHERE invoice_id = ? "
+            "AND (? = '' OR tenant_id = ?) LIMIT 1",
+            (invoice_id, tenant_id, tenant_id),
         )
         return c.fetchone() is not None
     finally:
