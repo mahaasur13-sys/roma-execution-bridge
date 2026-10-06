@@ -4,6 +4,7 @@ Every state change is captured as an immutable event.
 """
 
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
@@ -11,6 +12,8 @@ from enum import Enum
 from dataclasses import dataclass, field
 import threading
 import sqlite3
+
+logger = logging.getLogger("roma.durability")
 
 
 class EventType(str, Enum):
@@ -35,7 +38,9 @@ class Event:
     event_type: str = ""
     job_id: Optional[str] = None
     payload: Dict[str, Any] = field(default_factory=dict)
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    timestamp: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
     sequence: int = 0
 
     def to_dict(self) -> dict:
@@ -59,17 +64,28 @@ class EventStore:
     Uses SQLite by default (swap to PostgreSQL via connection_string).
     """
 
-    def __init__(self, db_path: str = "/tmp/roma-events.db", connection_string: Optional[str] = None):
+    def __init__(
+        self,
+        db_path: str = "/tmp/roma-events.db",
+        connection_string: Optional[str] = None,
+    ):
         self.db_path = db_path
-        self.connection_string = connection_string  # Not used yet — PostgreSQL swap possible
+        self.connection_string = (
+            connection_string  # Not used yet — PostgreSQL swap possible
+        )
         self._lock = threading.RLock()
         self._sequence = 0
+        # Fix B: reuse a single connection for the store's lifetime. The old
+        # `_get_conn()` opened a fresh sqlite3 connection on every append/replay
+        # and never closed it — a connection churn (open/GC-finalize per call),
+        # not a deterministic fd leak. Same pattern as event_sourcing.py.
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
 
         self._init_db()
 
     def _init_db(self):
         """Create tables if not exists."""
-        conn = self._get_conn()
+        conn = self._conn
         conn.execute("""
             CREATE TABLE IF NOT EXISTS events (
                 event_id TEXT PRIMARY KEY,
@@ -96,32 +112,55 @@ class EventStore:
         max_seq = cursor.fetchone()[0]
         self._sequence = max_seq or 0
 
-    def _get_conn(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.db_path, check_same_thread=False)
-
     def append(self, event: Event) -> Event:
         """Append an event to the log. Returns the event with sequence number."""
         with self._lock:
-            self._sequence += 1
-            event.sequence = self._sequence
+            conn = self._conn
+            # Вычисляем следующий sequence, но НЕ двигаем self._sequence до
+            # успешного commit: упавший commit обязан откатиться (rollback), и
+            # счётчик не должен «съесть» номер неудавшейся записи (монотонность
+            # сохранённых sequence без дыр).
+            next_seq = self._sequence + 1
 
-            conn = self._get_conn()
-            conn.execute(
-                "INSERT INTO events (event_id, event_type, job_id, payload, timestamp, sequence) VALUES (?, ?, ?, ?, ?, ?)",
-                (
-                    event.event_id,
-                    event.event_type,
-                    event.job_id,
-                    json.dumps(event.payload),
-                    event.timestamp,
-                    event.sequence,
-                ),
-            )
-            conn.commit()
+            try:
+                conn.execute(
+                    "INSERT INTO events (event_id, event_type, job_id, payload, timestamp, sequence) VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        event.event_id,
+                        event.event_type,
+                        event.job_id,
+                        json.dumps(event.payload),
+                        event.timestamp,
+                        next_seq,
+                    ),
+                )
+                conn.commit()
+            except Exception:
+                # Без rollback открытая транзакция тлеет: следующий успешный
+                # commit утащит недописанное событие (data-integrity).
+                try:
+                    conn.rollback()
+                except Exception:
+                    # Вторичная ошибка rollback() не должна маскировать исходную
+                    # ошибку execute/commit: логируем, а наружу пробрасываем
+                    # исходную (bare raise восстанавливает exc_info).
+                    logger.exception("SQLite rollback failed after append failure")
+                raise
+
+            # Присвоения — только после успешного commit: объект события получает
+            # номер, который стор реально потребил (иначе при неудаче он носит
+            # «несъеденный» sequence).
+            event.sequence = next_seq
+            self._sequence = next_seq
 
         return event
 
-    def emit(self, event_type: EventType, job_id: Optional[str] = None, payload: Optional[Dict] = None) -> Event:
+    def emit(
+        self,
+        event_type: EventType,
+        job_id: Optional[str] = None,
+        payload: Optional[Dict] = None,
+    ) -> Event:
         """Convenience method to emit a new event."""
         event = Event(
             event_type=event_type.value,
@@ -130,31 +169,33 @@ class EventStore:
         )
         return self.append(event)
 
-    def replay(self, from_sequence: int = 0, event_filter: Optional[List[str]] = None) -> List[Event]:
+    def replay(
+        self, from_sequence: int = 0, event_filter: Optional[List[str]] = None
+    ) -> List[Event]:
         """
         Replay all events from from_sequence (exclusive) to latest.
         Optionally filter by event types.
         """
-        conn = self._get_conn()
-        query = "SELECT * FROM events WHERE sequence > ? ORDER BY sequence ASC"
-        args = [from_sequence]
+        with self._lock:
+            query = "SELECT * FROM events WHERE sequence > ? ORDER BY sequence ASC"
+            args = [from_sequence]
 
-        if event_filter:
-            placeholders = ",".join("?" * len(event_filter))
-            query = f"SELECT * FROM events WHERE sequence > ? AND event_type IN ({placeholders}) ORDER BY sequence ASC"
-            args = [from_sequence] + event_filter
+            if event_filter:
+                placeholders = ",".join("?" * len(event_filter))
+                query = f"SELECT * FROM events WHERE sequence > ? AND event_type IN ({placeholders}) ORDER BY sequence ASC"
+                args = [from_sequence] + event_filter
 
-        rows = conn.execute(query, args).fetchall()
-        return [self._row_to_event(row) for row in rows]
+            rows = self._conn.execute(query, args).fetchall()
+            return [self._row_to_event(row) for row in rows]
 
     def get_events_for_job(self, job_id: str) -> List[Event]:
         """Get all events for a specific job."""
-        conn = self._get_conn()
-        rows = conn.execute(
-            "SELECT * FROM events WHERE job_id = ? ORDER BY sequence ASC",
-            (job_id,),
-        ).fetchall()
-        return [self._row_to_event(row) for row in rows]
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM events WHERE job_id = ? ORDER BY sequence ASC",
+                (job_id,),
+            ).fetchall()
+            return [self._row_to_event(row) for row in rows]
 
     def get_latest_sequence(self) -> int:
         """Get the latest event sequence number."""
@@ -189,7 +230,14 @@ class EventStore:
         }
 
         for event in events:
-            if event.event_type in (EventType.JOB_COMPLETED.value, EventType.JOB_SUCCEEDED.value if hasattr(EventType, 'JOB_SUCCEEDED') else "job.completed"):
+            if event.event_type in (
+                EventType.JOB_COMPLETED.value,
+                (
+                    EventType.JOB_SUCCEEDED.value
+                    if hasattr(EventType, 'JOB_SUCCEEDED')
+                    else "job.completed"
+                ),
+            ):
                 state["status"] = "completed"
             elif event.event_type == EventType.JOB_FAILED.value:
                 state["status"] = "failed"
@@ -210,8 +258,12 @@ class EventStore:
         return [e.to_dict() for e in self.replay(from_sequence=from_seq)]
 
     def close(self):
-        """Close connection (no-op for SQLite but needed for interface)."""
-        pass
+        """Close the store's single connection (paired with __init__)."""
+        with self._lock:
+            try:
+                self._conn.close()
+            except AttributeError:
+                pass
 
 
 class DurabilityLayer:
@@ -224,15 +276,28 @@ class DurabilityLayer:
         self.snapshots = EventStore(db_path.replace(".db", "-snapshots.db"))
         self._snapshots_interval = 100  # snapshot every 100 events
 
-    def record(self, event_type: EventType, job_id: Optional[str] = None, payload: Optional[Dict] = None) -> Event:
+    def record(
+        self,
+        event_type: EventType,
+        job_id: Optional[str] = None,
+        payload: Optional[Dict] = None,
+    ) -> Event:
         """Record an event to the append-only log."""
         return self.events.emit(event_type, job_id, payload)
 
     def record_job_submitted(self, job_id: str, plan: dict, priority: int) -> Event:
-        return self.record(EventType.JOB_SUBMITTED, job_id, {"plan": plan, "priority": priority})
+        return self.record(
+            EventType.JOB_SUBMITTED, job_id, {"plan": plan, "priority": priority}
+        )
 
-    def record_job_dispatched(self, job_id: str, manifest_name: str, execution_mode: str) -> Event:
-        return self.record(EventType.JOB_DISPATCHED, job_id, {"manifest": manifest_name, "mode": execution_mode})
+    def record_job_dispatched(
+        self, job_id: str, manifest_name: str, execution_mode: str
+    ) -> Event:
+        return self.record(
+            EventType.JOB_DISPATCHED,
+            job_id,
+            {"manifest": manifest_name, "mode": execution_mode},
+        )
 
     def record_job_completed(self, job_id: str, result: Optional[Dict] = None) -> Event:
         return self.record(EventType.JOB_COMPLETED, job_id, result or {})

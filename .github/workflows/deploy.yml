@@ -1,5 +1,17 @@
 name: ROMA Deploy to Zo
 
+# Pull-модель выката (G-ZO-DEPLOY-RED).
+#
+# Раннер GitHub Actions НЕ ходит на машину Zo: у него нет до неё ни маршрута, ни DNS
+# (`ssh: Could not resolve hostname ... Temporary failure in name resolution`, exit 255).
+# Выкат делает сама машина Zo (`deploy/ops/zo_deploy_agent.py`, Zo user service
+# `zo-deploy-agent`): тянет master, когда CI по этому SHA зелёный, применяет миграции,
+# рестартит `roma-execution-bridge` и ставит вердикт commit status `deploy/zo`.
+#
+# Этот workflow больше ничего не «деплоит» — он ЧИТАЕТ вердикт машины по своему SHA.
+# Красный здесь означает ровно одно: машина Zo не подтвердила выкат, причина — в описании
+# статуса `deploy/zo` (или статуса нет вовсе).
+
 on:
   workflow_run:
     workflows: ["ROMA CI"]
@@ -8,30 +20,49 @@ on:
   workflow_dispatch:
 
 jobs:
-  deploy:
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+  verdict:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup SSH
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.ZO_SSH_KEY }}
-
-      - name: Deploy to Zo
+      - name: Только актуальный HEAD (устаревшие SHA пропускаем)
+        id: gate
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.ZO_USER }}@${{ secrets.ZO_HOST }} << 'EOF'
-            cd /home/workspace/roma-execution-bridge
-            git pull origin master
-            source venv/bin/activate 2>/dev/null || true
-            pip install -e ".[dev]" -q
-            supervisorctl restart roma-execution-bridge
-            echo "Deploy complete"
-          EOF
+          default_branch="$(gh api "/repos/$REPO" --jq .default_branch)"
+          head_sha="$(gh api "/repos/$REPO/commits/$default_branch" --jq .sha)"
+          echo "run_sha=$SHA head=$head_sha"
+          if [ "$SHA" != "$head_sha" ]; then
+            echo "::notice::SHA $SHA перекрыт более новым master ($head_sha) — вердикт не ждём"
+            echo "superseded=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "superseded=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Health check
+      - name: Вердикт машины Zo (commit status deploy/zo)
+        if: steps.gate.outputs.superseded != 'true'
         run: |
-          sleep 5
-          curl -sf https://roma-execution-bridge-asurdev.zocomputer.io/health || echo "Health check failed"
+          deadline=$((SECONDS + 900))
+          while [ $SECONDS -lt $deadline ]; do
+            payload="$(gh api "/repos/$REPO/commits/$SHA/status" \
+              --jq '[.statuses[] | select(.context=="deploy/zo")][0] | "\(.state // "none")\t\(.description // "")"' 2>/dev/null || echo "none")"
+            state="${payload%%$'\t'*}"
+            desc="${payload#*$'\t'}"
+            echo "$(date -u +%H:%M:%SZ) deploy/zo=${state} ${desc}"
+            case "$state" in
+              success) echo "::notice::выкат на машину Zo подтверждён: ${desc}"; exit 0 ;;
+              failure|error) echo "::error::выкат не состоялся: ${desc}"; exit 1 ;;
+            esac
+            sleep 20
+          done
+          echo "::error::за 15 минут вердикт deploy/zo не появился — машина Zo выкат не подтвердила (журнал: /var/lib/roma-deploy-agent/deploy-agent.log)"
+          exit 1
+
+      - name: Public health probe
+        if: steps.gate.outputs.superseded != 'true'
+        run: |
+          curl -sf --max-time 15 https://roma-execution-bridge-asurdev.zocomputer.io/health | head -c 400
+          echo

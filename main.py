@@ -2,224 +2,189 @@
 ROMA Execution Bridge – FastAPI + Pydantic v2
 Multi-tenant execution platform with API-Key auth, tenant isolation, and billing.
 """
+
 # ── Load .env BEFORE all imports ─────────────────────────────────
-import os as _os
-from pathlib import Path as _Path
-_env_path = _Path(__file__).parent / ".env"
-if _env_path.exists():
-    with open(_env_path, "r") as _f:
-        for _line in _f:
-            _line = _line.strip()
-            if _line and not _line.startswith("#") and "=" in _line:
-                _key, _, _val = _line.partition("=")
-                _os.environ.setdefault(_key.strip(), _val.strip().strip('"').strip("'"))
-    print(f"✅ Loaded {_env_path}", flush=True)
+from env_loader import load_env
+
+load_env()
 
 
 import asyncio
 import json
 import logging
 import os
-import ipaddress
 import time
 import traceback
 import uuid
-import secrets
-import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import db_adapter as db
 
 # A1 — shared singletons/helpers (re-exported so main.* names stay intact)
 from deps import (
     API_KEYS,
-    ADMIN_IP_ALLOWLIST,
     verify_api_key,
-    _get_client_ip,
-    _ip_allowed,
-    _admin_only,
     alert_dispatcher,
     limiter,
     billing_ledger,
-    PLANS,
+    plan_config,
+    PLANS as PLANS,
 )
 
+import plan_source
+
 # DecisionOS — Week 1 foundation
-from models.decision import DecisionRequest
 from cost.gate import EnterpriseDecisionGate
-from audit.event_store import write_event, on_job_created
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import (
+    Counter,
+    Gauge,
+    Histogram,
+    generate_latest,
+    CONTENT_TYPE_LATEST,
+)
 from monitoring.metrics import (
-    gpu_seconds_total,
-    tokens_total,
-    billing_cost_total,
-    spend_cap_balance,
-    spend_cap_pct,
-    spend_cap_blocked_total,
-    job_cost,
-    track_billing,
     track_spend_cap,
     track_spend_cap_blocked,
+    track_gate_unavailable,
 )
 from alerts import Alert, AlertLevel
 
 # === BILLING SINGLETONS (v2.1.0) ===
-from billing.pg_metering import PGMeteringEngine as MeteringEngine
 
-metering_engine = MeteringEngine()
-from billing.execution_worker import init_worker, execute_and_bill, bill_job, poll_and_execute
+# N-BLACK-B: явный реэкспорт публичной поверхности main.
+# Имена ниже не используются внутри main.py, но импортируются из main другими
+# модулями и тестами (например tests/test_billing_increment.py:
+# `from main import _increment_usage, metering_engine, billing_ledger`).
+# Форма `x as x` помечает их как намеренный реэкспорт: ruff F401 их не удаляет,
+# поведение импорта из main сохраняется побайтово по смыслу.
+from billing.finalize import (
+    _increment_usage as _increment_usage,
+    finalize_job_billing as finalize_job_billing,
+    metering_engine as metering_engine,
+)
+from billing.pg_ledger import PGUnavailableError as PGUnavailableError
+from billing.execution_worker import (
+    bill_job as bill_job,
+    execute_and_bill as execute_and_bill,
+)
 
-_burn_tracker: dict[str, list[tuple[float, float]]] = {}
+from billing.execution_worker import init_worker, poll_and_execute
+
 _http_request_count = 0
 _billing_event_count = 0
 
-def _increment_usage(
-    tenant_id: str,
-    gpu_sec: float = 0.0,
-    input_tokens: int = 0,
-    output_tokens: int = 0,
-    plan_name: str = "free",
-    job_id: str | None = None,
-):
-    """Единая точка списания денег: GPU-sec + token counting."""
-    if not tenant_id:
-        return 0.0
 
-    total_cost = 0.0
+def _plan_limits_or_refusal(plan_name: str | None) -> tuple[dict | None, str | None]:
+    """Единый вывод лимитов тира для API-пути (квоты — из plan_source).
 
-    # GPU cost
-    if gpu_sec > 0:
-        gpu_rate = 0.00001
-        gpu_cost = round(gpu_sec * gpu_rate, 8)
-        metering_engine.record(
-            event_type="gpu_usage", tenant=tenant_id,
-            gpu_seconds=gpu_sec, job_id=job_id or "auto",
+    Тир вне объявленной схемы не получает молчаливый free-дефолт: вердикт —
+    `GATE_UNAVAILABLE` (fail-closed), тот же код, что у планировщика и CLI.
+    """
+    try:
+        return plan_config(plan_name), None
+    except plan_source.PlanSourceError as exc:
+        track_gate_unavailable("api.plan")
+        logger.error(
+            "GATE_UNAVAILABLE (api.plan): %s · plan=%r — решение по квоте не выдаётся",
+            exc,
+            plan_name,
         )
-        billing_ledger.append(
-            tenant_id=tenant_id, entry_type="debit", amount=gpu_cost,
-            metadata={"gpu_sec": gpu_sec, "plan": plan_name, "job_id": job_id},
+        return (
+            None,
+            f"{plan_source.GATE_UNAVAILABLE}: квота тира не установлена ({exc})",
         )
-        total_cost += gpu_cost
-        gpu_seconds_total.labels(tenant_id=tenant_id, plan=plan_name).inc(gpu_sec)
-        billing_cost_total.labels(tenant_id=tenant_id, plan=plan_name, cost_type="gpu").inc(gpu_cost)
-
-    # Token cost
-    if input_tokens > 0 or output_tokens > 0:
-        in_rate = 0.000001
-        out_rate = 0.000002
-        token_cost = round(input_tokens * in_rate + output_tokens * out_rate, 8)
-        metering_engine.record(
-            event_type="token_usage", tenant=tenant_id,
-            gpu_seconds=0, job_id=job_id or "auto",
-        )
-        billing_ledger.append(
-            tenant_id=tenant_id, entry_type="debit", amount=token_cost,
-            metadata={"input_tokens": input_tokens, "output_tokens": output_tokens, "job_id": job_id},
-        )
-        total_cost += token_cost
-        if input_tokens > 0:
-            tokens_total.labels(tenant_id=tenant_id, plan=plan_name, direction="input").inc(input_tokens)
-        if output_tokens > 0:
-            tokens_total.labels(tenant_id=tenant_id, plan=plan_name, direction="output").inc(output_tokens)
-        token_cost_input = input_tokens * in_rate
-        token_cost_output = output_tokens * out_rate
-        if token_cost_input > 0:
-            billing_cost_total.labels(tenant_id=tenant_id, plan=plan_name, cost_type="tokens").inc(token_cost_input)
-        if token_cost_output > 0:
-            billing_cost_total.labels(tenant_id=tenant_id, plan=plan_name, cost_type="tokens").inc(token_cost_output)
-
-    if total_cost > 0:
-        job_cost.labels(tenant_id=tenant_id, plan=plan_name).observe(total_cost)
-
-    # Burn-rate tracking: alert if >$1/hour over recent window
-    _burn_tracker.setdefault(tenant_id, []).append((time.time(), total_cost))
-    _burn_tracker[tenant_id] = [(t, c) for t, c in _burn_tracker[tenant_id] if time.time() - t < 3600]
-    recent_cost = sum(c for t, c in _burn_tracker[tenant_id] if time.time() - t < 600)
-    burn_rate_hourly = recent_cost * 6 if recent_cost > 0 else 0
-    if burn_rate_hourly > 1.0:
-        alert_dispatcher.send(Alert(
-            level=AlertLevel.WARNING,
-            title="🔥 High GPU Burn Rate",
-            body=f"Tenant `{tenant_id}` (plan `{plan_name}`) burn rate: **${burn_rate_hourly:.2f}/hour**\n"
-                 f"Last 10 min cost: ${recent_cost:.4f} → projected ${burn_rate_hourly:.2f}/hour\n"
-                 f"Threshold: $1.00/hour",
-            tags={"tenant_id": tenant_id, "plan": plan_name, "event": "high_burn_rate"},
-        ))
-
-    return total_cost
 
 
 def _check_spend_cap(tenant_id: str, estimated_cost: float, plan_name: str = "free"):
     """Проверка spend-cap ПЕРЕД созданием job."""
-    plan = PLANS.get(plan_name, PLANS.get("free", {}))
-    cap = plan.get("spend_cap_usd", 0)
+    plan, refusal = _plan_limits_or_refusal(plan_name)
+    if plan is None:
+        return False, refusal
+    cap = plan["spend_cap_usd"]
     if cap <= 0:
-        return True, "Free plan: no spend-cap. Upgrade to Start ($5 cap) for GPU access."
-    balance = billing_ledger.get_tenant_balance(tenant_id) if hasattr(billing_ledger, "get_tenant_balance") else billing_ledger.get_balance(tenant_id) if hasattr(billing_ledger, "get_balance") else 0.0
+        return (
+            True,
+            "Free plan: no spend-cap. Upgrade to Start ($5 cap) for GPU access.",
+        )
+    balance = (
+        billing_ledger.get_tenant_balance(tenant_id)
+        if hasattr(billing_ledger, "get_tenant_balance")
+        else (
+            billing_ledger.get_balance(tenant_id)
+            if hasattr(billing_ledger, "get_balance")
+            else 0.0
+        )
+    )
     projected = balance + estimated_cost
     track_spend_cap(tenant_id, plan_name, balance, cap)
     if projected > cap:
         pct = int(balance / cap * 100) if cap > 0 else 0
         reason = f"Spend cap exceeded: ${balance:.4f}/${cap:.2f} ({pct}%). Job ${estimated_cost:.6f} exceeds cap."
-        logger.warning("spend_cap_blocked tenant=%s plan=%s balance=%.4f cap=%.2f", tenant_id, plan_name, balance, cap)
+        logger.warning(
+            "spend_cap_blocked tenant=%s plan=%s balance=%.4f cap=%.2f",
+            tenant_id,
+            plan_name,
+            balance,
+            cap,
+        )
         track_spend_cap_blocked(tenant_id, plan_name)
-        alert_dispatcher.send(Alert(
-            level=AlertLevel.CRITICAL,
-            title="🚫 Spend-Cap Exceeded",
-            body=f"Tenant `{tenant_id}` (plan `{plan_name}`) exceeded spend-cap.\n"
-                 f"Balance: **${balance:.4f}** / Cap: **${cap:.2f}** ({pct}%)\n"
-                 f"Attempted job cost: ${estimated_cost:.6f}\n"
-                 f"Projected: ${projected:.6f} → BLOCKED",
-            tags={"tenant_id": tenant_id, "plan": plan_name, "event": "spend_cap_exceeded"},
-        ))
+        alert_dispatcher.send(
+            Alert(
+                level=AlertLevel.CRITICAL,
+                title="🚫 Spend-Cap Exceeded",
+                body=f"Tenant `{tenant_id}` (plan `{plan_name}`) exceeded spend-cap.\n"
+                f"Balance: **${balance:.4f}** / Cap: **${cap:.2f}** ({pct}%)\n"
+                f"Attempted job cost: ${estimated_cost:.6f}\n"
+                f"Projected: ${projected:.6f} → BLOCKED",
+                tags={
+                    "tenant_id": tenant_id,
+                    "plan": plan_name,
+                    "event": "spend_cap_exceeded",
+                },
+            )
+        )
         return False, reason
     if cap > 0 and balance / cap >= 0.9:
         pct = int(balance / cap * 100) if cap > 0 else 0
-        logger.warning("spend_cap_90%% tenant=%s plan=%s balance=%.4f cap=%.2f", tenant_id, plan_name, balance, cap)
-        alert_dispatcher.send(Alert(
-            level=AlertLevel.WARNING,
-            title="⚠️ Spend-Cap 90% Reached",
-            body=f"Tenant `{tenant_id}` (plan `{plan_name}`) approaching spend-cap.\n"
-                 f"Balance: **${balance:.4f}** / Cap: **${cap:.2f}** ({pct}%)\n"
-                 f"Remaining: **${cap - balance:.4f}**",
-            tags={"tenant_id": tenant_id, "plan": plan_name, "event": "spend_cap_90"},
-        ))
+        logger.warning(
+            "spend_cap_90%% tenant=%s plan=%s balance=%.4f cap=%.2f",
+            tenant_id,
+            plan_name,
+            balance,
+            cap,
+        )
+        alert_dispatcher.send(
+            Alert(
+                level=AlertLevel.WARNING,
+                title="⚠️ Spend-Cap 90% Reached",
+                body=f"Tenant `{tenant_id}` (plan `{plan_name}`) approaching spend-cap.\n"
+                f"Balance: **${balance:.4f}** / Cap: **${cap:.2f}** ({pct}%)\n"
+                f"Remaining: **${cap - balance:.4f}**",
+                tags={
+                    "tenant_id": tenant_id,
+                    "plan": plan_name,
+                    "event": "spend_cap_90",
+                },
+            )
+        )
     return True, ""
-
-
-def finalize_job_billing(tenant_id: str, job_id: str, gpu_sec: float,
-                         plan_name: str = "free") -> bool:
-    """Single source of truth for debiting a job at terminal state.
-
-    Both /complete/{job_id} (manual) and billing.execution_worker.execute_and_bill
-    (background) MUST go through this function so a job is debited exactly once.
-    Idempotent: a job that is already terminal is never debited again.
-
-    Returns True if a debit was applied, False otherwise (already finalized or
-    not owned by `tenant_id`).
-    """
-    job = db.get_execution_job(job_id)
-    if not job or job.get("tenant_id") != tenant_id:
-        return False
-    if job.get("status") in ("completed", "cancelled", "failed", "timeout"):
-        return False
-    _increment_usage(tenant_id, gpu_sec, plan_name=plan_name, job_id=job_id)
-    return True
 
 
 def _check_limits(tenant_id: str) -> tuple[bool, str]:
     """Quota check for the internal/demo submit path. Returns (allowed, reason)."""
     t = db.get_tenant(tenant_id)
-    plan_name = t.get("plan", "free") if t else "free"
-    plan = PLANS.get(plan_name, PLANS.get("free", {}))
-    max_jobs = plan.get("max_jobs_per_month", 50)
+    plan_name = t.get("plan") if t else None
+    plan, refusal = _plan_limits_or_refusal(plan_name)
+    if plan is None:
+        return False, refusal
+    max_jobs = plan["max_jobs_per_month"]
     if max_jobs < 0:
         return True, ""
-    used = db.count_jobs_for_tenant(tenant_id)
+    used = db.count_jobs_for_tenant_total(tenant_id)
     if used >= max_jobs:
         return False, f"Monthly job limit reached: {used}/{max_jobs}"
     return True, ""
@@ -229,26 +194,37 @@ def _get_tenant_usage(tenant_id: str) -> dict:
     """Usage summary for the dashboard (total_jobs + total_gpu_seconds)."""
     return db.get_tenant_usage_db(tenant_id)
 
-from pydantic import BaseModel, Field, ConfigDict
+
 from starlette.requests import Request
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse, Response, StreamingResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-
 # ============================================
 # JSON LOGGING
 # ============================================
 
+
 class JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         log_entry = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[
+                :-3
+            ]
+            + "Z",
             "level": record.levelname,
             "logger": record.name,
         }
-        for key in ("endpoint", "method", "status_code", "duration_ms", "api_key", "tenant_id", "job_id"):
+        for key in (
+            "endpoint",
+            "method",
+            "status_code",
+            "duration_ms",
+            "api_key",
+            "tenant_id",
+            "job_id",
+        ):
             if hasattr(record, key):
                 log_entry[key] = getattr(record, key)
         if record.exc_info and record.exc_info[0]:
@@ -257,6 +233,7 @@ class JSONFormatter(logging.Formatter):
         else:
             log_entry["message"] = record.getMessage()
         return json.dumps(log_entry, ensure_ascii=False)
+
 
 _log_handler = logging.StreamHandler()
 _log_handler.setFormatter(JSONFormatter())
@@ -267,16 +244,19 @@ logger.addHandler(_log_handler)
 logger.setLevel(logging.INFO)
 logger.propagate = False
 
+
 def _mask_key(api_key: str | None) -> str | None:
     if not api_key:
         return None
     return api_key[:4] + "***" + api_key[-4:] if len(api_key) > 8 else "***"
+
 
 # ============================================
 # CONFIG LOADERS
 # ============================================
 
 CONFIG_DIR = Path(__file__).parent / "config"
+
 
 def _load_json(filename: str) -> dict:
     path = CONFIG_DIR / filename
@@ -285,10 +265,12 @@ def _load_json(filename: str) -> dict:
             return json.load(f)
     return {}
 
+
 def _save_json(filename: str, data: dict) -> None:
     path = CONFIG_DIR / filename
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
+
 
 # ============================================
 # API KEY AUTH + MULTI-TENANCY
@@ -296,6 +278,33 @@ def _save_json(filename: str, data: dict) -> None:
 
 db.init_db()
 db.seed_tenants(API_KEYS)
+
+
+def verify_api_key(x_api_key: str = Header(None)) -> dict:
+    """Validate API key and return tenant info: {tenant_id, name, tier, api_key}."""
+    if not x_api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing X-API-Key header. Request a key at https://roma-execution-bridge-asurdev.zocomputer.io",
+        )
+    tenant = db.find_tenant_by_key(x_api_key)
+    if not tenant:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    tenant["api_key"] = x_api_key
+
+    # Check email verification for API endpoints (skip auth endpoints and admin keys)
+    _ADMIN_KEYS = {
+        k.strip() for k in os.getenv("ROMA_ADMIN_KEYS", "").split(",") if k.strip()
+    }
+    if x_api_key not in _ADMIN_KEYS:
+        verif_status = is_email_verified(x_api_key)
+        if not verif_status:
+            raise HTTPException(
+                status_code=403,
+                detail="Email not verified. Please verify your email first.",
+            )
+    return tenant
+
 
 # ============================================
 # PLANS & USAGE — DecisionOS PG-backed
@@ -308,11 +317,13 @@ db.seed_tenants(API_KEYS)
 # Lazy-init gate (needs DB adapter)
 _gate: EnterpriseDecisionGate | None = None
 
+
 def _get_gate() -> EnterpriseDecisionGate:
     global _gate
     if _gate is None:
         _gate = EnterpriseDecisionGate(db_adapter=db)
     return _gate
+
 
 # ============================================
 # STRIPE — real integration with test-mode fallback
@@ -323,21 +334,21 @@ def _get_gate() -> EnterpriseDecisionGate:
 # ============================================
 
 CLOUDPAYMENTS_ENABLED = bool(
-    os.environ.get("CLOUDPAYMENTS_PUBLIC_ID") and
-    os.environ.get("CLOUDPAYMENTS_API_SECRET")
+    os.environ.get("CLOUDPAYMENTS_PUBLIC_ID")
+    and os.environ.get("CLOUDPAYMENTS_API_SECRET")
 )
 WORKER_WS_ENABLED = os.environ.get("WORKER_WS_ENABLED", "false").lower() == "true"
 
 CLOUDPAYMENTS_PLANS = {
     "pro": {
-        "amount": 4900.00,       # RUB
+        "amount": 4900.00,  # RUB
         "currency": "RUB",
         "interval": "Month",
         "period": 1,
         "description": "ROMA Pro — 500 задач/мес",
     },
     "enterprise": {
-        "amount": 29900.00,      # RUB
+        "amount": 29900.00,  # RUB
         "currency": "RUB",
         "interval": "Month",
         "period": 1,
@@ -348,6 +359,7 @@ CLOUDPAYMENTS_PLANS = {
 cloudpayments_client = None
 if CLOUDPAYMENTS_ENABLED:
     from billing.cloudpayments_client import CloudPaymentsConfig, CloudPaymentsClient
+
     _cp_cfg = CloudPaymentsConfig(
         public_id=os.environ["CLOUDPAYMENTS_PUBLIC_ID"],
         api_secret=os.environ["CLOUDPAYMENTS_API_SECRET"],
@@ -357,8 +369,6 @@ if CLOUDPAYMENTS_ENABLED:
 
 
 import httpx
-
-
 
 # ============================================
 # JAEGER / OPENTELEMETRY TRACING
@@ -399,28 +409,149 @@ else:
 from models.app import (
     RomaTaskInput,
     RomaTaskResponse,
-    RomaStatusResponse,
-    CheckoutRequest,
-    CheckoutResponse,
-    UsageResponse,
     ChatMessage,
     ChatRequest,
-    TestAlertRequest,
 )
 
 # ============================================
 # APP
 # ============================================
 
+from contextlib import asynccontextmanager
+
+
+async def _reconciliation_loop():
+    import glob
+    import os
+
+    while True:
+        try:
+            from billing.pg_ledger import PGBillingLedger
+            from monitoring.metrics import (
+                roma_ledger_computed_balance,
+                roma_api_balance,
+                roma_ledger_reconciliation_diff,
+                roma_ledger_entry_count,
+                roma_backup_last_success_timestamp,
+            )
+
+            ledger = PGBillingLedger()
+            for tenant_id in ["t-test-paper-20260909"]:
+                try:
+                    debit_sum = ledger.get_tenant_debit_sum(tenant_id)
+                    cost_sum = ledger.get_tenant_usage_cost(tenant_id)
+                    count = ledger.get_tenant_entry_count(tenant_id)
+                    diff = abs(debit_sum - cost_sum)
+                    roma_ledger_computed_balance.labels(tenant_id=tenant_id).set(
+                        debit_sum
+                    )
+                    roma_api_balance.labels(tenant_id=tenant_id).set(cost_sum)
+                    roma_ledger_reconciliation_diff.labels(tenant_id=tenant_id).set(
+                        diff
+                    )
+                    roma_ledger_entry_count.labels(tenant_id=tenant_id).set(count)
+                except Exception as e:
+                    logger.warning("reconciliation failed tenant=%s: %s", tenant_id, e)
+            try:
+                files = glob.glob("/home/felix/backups/roma/roma_*.sql.gz")
+                if files:
+                    latest = max(files, key=os.path.getmtime)
+                    roma_backup_last_success_timestamp.set(os.path.getmtime(latest))
+            except Exception as e:
+                logger.warning("backup scan failed: %s", e)
+        except Exception as e:
+            logger.warning("reconciliation loop error: %s", e)
+        await asyncio.sleep(900)
+
+
+@asynccontextmanager
+async def lifespan(app):
+    try:
+        billing_ledger._pg._ensure_pool()
+        try:
+            init_worker()
+            app.state.worker_task = asyncio.create_task(poll_and_execute())
+            app.state.reconciliation_task = asyncio.create_task(_reconciliation_loop())
+            logger.info("execution_worker initialized")
+        except Exception as e:
+            logger.warning("Failed to init execution_worker: %s", e)
+        logger.info("PG pool initialized on startup")
+    except Exception as e:
+        logger.warning("Failed to init PG pool on startup: %s", e)
+    yield
+    try:
+        for name in ("worker_task", "reconciliation_task"):
+            t = getattr(app.state, name, None)
+            if t is not None and not t.done():
+                t.cancel()
+        pending = [
+            getattr(app.state, name)
+            for name in ("worker_task", "reconciliation_task")
+            if getattr(app.state, name, None) is not None
+            and not getattr(app.state, name).done()
+        ]
+        if pending:
+            try:
+                await asyncio.gather(*pending, return_exceptions=True)
+            except asyncio.CancelledError:
+                pass
+        from billing.execution_worker import drain_inflight
+
+        await drain_inflight()
+        from billing.pg_connection import shutdown_pg
+
+        shutdown_pg()
+        from db_adapter import close_pg_pool
+
+        close_pg_pool()
+        logger.info("PG pool released on shutdown")
+    except Exception as e:
+        logger.warning("Failed to close PG pool: %s", e)
+
+
 app = FastAPI(
     title="ROMA Execution Platform",
     version="2.1.0",
+    lifespan=lifespan,
 )
 app.state.limiter = limiter
 
-# CORS (P2-1)
-CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
-app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+# CORS (C5) — allowlist from CORS_ALLOW_ORIGINS
+def _cors_allowed_origins() -> list[str]:
+    """Resolve CORS origins from CORS_ALLOW_ORIGINS (comma-separated).
+
+    - explicit list -> used as-is (trimmed, empty entries dropped)
+    - production (ENV/ROMA_ENV=production) + empty -> fail-closed []
+    - non-prod + empty -> localhost only
+    """
+    raw = os.environ.get("CORS_ALLOW_ORIGINS", "")
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    if origins:
+        return origins
+    production = (
+        os.environ.get("ENV", "").strip().lower() == "production"
+        or os.environ.get("ROMA_ENV", "").strip().lower() == "production"
+    )
+    if production:
+        return []  # fail-closed
+    return ["http://127.0.0.1:3080", "http://localhost:3080"]
+
+
+def _cors_allow_credentials(origins: list[str]) -> bool:
+    """Credentials are allowed only when the origin list has no wildcard."""
+    return "*" not in origins
+
+
+_cors_origins = _cors_allowed_origins()
+_cors_credentials_enabled = _cors_allow_credentials(_cors_origins)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_credentials_enabled,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # DecisionOS Week 2 — v1 API routes
 from routes.v1_router import router as v1_router
@@ -433,6 +564,10 @@ from routers.admin import router as admin_router
 from routers.webhooks import router as webhooks_router
 from routers.auth import router as auth_router
 from routers.billing import router as billing_router
+from routers.public_jobs import router as public_jobs_router
+from routers.submit import router as submit_router
+from routers.beta import router as beta_router
+
 app.include_router(v1_router)
 app.include_router(decisions_router)
 app.include_router(jobs_router)
@@ -443,12 +578,16 @@ app.include_router(admin_router)
 app.include_router(webhooks_router)
 app.include_router(auth_router)
 app.include_router(billing_router)
+app.include_router(public_jobs_router)
+app.include_router(submit_router)
+app.include_router(beta_router)
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 if JAEGER_ENABLED:
     FastAPIInstrumentor.instrument_app(app)
 
 STATIC_INDEX = Path(__file__).parent / "static" / "index.html"
+
 
 # ============================================
 # PROMETHEUS METRICS (with tenant_id label)
@@ -458,32 +597,47 @@ async def landing_page():
     return FileResponse(STATIC_INDEX, media_type="text/html")
 
 
-
-roma_jobs_total = Counter("roma_jobs_total", "Total number of submitted jobs", ["tenant_id"])
-roma_jobs_active = Gauge("roma_jobs_active", "Currently active jobs", ["tenant_id"])
+roma_jobs_total = Counter(
+    "roma_jobs_total", "Total number of submitted jobs", ["tenant_id"]
+)
+roma_jobs_active = Gauge(
+    "roma_jobs_active",
+    "Active (non-terminal: queued/running/pending) jobs",
+    ["tenant_id"],
+)
 roma_queue_depth = Gauge("roma_queue_depth", "Current queue depth", ["tenant_id"])
 queue_depth = 0
 jobs: dict = {}  # in-memory job registry for the demo/dashboard path
-roma_requests_total = Counter("roma_requests_total", "Total HTTP requests", ["endpoint", "method", "status"])
-roma_request_duration = Histogram("roma_request_duration_seconds", "Request duration in seconds", ["endpoint", "method"])
+roma_requests_total = Counter(
+    "roma_requests_total", "Total HTTP requests", ["endpoint", "method", "status"]
+)
+roma_request_duration = Histogram(
+    "roma_request_duration_seconds",
+    "Request duration in seconds",
+    ["endpoint", "method"],
+)
 
 # Business metrics (P2-4)
-roma_billing_events = Counter("roma_billing_events_total", "Billing events", ["event_type", "plan"])
-roma_errors_total = Counter("roma_errors_total", "Errors by endpoint", ["endpoint", "status_code"])
-
-from monitoring.verification_metrics import (
-    roma_email_verification_total, roma_email_send_total,
-    roma_email_resend_total, roma_unverified_api_key_blocked_total,
-    roma_verification_token_expired_total, roma_verification_token_invalid_total,
+roma_billing_events = Counter(
+    "roma_billing_events_total", "Billing events", ["event_type", "plan"]
 )
+roma_errors_total = Counter(
+    "roma_errors_total", "Errors by endpoint", ["endpoint", "status_code"]
+)
+
 VERIFICATION_METRICS_LOADED = True
-roma_cloudpayments_success = Counter("roma_cloudpayments_success_total", "CloudPayments successful payments")
-roma_cloudpayments_failure = Counter("roma_cloudpayments_failure_total", "CloudPayments failed payments")
+roma_cloudpayments_success = Counter(
+    "roma_cloudpayments_success_total", "CloudPayments successful payments"
+)
+roma_cloudpayments_failure = Counter(
+    "roma_cloudpayments_failure_total", "CloudPayments failed payments"
+)
 
 # Business metrics (P2-4)
 # ============================================
 # MIDDLEWARE — structured logging + metrics
 # ============================================
+
 
 @app.middleware("http")
 async def tracking_middleware(request: Request, call_next) -> Response:
@@ -499,8 +653,12 @@ async def tracking_middleware(request: Request, call_next) -> Response:
     method = request.method
     status = response.status_code
 
-    roma_requests_total.labels(endpoint=endpoint, method=method, status=str(status)).inc()
-    roma_request_duration.labels(endpoint=endpoint, method=method).observe(duration_ms / 1000)
+    roma_requests_total.labels(
+        endpoint=endpoint, method=method, status=str(status)
+    ).inc()
+    roma_request_duration.labels(endpoint=endpoint, method=method).observe(
+        duration_ms / 1000
+    )
 
     global _http_request_count
     _http_request_count += 1
@@ -518,7 +676,17 @@ async def tracking_middleware(request: Request, call_next) -> Response:
         try:
             client_ip = request.client.host if request.client else ""
             ua = request.headers.get("user-agent", "")
-            db.log_user_event(tenant_id, "api_request", event_data={"endpoint": endpoint, "method": method, "status_code": status}, ip_address=client_ip, user_agent=ua)
+            db.log_user_event(
+                tenant_id,
+                "api_request",
+                event_data={
+                    "endpoint": endpoint,
+                    "method": method,
+                    "status_code": status,
+                },
+                ip_address=client_ip,
+                user_agent=ua,
+            )
         except Exception:
             pass
 
@@ -620,31 +788,83 @@ SYSTEM_PROMPT = """Ты — ROMA AI, дружелюбный и честный п
 Enter — отправить | Shift+Enter — новая строка | Stop — остановить | 🗑 — очистить"""
 
 
-def _tool_schema(name: str, description: str, properties: dict, required: list[str] | None = None) -> dict:
+def _tool_schema(
+    name: str, description: str, properties: dict, required: list[str] | None = None
+) -> dict:
     schema = {"type": "object", "properties": properties}
     if required:
         schema["required"] = required
-    return {"type": "function", "function": {"name": name, "description": description, "parameters": schema}}
+    return {
+        "type": "function",
+        "function": {"name": name, "description": description, "parameters": schema},
+    }
 
 
 ROMA_TOOLS = [
-    _tool_schema("submit_task", "Отправить ML-задачу на выполнение.", {
-        "task": {"type": "string"}, "gpu_required": {"type": "boolean"},
-        "image": {"type": "string"}, "priority": {"type": "integer", "minimum": 1, "maximum": 10},
-    }, ["task"]),
-    _tool_schema("get_job_status", "Получить статус задачи.", {"job_id": {"type": "string"}}, ["job_id"]),
-    _tool_schema("list_jobs", "Получить задачи текущего tenant.", {"limit": {"type": "integer", "minimum": 1, "maximum": 50}}),
-    _tool_schema("cancel_job", "Отменить задачу.", {"job_id": {"type": "string"}}, ["job_id"]),
+    _tool_schema(
+        "submit_task",
+        "Отправить ML-задачу на выполнение.",
+        {
+            "task": {"type": "string"},
+            "gpu_required": {"type": "boolean"},
+            "image": {"type": "string"},
+            "priority": {"type": "integer", "minimum": 1, "maximum": 10},
+        },
+        ["task"],
+    ),
+    _tool_schema(
+        "get_job_status",
+        "Получить статус задачи.",
+        {"job_id": {"type": "string"}},
+        ["job_id"],
+    ),
+    _tool_schema(
+        "list_jobs",
+        "Получить задачи текущего tenant.",
+        {"limit": {"type": "integer", "minimum": 1, "maximum": 50}},
+    ),
+    _tool_schema(
+        "cancel_job", "Отменить задачу.", {"job_id": {"type": "string"}}, ["job_id"]
+    ),
     _tool_schema("list_workers", "Получить список воркеров.", {}),
-    _tool_schema("drain_worker", "Перевести воркер в drain.", {"worker_id": {"type": "string"}}, ["worker_id"]),
-    _tool_schema("slurm_status", "Получить статус Slurm-задачи.", {"slurm_job_id": {"type": "string"}}, ["slurm_job_id"]),
-    _tool_schema("slurm_cancel", "Отменить Slurm-задачу.", {"slurm_job_id": {"type": "string"}}, ["slurm_job_id"]),
+    _tool_schema(
+        "drain_worker",
+        "Перевести воркер в drain.",
+        {"worker_id": {"type": "string"}},
+        ["worker_id"],
+    ),
+    _tool_schema(
+        "slurm_status",
+        "Получить статус Slurm-задачи.",
+        {"slurm_job_id": {"type": "string"}},
+        ["slurm_job_id"],
+    ),
+    _tool_schema(
+        "slurm_cancel",
+        "Отменить Slurm-задачу.",
+        {"slurm_job_id": {"type": "string"}},
+        ["slurm_job_id"],
+    ),
     _tool_schema("get_usage", "Получить использование и лимиты.", {}),
-    _tool_schema("create_checkout_session", "Создать checkout-сессию CloudPayments для плана.", {"plan": {"type": "string", "enum": ["free", "pro", "enterprise"]}}, ["plan"]),
+    _tool_schema(
+        "create_checkout_session",
+        "Создать checkout-сессию CloudPayments для плана.",
+        {"plan": {"type": "string", "enum": ["free", "pro", "enterprise"]}},
+        ["plan"],
+    ),
     _tool_schema("get_daily_stats", "Получить дневную статистику.", {}),
     _tool_schema("get_balance", "Получить текущий баланс и spend-cap тенанта.", {}),
-    _tool_schema("get_billing_ledger", "Получить историю списаний (дебет/кредит).", {"limit": {"type": "integer", "minimum": 1, "maximum": 100}}),
-    _tool_schema("check_spend_cap", "Проверить, хватит ли бюджета на задачу с указанной стоимостью.", {"estimated_cost_usd": {"type": "number"}}, ["estimated_cost_usd"]),
+    _tool_schema(
+        "get_billing_ledger",
+        "Получить историю списаний (дебет/кредит).",
+        {"limit": {"type": "integer", "minimum": 1, "maximum": 100}},
+    ),
+    _tool_schema(
+        "check_spend_cap",
+        "Проверить, хватит ли бюджета на задачу с указанной стоимостью.",
+        {"estimated_cost_usd": {"type": "number"}},
+        ["estimated_cost_usd"],
+    ),
 ]
 
 
@@ -655,13 +875,19 @@ async def execute_tool(name: str, arguments: dict, api_key: str | None = None) -
         headers["X-API-Key"] = api_key
 
     routes: dict[str, tuple[str, str]] = {
-        "submit_task": ("POST", "/submit"), "get_job_status": ("GET", "/status/{job_id}"),
-        "list_jobs": ("GET", "/jobs"), "cancel_job": ("POST", "/cancel/{job_id}"),
-        "list_workers": ("GET", "/workers"), "drain_worker": ("POST", "/workers/{worker_id}/drain"),
-        "slurm_status": ("GET", "/slurm/status/{slurm_job_id}"), "slurm_cancel": ("POST", "/slurm/cancel/{slurm_job_id}"),
-        "get_usage": ("GET", "/usage"), "create_checkout_session": ("POST", "/billing/create-checkout-session"),
+        "submit_task": ("POST", "/submit"),
+        "get_job_status": ("GET", "/status/{job_id}"),
+        "list_jobs": ("GET", "/jobs"),
+        "cancel_job": ("POST", "/cancel/{job_id}"),
+        "list_workers": ("GET", "/workers"),
+        "drain_worker": ("POST", "/workers/{worker_id}/drain"),
+        "slurm_status": ("GET", "/slurm/status/{slurm_job_id}"),
+        "slurm_cancel": ("POST", "/slurm/cancel/{slurm_job_id}"),
+        "get_usage": ("GET", "/usage"),
+        "create_checkout_session": ("POST", "/billing/create-checkout-session"),
         "get_daily_stats": ("GET", "/stats/daily"),
-        "get_balance": ("GET", "/billing/balance"), "get_billing_ledger": ("GET", "/billing/ledger"),
+        "get_balance": ("GET", "/billing/balance"),
+        "get_billing_ledger": ("GET", "/billing/ledger"),
         "check_spend_cap": ("GET", "/billing/spend-cap"),
     }
     if name not in routes:
@@ -672,10 +898,20 @@ async def execute_tool(name: str, arguments: dict, api_key: str | None = None) -
         path = template.format(**arguments)
         payload = arguments if method == "POST" else None
         params = arguments if method == "GET" and "{" not in template else None
-        async with httpx.AsyncClient(base_url=ROMA_INTERNAL_BASE_URL, timeout=45.0) as http:
-            response = await http.request(method, path, json=payload, params=params, headers=headers)
+        async with httpx.AsyncClient(
+            base_url=ROMA_INTERNAL_BASE_URL, timeout=45.0
+        ) as http:
+            response = await http.request(
+                method, path, json=payload, params=params, headers=headers
+            )
         if response.status_code >= 400:
-            return json.dumps({"error": f"HTTP {response.status_code}", "detail": response.text[:800]}, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "error": f"HTTP {response.status_code}",
+                    "detail": response.text[:800],
+                },
+                ensure_ascii=False,
+            )
         try:
             return json.dumps(response.json(), ensure_ascii=False, indent=2)
         except Exception:
@@ -691,7 +927,12 @@ def _message_dict(message: Any) -> dict:
     return {"role": message.role, "content": message.content}
 
 
-async def stream_with_tools(message: str, history: list[ChatMessage], api_key: str | None = None, name: str | None = None):
+async def stream_with_tools(
+    message: str,
+    history: list[ChatMessage],
+    api_key: str | None = None,
+    name: str | None = None,
+):
     """Стримит ответ DeepSeek и выполняет собранные tool_calls до финального ответа."""
     if message.strip().lower() in {"помощь", "help"}:
         yield (
@@ -714,29 +955,45 @@ async def stream_with_tools(message: str, history: list[ChatMessage], api_key: s
 
     messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
     if name:
-        messages.append({"role": "system", "content": f"Пользователя зовут {name}. Обращайся к нему по имени, когда это уместно."})
+        messages.append(
+            {
+                "role": "system",
+                "content": f"Пользователя зовут {name}. Обращайся к нему по имени, когда это уместно.",
+            }
+        )
     messages.extend(_message_dict(item) for item in history[-10:])
     messages.append({"role": "user", "content": message})
 
     for iteration in range(6):
         stream = None
         last_error: Exception | None = None
-        selected_model = DEEPSEEK_MODEL
+        _selected_model = DEEPSEEK_MODEL
         for model in (DEEPSEEK_MODEL,):
             try:
                 stream = await DEEPSEEK_CLIENT.chat.completions.create(
-                    model=model, messages=messages,
-                    tools=ROMA_TOOLS, tool_choice="auto", temperature=0.25, max_tokens=2200, stream=True,
+                    model=model,
+                    messages=messages,
+                    tools=ROMA_TOOLS,
+                    tool_choice="auto",
+                    temperature=0.25,
+                    max_tokens=2200,
+                    stream=True,
                 )
-                selected_model = model
-                selected_model = model
+                _selected_model = model
                 break
             except Exception as exc:
                 last_error = exc
-                logger.warning("DeepSeek model %s failed on tool loop %d: %s", model, iteration + 1, exc)
+                logger.warning(
+                    "DeepSeek model %s failed on tool loop %d: %s",
+                    model,
+                    iteration + 1,
+                    exc,
+                )
 
         if stream is None:
-            logger.error("DeepSeek failed on tool loop %d: %s", iteration + 1, last_error)
+            logger.error(
+                "DeepSeek failed on tool loop %d: %s", iteration + 1, last_error
+            )
             yield "\n\n❌ DeepSeek временно недоступен. Попробуйте ещё раз позже."
             return
 
@@ -750,9 +1007,16 @@ async def stream_with_tools(message: str, history: list[ChatMessage], api_key: s
                 if delta.content:
                     text_parts.append(delta.content)
                     yield delta.content
-                for call_delta in (delta.tool_calls or []):
+                for call_delta in delta.tool_calls or []:
                     index = call_delta.index
-                    call = tool_calls.setdefault(index, {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                    call = tool_calls.setdefault(
+                        index,
+                        {
+                            "id": "",
+                            "type": "function",
+                            "function": {"name": "", "arguments": ""},
+                        },
+                    )
                     if call_delta.id:
                         call["id"] = call_delta.id
                     function = call_delta.function
@@ -763,7 +1027,13 @@ async def stream_with_tools(message: str, history: list[ChatMessage], api_key: s
         if not tool_calls:
             return
 
-        messages.append({"role": "assistant", "content": "".join(text_parts) or None, "tool_calls": list(tool_calls.values())})
+        messages.append(
+            {
+                "role": "assistant",
+                "content": "".join(text_parts) or None,
+                "tool_calls": list(tool_calls.values()),
+            }
+        )
         for call in tool_calls.values():
             try:
                 args = json.loads(call["function"]["arguments"] or "{}")
@@ -771,7 +1041,9 @@ async def stream_with_tools(message: str, history: list[ChatMessage], api_key: s
                 args = {}
             logger.info("Chat tool call: %s", call["function"]["name"])
             result = await execute_tool(call["function"]["name"], args, api_key)
-            messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
+            messages.append(
+                {"role": "tool", "tool_call_id": call["id"], "content": result}
+            )
 
     yield "\n\nДостигнут лимит последовательных вызовов инструментов."
 
@@ -788,12 +1060,30 @@ async def chat_stream(
         raise HTTPException(status_code=400, detail="Сообщение пустое")
     api_key = x_api_key
     if not api_key and authorization:
-        api_key = authorization[7:].strip() if authorization.lower().startswith("bearer ") else authorization.strip()
-    logger.info("Chat request: message=%r history=%d api_key_present=%s", message[:100], len(request.history), bool(api_key))
+        api_key = (
+            authorization[7:].strip()
+            if authorization.lower().startswith("bearer ")
+            else authorization.strip()
+        )
+    logger.info(
+        "Chat request: message=%r history=%d api_key_present=%s",
+        message[:100],
+        len(request.history),
+        bool(api_key),
+    )
     return StreamingResponse(
-        stream_with_tools(message, request.history[-10:], api_key, request.name.strip() if request.name else None),
+        stream_with_tools(
+            message,
+            request.history[-10:],
+            api_key,
+            request.name.strip() if request.name else None,
+        ),
         media_type="text/plain; charset=utf-8",
-        headers={"Cache-Control": "no-cache, no-store", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache, no-store",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
@@ -802,9 +1092,11 @@ async def daily_stats(request: Request):
     """Daily job/GPU stats (last 7 days)."""
     return db.get_daily_stats()
 
+
 @app.get("/health")
 async def health():
     from billing.pg_connection import pg_health
+
     pg_status = pg_health()
     return {
         "status": "ok",
@@ -812,6 +1104,31 @@ async def health():
         "pg_detail": pg_status,
         "version": "2.1.0",
     }
+
+
+@app.get("/ready")
+async def ready():
+    """Readiness probe — PG connected + pool healthy (fail-closed)."""
+    from fastapi.responses import JSONResponse
+    from billing.pg_connection import pg_health
+
+    pg_status = pg_health()
+    pg_ok = bool(pg_status.get("connected"))
+    pool_ok = (
+        bool(pg_status.get("pool_configured")) and pg_status.get("status") == "healthy"
+    )
+    ready = pg_ok and pool_ok and int(pg_status.get("error_count", 0)) < 5
+    return JSONResponse(
+        status_code=200 if ready else 503,
+        content={
+            "status": "ready" if ready else "not_ready",
+            "pg": pg_ok,
+            "pool": pg_status.get("pool_size", "0/10"),
+            "reconnect_count": pg_status.get("reconnect_count", 0),
+            "error_count": pg_status.get("error_count", 0),
+            "version": "2.1.0",
+        },
+    )
 
 
 @app.get("/metrics")
@@ -822,216 +1139,6 @@ async def metrics():
 # ============================================
 # ENDPOINTS — DecisionOS: /submit via Gate + PG
 # ============================================
-
-# ── Load .env at startup ─────────────────────────────────────────
-import os as _os
-from pathlib import Path as _Path
-_env_path = _Path(__file__).parent / ".env"
-if _env_path.exists():
-    with open(_env_path) as _f:
-        for _line in _f:
-            _line = _line.strip()
-            if _line and not _line.startswith('#') and '=' in _line:
-                _key, _val = _line.split('=', 1)
-                _key = _key.strip()
-                _val = _val.strip().strip('"').strip("'")
-                if _key not in _os.environ:
-                    _os.environ[_key] = _val
-
-def _parse_idempotency_key(request: Request) -> Optional[str]:
-    """Read and validate the Idempotency-Key header. Returns None if absent."""
-    raw = request.headers.get("Idempotency-Key")
-    if raw is None:
-        return None
-    key = raw.strip()
-    if not key:
-        raise HTTPException(status_code=400, detail="Idempotency-Key must not be empty")
-    if len(key) > 256:
-        raise HTTPException(status_code=400, detail="Idempotency-Key too long (max 256)")
-    return key
-
-
-def _submit_response(job_id: str, tenant_id: str, gpu_required: bool) -> RomaTaskResponse:
-    return RomaTaskResponse(
-        status="queued",
-        job_id=job_id,
-        tenant_id=tenant_id,
-        roma_dispatch={"protocol": "rom", "target": f"rom://local/{job_id}"},
-        dag=["validate", "dispatch", "execute", "commit"],
-        estimated_resources={"cpu_cores": 2, "memory_mb": 512, "gpu": 1 if gpu_required else 0},
-        gpu_required=gpu_required,
-    )
-
-
-@limiter.limit("30/minute")
-@app.post("/submit", response_model=RomaTaskResponse, status_code=202, dependencies=[Depends(verify_api_key)])
-async def submit_task(payload: RomaTaskInput, request: Request, key_info: dict = Depends(verify_api_key)):
-    global queue_depth
-    tenant_id = key_info["tenant_id"]
-
-    idempotency_key = _parse_idempotency_key(request)
-
-    # Replay: an existing (tenant_id, Idempotency-Key) mapping returns the same job.
-    if idempotency_key:
-        existing_job_id = db.find_job_by_idempotency(tenant_id, idempotency_key)
-        if existing_job_id:
-            existing = db.get_execution_job(existing_job_id)
-            if existing and existing.get("tenant_id") == tenant_id:
-                logger.info("submit.idempotent_replay tenant=%s key=%s job=%s",
-                            tenant_id, idempotency_key[:8], existing_job_id)
-                return _submit_response(
-                    existing_job_id, tenant_id,
-                    bool((existing.get("payload") or {}).get("gpu_required", False)),
-                )
-
-    gate = _get_gate()
-
-    # Build DecisionRequest
-    dreq = DecisionRequest(
-        tenant_id=tenant_id,
-        request_type="job_submit",
-        payload=payload.model_dump(),
-        idempotency_key=idempotency_key,
-    )
-
-    # Evaluate through Gate
-    decision = gate.evaluate(tenant_id=tenant_id, payload=payload.model_dump())
-    if decision.result.value != "allowed":
-        logger.warning("decision.denied tenant=%s reason=%s", tenant_id, decision.reason)
-        raise HTTPException(status_code=402, detail=decision.reason)
-
-    job_id = str(uuid.uuid4())
-
-    # Reserve the idempotency key atomically BEFORE creating the job, so two
-    # identical concurrent submits never produce two jobs.
-    if idempotency_key:
-        if not db.create_job_idempotency(tenant_id, idempotency_key, job_id):
-            winner_job_id = db.find_job_by_idempotency(tenant_id, idempotency_key)
-            if winner_job_id:
-                existing = db.get_execution_job(winner_job_id)
-                if existing and existing.get("tenant_id") == tenant_id:
-                    return _submit_response(
-                        winner_job_id, tenant_id,
-                        bool((existing.get("payload") or {}).get("gpu_required", False)),
-                    )
-
-    queue_depth += 1
-    roma_queue_depth.labels(tenant_id=tenant_id).set(queue_depth)
-
-    # Persist execution job in PG
-    db.insert_execution_job(
-        job_id=job_id,
-        decision_id=str(uuid.uuid4()),  # GateDecision has no decision_id
-        tenant_id=tenant_id,
-        status="queued",
-        payload=payload.model_dump(),
-    )
-    db.update_execution_job(job_id, backend=payload.backend)
-
-    # Dispatch — ТОЛЬКО фоновый poll_and_execute (одна точка). Не рентим здесь,
-    # иначе Vast создаётся дважды (submit + worker) → утечка инстанса.
-    # No debit at submit: the job is only queued. Actual billing happens exactly
-    # once at finalize via finalize_job_billing() (see /complete and execute_and_bill).
-
-    # Audit: job.created
-    try:
-        on_job_created(tenant_id, job_id, str(uuid.uuid4()))
-    except Exception as exc:
-        logger.warning("audit.job_created failed tenant=%s job=%s: %s", tenant_id, job_id, exc)
-
-    queue_depth -= 1
-    roma_queue_depth.labels(tenant_id=tenant_id).set(queue_depth)
-    roma_jobs_total.labels(tenant_id=tenant_id).inc()
-
-    ten_jobs = db.list_tenant_jobs(tenant_id, limit=100)
-    roma_jobs_active.labels(tenant_id=tenant_id).set(len(ten_jobs))
-
-    return _submit_response(job_id, tenant_id, payload.gpu_required)
-
-
-@app.get("/status/{job_id}", response_model=RomaStatusResponse, dependencies=[Depends(verify_api_key)])
-async def get_status(job_id: str, key_info: dict = Depends(verify_api_key)):
-    tenant_id = key_info["tenant_id"]
-    job = db.get_execution_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if job.get("tenant_id") != tenant_id:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return RomaStatusResponse(
-        job_id=job_id,
-        status=job["status"],
-        created_at=job["created_at"],
-        started_at=job.get("started_at"),
-        completed_at=job.get("completed_at"),
-        error=job.get("error"),
-        backend=job.get("backend"),
-        backend_job_id=job.get("backend_job_id"),
-    )
-
-
-@app.post("/cancel/{job_id}", dependencies=[Depends(verify_api_key)])
-async def cancel_job(job_id: str, key_info: dict = Depends(verify_api_key)):
-    tenant_id = key_info["tenant_id"]
-    job = db.get_execution_job(job_id)
-    if not job or job.get("tenant_id") != tenant_id:
-        raise HTTPException(status_code=404, detail="Job not found")
-    db.update_execution_job(job_id, status="cancelled", completed_at=datetime.now(timezone.utc).isoformat())
-    # Гасим backend-инстанс (Vast.ai destroy и т.п.)
-    try:
-        await backend_cancel_job(tenant_id=tenant_id, job_id=job_id)
-    except Exception as exc:
-        logger.warning("cancel.backend_cleanup_failed tenant=%s job=%s: %s", tenant_id, job_id, exc)
-    try:
-        write_event(tenant_id, "job.cancelled", "job", job_id, {})
-    except Exception:
-        pass
-    return {"status": "cancelled", "job_id": job_id}
-
-
-@app.post("/complete/{job_id}", dependencies=[Depends(verify_api_key)])
-async def complete_job(job_id: str, key_info: dict = Depends(verify_api_key)):
-    tenant_id = key_info["tenant_id"]
-    job = db.get_execution_job(job_id)
-    if not job or job.get("tenant_id") != tenant_id:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    # Single source of truth: finalize_job_billing() debits exactly once
-    # (idempotent). Actual GPU seconds are derived from the job duration.
-    actual_duration_s = 0
-    started_at = job.get("started_at")
-    if started_at:
-        try:
-            started_dt = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
-            if started_dt.tzinfo is None:
-                started_dt = started_dt.replace(tzinfo=timezone.utc)
-            actual_duration_s = (datetime.now(timezone.utc) - started_dt).total_seconds()
-        except Exception:
-            actual_duration_s = 0
-    gpu_sec = max(actual_duration_s, 0)
-    plan_name = (db.get_tenant(tenant_id) or {}).get("plan", "free")
-    finalize_job_billing(tenant_id, job_id, gpu_sec, plan_name)
-
-    # Cleanup backend instance (Vast.ai destroy etc.)
-    try:
-        await backend_cancel_job(tenant_id=tenant_id, job_id=job_id)
-    except Exception as exc:
-        logger.warning("backend.cleanup.failed tenant=%s job=%s: %s", tenant_id, job_id, exc)
-
-    db.update_execution_job(job_id, status="completed", completed_at=datetime.utcnow().isoformat())
-    return {"status": "completed", "job_id": job_id}
-
-
-@app.get("/jobs", dependencies=[Depends(verify_api_key)])
-async def list_jobs(key_info: dict = Depends(verify_api_key)):
-    tenant_id = key_info["tenant_id"]
-    my_jobs = db.list_jobs(tenant_id, limit=100)
-    return {
-        "rom_version": "1.0.0",
-        "tenant_id": tenant_id,
-        "queue": len(my_jobs),
-        "jobs": my_jobs[-10:],
-        "execution_modes": ["k8s_job", "k8s_persistent", "atom_cluster", "batch", "vastai", "local"],
-    }
 
 
 @app.post("/submit/cluster", status_code=202, dependencies=[Depends(verify_api_key)])
@@ -1046,7 +1153,11 @@ async def submit_atom_cluster(payload: dict, key_info: dict = Depends(verify_api
         "tenant_id": tenant_id,
         "cluster_name": cluster_name,
         "execution_mode": "atom_cluster",
-        "atom_cluster": {"name": cluster_name, "managed": True, "nodes": cluster_spec.get("nodes", 1)},
+        "atom_cluster": {
+            "name": cluster_name,
+            "managed": True,
+            "nodes": cluster_spec.get("nodes", 1),
+        },
     }
     db.insert_job_raw(job_id, tenant_id, "atom_cluster_managed", job)
     return job
@@ -1056,14 +1167,15 @@ async def submit_atom_cluster(payload: dict, key_info: dict = Depends(verify_api
 # ENDPOINTS — Usage (PG-backed)
 # ============================================
 
+
 @app.get("/usage", dependencies=[Depends(verify_api_key)])
 async def get_usage(key_info: dict = Depends(verify_api_key)):
     tenant_id = key_info["tenant_id"]
     t = db.get_tenant(tenant_id)
-    plan_name = t.get("plan", "free") if t else "free"
-    plan = PLANS.get(plan_name, PLANS.get("free", {}))
+    plan_name = t.get("plan") if t else None
+    plan, refusal = _plan_limits_or_refusal(plan_name)
     usage_data = db.get_tenant_usage_db(tenant_id)
-    max_jobs = plan.get("max_jobs_per_month", 50)
+    max_jobs = plan["max_jobs_per_month"] if plan else None
     sub_status = t.get("subscription_status", "inactive") if t else "inactive"
     return {
         "tenant_id": tenant_id,
@@ -1072,7 +1184,11 @@ async def get_usage(key_info: dict = Depends(verify_api_key)):
         "usage": usage_data,
         "limits": {
             "max_jobs_per_month": max_jobs,
-            "max_jobs_per_month_display": "unlimited" if max_jobs == -1 else str(max_jobs),
+            "max_jobs_per_month_display": (
+                refusal
+                if max_jobs is None
+                else "unlimited" if max_jobs == -1 else str(max_jobs)
+            ),
         },
     }
 
@@ -1140,7 +1256,7 @@ async def submit_job(payload: RomaTaskInput, key_info: dict) -> RomaTaskResponse
             "job_id": job_id,
             "tenant_id": tenant_id,
             "rom": f"rom://local/{job_id}",
-            "submitted_at": datetime.utcnow().isoformat(),
+            "submitted_at": datetime.now(timezone.utc).isoformat(),
             "payload": payload.model_dump(),
         }
         jobs[job_id] = job
@@ -1149,8 +1265,9 @@ async def submit_job(payload: RomaTaskInput, key_info: dict) -> RomaTaskResponse
         roma_jobs_total.labels(tenant_id=tenant_id).inc()
         # No debit at demo submit — billing is finalized exactly once via
         # finalize_job_billing() (see /complete and execute_and_bill).
-        tenant_jobs = [j for j in jobs.values() if j.get("tenant_id") == tenant_id]
-        roma_jobs_active.labels(tenant_id=tenant_id).set(len(tenant_jobs))
+        roma_jobs_active.labels(tenant_id=tenant_id).set(
+            db.count_jobs_active_for_tenant(tenant_id)
+        )
         return RomaTaskResponse(
             status="queued",
             job_id=job_id,
@@ -1165,21 +1282,26 @@ async def submit_job(payload: RomaTaskInput, key_info: dict) -> RomaTaskResponse
         roma_queue_depth.labels(tenant_id=tenant_id).set(queue_depth)
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/demo/{demo_name}")
 async def run_demo(demo_name: str, key_info: dict = Depends(verify_api_key)):
-    tenant_id = key_info["tenant_id"]
+    _tenant_id = key_info["tenant_id"]
     if demo_name not in DEMOS:
-        raise HTTPException(status_code=404, detail=f"Demo not found: {demo_name}. Available: {list(DEMOS.keys())}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Demo not found: {demo_name}. Available: {list(DEMOS.keys())}",
+        )
     demo = DEMOS[demo_name]
     input_data = {k: v for k, v in demo.items() if k in RomaTaskInput.model_fields}
     payload = RomaTaskInput.model_validate(input_data)
     return await submit_job(payload, key_info)
+
+
 # ============================================
 # SLURM INTEGRATION ENDPOINTS
 # ============================================
 
 from scheduler.slurm_plugin import slurm as slurm_plugin
-from backends.dispatcher import dispatch_job, backend_cancel_job
 
 
 @app.get("/slurm/status/{slurm_job_id}", dependencies=[Depends(verify_api_key)])
@@ -1207,6 +1329,7 @@ async def list_workers(key_info: dict = Depends(verify_api_key)):
     workers = db.get_tenant_workers(tenant_id)
     return {"rom_version": "1.0.0", "tenant_id": tenant_id, "workers": workers}
 
+
 @app.get("/workers/{worker_id}", dependencies=[Depends(verify_api_key)])
 async def get_worker(worker_id: str, key_info: dict = Depends(verify_api_key)):
     tenant_id = key_info["tenant_id"]
@@ -1214,6 +1337,7 @@ async def get_worker(worker_id: str, key_info: dict = Depends(verify_api_key)):
     if not w or w.get("tenant_id") != tenant_id:
         raise HTTPException(status_code=404, detail="Worker not found")
     return w
+
 
 @app.post("/workers/{worker_id}/drain", dependencies=[Depends(verify_api_key)])
 async def drain_worker(worker_id: str, key_info: dict = Depends(verify_api_key)):
@@ -1226,140 +1350,13 @@ async def drain_worker(worker_id: str, key_info: dict = Depends(verify_api_key))
 
 
 # ============================================
-# BETA TESTING — application + leads
-# ============================================
-
-BETA_FORM_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ROMA — Beta Application</title>
-<style>
-* { margin:0; padding:0; box-sizing:border-box }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#0f1117; color:#e5e7eb; min-height:100vh; padding:40px 16px }
-.container { max-width:600px; margin:0 auto }
-.card { background:#161b22; border:1px solid #30363d; border-radius:12px; padding:32px }
-h1 { font-size:24px; margin-bottom:8px; color:#f9fafb }
-p { color:#8b949e; font-size:14px; margin-bottom:24px; line-height:1.6 }
-label { display:block; font-size:13px; color:#8b949e; margin-bottom:4px }
-input, textarea, select { width:100%; padding:10px 14px; background:#0d1117; border:1px solid #30363d; border-radius:8px; color:#e5e7eb; font-size:14px; margin-bottom:16px; outline:none; font-family:inherit }
-input:focus, textarea:focus, select:focus { border-color:#3b82f6 }
-select { appearance:none }
-button { width:100%; padding:12px; background:#238636; border:none; border-radius:8px; color:#fff; font-size:15px; cursor:pointer; font-weight:600 }
-button:hover { background:#2ea043 }
-.success { background:rgba(34,197,94,0.1); border:1px solid #22c55e; border-radius:8px; padding:16px; color:#22c55e; text-align:center; margin-bottom:20px; display:none }
-.error { background:rgba(239,68,68,0.1); border:1px solid #ef4444; border-radius:8px; padding:12px; color:#ef4444; font-size:14px; margin-bottom:16px; display:none }
-.note { font-size:12px; color:#6b7280; margin-top:12px; text-align:center }
-</style>
-</head>
-<body>
-<div class="container">
-<div class="card">
-    <h1>🚀 ROMA Beta Testing</h1>
-    <p>Closed-loop GPU execution platform. We're opening early access to ML engineers, researchers, and startups. Fill out the form — we'll get back to you within 48 hours.</p>
-    <div id="success" class="success">✅ Application submitted! We'll reach out to you soon.</div>
-    <div id="error" class="error"></div>
-    <form id="betaForm">
-        <label for="email">Email *</label>
-        <input type="email" id="email" name="email" placeholder="you@company.com" required>
-        <label for="company">Company</label>
-        <input type="text" id="company" name="company" placeholder="Acme AI Labs">
-        <label for="role">Role</label>
-        <select id="role" name="role">
-            <option value="">Select role...</option>
-            <option>ML Engineer</option>
-            <option>Research Scientist</option>
-            <option>DevOps / MLOps</option>
-            <option>CTO / Engineering Lead</option>
-            <option>Student / Researcher</option>
-            <option>Other</option>
-        </select>
-        <label for="use_case">What would you use ROMA for?</label>
-        <textarea id="use_case" name="use_case" rows="3" placeholder="E.g. training LLMs, batch inference, hyperparameter tuning..."></textarea>
-        <label for="source">How did you hear about ROMA?</label>
-        <select id="source" name="source">
-            <option value="">Select...</option>
-            <option>GitHub</option>
-            <option>Twitter / X</option>
-            <option>LinkedIn</option>
-            <option>Recommendation</option>
-            <option>Search</option>
-            <option>Other</option>
-        </select>
-        <button type="submit">Apply for Beta Access</button>
-    </form>
-    <div class="note">No credit card required. Free during beta period.</div>
-</div>
-</div>
-<script>
-document.getElementById('betaForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const email = document.getElementById('email').value.trim();
-    if (!email) return;
-    const data = {
-        email: email,
-        company: document.getElementById('company').value.trim(),
-        role: document.getElementById('role').value,
-        use_case: document.getElementById('use_case').value.trim(),
-        source: document.getElementById('source').value,
-    };
-    try {
-        const resp = await fetch('/beta/apply', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
-        if (resp.ok) {
-            document.getElementById('success').style.display = 'block';
-            document.getElementById('error').style.display = 'none';
-            document.getElementById('betaForm').reset();
-        } else {
-            const err = await resp.json();
-            document.getElementById('error').textContent = err.detail || 'Submission failed';
-            document.getElementById('error').style.display = 'block';
-        }
-    } catch(e) {
-        document.getElementById('error').textContent = 'Network error. Please try again.';
-        document.getElementById('error').style.display = 'block';
-    }
-});
-</script>
-</body>
-</html>"""
-
-
-@app.get("/beta")
-async def beta_page():
-    return Response(content=BETA_FORM_HTML, media_type="text/html")
-
-
-@limiter.limit("5/minute")
-@app.post("/beta/apply")
-async def beta_apply(request: Request, payload: dict):
-    email = (payload.get("email") or "").strip()
-    if not email:
-        raise HTTPException(status_code=400, detail="Email is required")
-    company = payload.get("company", "")
-    role = payload.get("role", "")
-    use_case = payload.get("use_case", "")
-    source = payload.get("source", "")
-    lead_id = db.add_lead(email, company, role, use_case, source)
-    logger.info("beta_lead_created", extra={"lead_id": lead_id, "email": email[:3] + "***"})
-    return {"status": "accepted", "message": "Thank you! We'll reach out to you soon.", "lead_id": lead_id}
-
-
-@app.get("/beta/leads", dependencies=[Depends(verify_api_key)])
-async def beta_leads(key_info: dict = Depends(verify_api_key)):
-    status = ""  # All leads
-    all_leads = db.list_leads()
-    return {"total": len(all_leads), "leads": all_leads}
-
-
-
-# ============================================
 # WEBSOCKET — Worker Registration
 # ============================================
 
 from fastapi import WebSocket, WebSocketDisconnect
 
 active_ws_workers: dict[str, WebSocket] = {}
+
 
 @app.websocket("/ws/worker")
 async def ws_worker(ws: WebSocket):
@@ -1381,8 +1378,17 @@ async def ws_worker(ws: WebSocket):
                 tenant_id = API_KEYS[api_key]["tenant_id"]
                 db.register_worker(worker_id, tenant_id, capabilities)
                 active_ws_workers[worker_id] = ws
-                await ws.send_json({"type": "registered", "worker_id": worker_id, "tenant_id": tenant_id})
-                logger.info("worker_registered", extra={"tenant_id": tenant_id, "worker_id": worker_id})
+                await ws.send_json(
+                    {
+                        "type": "registered",
+                        "worker_id": worker_id,
+                        "tenant_id": tenant_id,
+                    }
+                )
+                logger.info(
+                    "worker_registered",
+                    extra={"tenant_id": tenant_id, "worker_id": worker_id},
+                )
             elif msg_type == "heartbeat":
                 db.update_worker_heartbeat(worker_id)
                 await ws.send_json({"type": "heartbeat_ack", "worker_id": worker_id})
@@ -1397,11 +1403,25 @@ async def ws_worker(ws: WebSocket):
                             jobs[job_id]["output"] = data["output"]
                         if "error" in data:
                             jobs[job_id]["error"] = data["error"]
-                logger.info("worker_status_update", extra={"tenant_id": tenant_id, "worker_id": worker_id, "job_id": job_id, "status": status})
+                logger.info(
+                    "worker_status_update",
+                    extra={
+                        "tenant_id": tenant_id,
+                        "worker_id": worker_id,
+                        "job_id": job_id,
+                        "status": status,
+                    },
+                )
     except WebSocketDisconnect:
-        logger.info("worker_disconnected", extra={"tenant_id": tenant_id, "worker_id": worker_id})
+        logger.info(
+            "worker_disconnected",
+            extra={"tenant_id": tenant_id, "worker_id": worker_id},
+        )
     except Exception as e:
-        logger.error(f"ws_worker error: {e}", extra={"tenant_id": tenant_id, "worker_id": worker_id})
+        logger.error(
+            f"ws_worker error: {e}",
+            extra={"tenant_id": tenant_id, "worker_id": worker_id},
+        )
     finally:
         if worker_id:
             active_ws_workers.pop(worker_id, None)
@@ -1415,32 +1435,6 @@ from auth.sessions import get_session
 from auth.verification import is_email_verified
 from starlette.responses import RedirectResponse
 
-# ============================================
-# BETA — Invite Codes + Capacity
-# ============================================
-
-from auth.invites import (
-    BETA_MODE, BETA_REQUIRE_INVITE, BETA_DEFAULT_SPEND_CAP,
-    validate_invite, use_invite,
-    check_beta_capacity, is_beta_enabled,
-)
-
-
-@app.get("/api/beta/status")
-async def beta_status():
-    """Public endpoint: check beta status and capacity."""
-    return check_beta_capacity()
-
-
-@app.get("/api/beta/validate-invite")
-async def beta_validate_invite(code: str):
-    """Check if an invite code is valid (pre-signup)."""
-    result = validate_invite(code)
-    if result is None:
-        raise HTTPException(status_code=404, detail="Invalid or expired invite code")
-    return {"valid": True, "max_uses": result.get("invite", {}).get("max_uses", 1),
-            "used_count": result.get("invite", {}).get("used_count", 0)}
-
 
 def _resolve_api_key(request: Request) -> dict | None:
     """Try header first, then query param (for browser access)."""
@@ -1449,13 +1443,20 @@ def _resolve_api_key(request: Request) -> dict | None:
         return None
     return API_KEYS[key]
 
+
 def _render_dashboard(tenant_id: str, plan_name: str, api_key: str) -> str:
     usage_data = _get_tenant_usage(tenant_id)
-    plan = PLANS.get(plan_name, PLANS.get("free", {}))
-    max_jobs = plan.get("max_jobs_per_month", 50)
+    plan, refusal = _plan_limits_or_refusal(plan_name)
+    max_jobs = plan["max_jobs_per_month"] if plan else None
     used = usage_data["total_jobs"]
-    pct = min(100, round(used / max_jobs * 100, 1)) if max_jobs > 0 else 0
-    limit_display = "∞" if max_jobs == -1 else str(max_jobs)
+    pct = (
+        min(100, round(used / max_jobs * 100, 1))
+        if max_jobs is not None and max_jobs > 0
+        else 0
+    )
+    limit_display = (
+        refusal if max_jobs is None else "∞" if max_jobs == -1 else str(max_jobs)
+    )
     bar_color = "#22c55e" if pct < 60 else "#f59e0b" if pct < 85 else "#ef4444"
 
     my_jobs = [j for j in jobs.values() if j.get("tenant_id") == tenant_id]
@@ -1464,7 +1465,11 @@ def _render_dashboard(tenant_id: str, plan_name: str, api_key: str) -> str:
     jobs_html = ""
     if recent:
         for j in recent:
-            status_cls = {"queued": "#3b82f6", "cancelled": "#9ca3af", "completed": "#22c55e"}.get(j["status"], "#6b7280")
+            status_cls = {
+                "queued": "#3b82f6",
+                "cancelled": "#9ca3af",
+                "completed": "#22c55e",
+            }.get(j["status"], "#6b7280")
             jobs_html += f"""<tr>
                 <td style="font-family:monospace;font-size:13px">{j['job_id'][:8]}...</td>
                 <td><span style="background:{status_cls};color:#fff;padding:2px 8px;border-radius:10px;font-size:12px">{j['status']}</span></td>
@@ -1670,6 +1675,7 @@ footer .dot {{ display:inline-block; width:7px; height:7px; border-radius:50%; b
 </body>
 </html>"""
 
+
 @app.get("/dashboard")
 async def dashboard(request: Request):
     # 1. Check session cookie first
@@ -1680,12 +1686,14 @@ async def dashboard(request: Request):
             tenant_id = sess["tenant_id"]
             api_key_raw = sess["api_key"]
             t = db.get_tenant(tenant_id)
-            plan_name = t["plan"] if t else PLANS.get("free", {})
+            plan_name = t["plan"] if t else None
             html = _render_dashboard(tenant_id, plan_name, api_key_raw)
             return Response(content=html, media_type="text/html")
 
     # 2. Fall back to query param or header
-    api_key_raw = request.headers.get("X-API-Key") or request.query_params.get("api_key")
+    api_key_raw = request.headers.get("X-API-Key") or request.query_params.get(
+        "api_key"
+    )
     if api_key_raw and api_key_raw in API_KEYS:
         info = API_KEYS[api_key_raw]
         tenant_id = info["tenant_id"]
@@ -1698,10 +1706,10 @@ async def dashboard(request: Request):
     return RedirectResponse(url="/auth/login", status_code=302)
 
 
-
 # ============================================
 # ENDPOINTS — Feedback
 # ============================================
+
 
 @limiter.limit("10/minute")
 @app.post("/feedback")
@@ -1731,38 +1739,14 @@ async def submit_feedback(request: Request):
             tenant_id = info["tenant_id"]
 
     try:
-        fid = db.save_feedback(tenant_id, user_id, rating, liked, improvement, bug, user_agent)
-        logger.info("Feedback saved", extra={"feedback_id": fid, "tenant_id": tenant_id, "rating": rating})
+        fid = db.save_feedback(
+            tenant_id, user_id, rating, liked, improvement, bug, user_agent
+        )
+        logger.info(
+            "Feedback saved",
+            extra={"feedback_id": fid, "tenant_id": tenant_id, "rating": rating},
+        )
         return {"status": "ok", "feedback_id": fid}
     except Exception as e:
         logger.error(f"Failed to save feedback: {e}")
         raise HTTPException(status_code=500, detail="Failed to save feedback")
-
-
-@app.on_event("startup")
-async def startup_event():
-    try:
-        billing_ledger._pg._ensure_pool()
-        try:
-            init_worker()
-            asyncio.create_task(poll_and_execute())
-            logger.info("execution_worker initialized")
-        except Exception as e:
-            logger.warning("Failed to init execution_worker: %s", e)
-        logger.info("PG pool initialized on startup")
-    except Exception as e:
-        logger.warning("Failed to init PG pool on startup: %s", e)
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    try:
-        from billing.pg_connection import shutdown_pg
-        shutdown_pg()
-        from db_adapter import close_pg_pool
-        close_pg_pool()
-        logger.info("PG pool released on shutdown")
-    except Exception as e:
-        logger.warning("Failed to close PG pool: %s", e)
-
-

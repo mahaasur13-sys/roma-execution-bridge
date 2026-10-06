@@ -18,7 +18,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Protocol
 
 from plugins.dashbeam.domain import (
-    DashBeamTicket, DashBeamSession, DashBeamRelayConfig, PairedDevice,
+    DashBeamTicket,
+    DashBeamSession,
+    DashBeamRelayConfig,
+    PairedDevice,
 )
 
 
@@ -43,7 +46,9 @@ class IrohAdapter:
 
     relay_url: str = "https://relay.dashbeam.io"
     data_dir: str = "./data/dashbeam"
-    node_id: str = field(default_factory=lambda: hashlib.sha256(os.urandom(32)).hexdigest()[:32])
+    node_id: str = field(
+        default_factory=lambda: hashlib.sha256(os.urandom(32)).hexdigest()[:32]
+    )
     _proto: IrohNodeProtocol | None = None
 
     # ─── Lifecycle ───
@@ -126,9 +131,7 @@ class IrohAdapter:
 
     # ─── Pairing ───
 
-    async def pair_device(
-        self, device_name: str, fingerprint: str
-    ) -> PairedDevice:
+    async def pair_device(self, device_name: str, fingerprint: str) -> PairedDevice:
         return PairedDevice(
             device_id=str(uuid.uuid4()),
             device_name=device_name,

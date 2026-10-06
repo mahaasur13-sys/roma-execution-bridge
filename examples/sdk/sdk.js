@@ -70,7 +70,7 @@ class ROMAClient {
 // ═══════════════════════════════════════════════════════════════════════
 
 async function demoFullLifecycle() {
-  const client = new ROMAClient(BASE_URL, "roma-demo-key-2026");
+  const client = new ROMAClient(BASE_URL, process.env.ROMA_API_KEY || "YOUR_API_KEY");
 
   // 1. Check balance before submitting
   let usage = await client.getUsage();

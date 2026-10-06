@@ -45,7 +45,9 @@ class PluginLoader:
                     manifest = self.load_manifest(str(manifest_file))
                     manifests.append(manifest)
                 except Exception as e:
-                    logger.warning("Failed to load manifest from %s: %s", manifest_file, e)
+                    logger.warning(
+                        "Failed to load manifest from %s: %s", manifest_file, e
+                    )
 
         return manifests
 
@@ -90,7 +92,9 @@ class PluginLoader:
         plugin_class = getattr(module, class_name)
         return plugin_class
 
-    def validate_permissions(self, manifest: PluginManifest, allowed_permissions: set[str]) -> list[str]:
+    def validate_permissions(
+        self, manifest: PluginManifest, allowed_permissions: set[str]
+    ) -> list[str]:
         """Check requested permissions against allowed set. Returns denials."""
         requested = set(manifest.permissions)
         denied = requested - allowed_permissions

@@ -6,8 +6,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
-
 # ── Pydantic request/response schemas ──
+
 
 class CreateTicketRequest(BaseModel):
     file_name: str
@@ -71,6 +71,7 @@ class MoneroShareResponse(BaseModel):
 
 # ── Router factory ──
 
+
 def create_router(service) -> APIRouter:
     """Build the FastAPI router for dashbeam-transfer plugin."""
     router = APIRouter(prefix="/api/v1/dashbeam", tags=["dashbeam-transfer"])
@@ -78,7 +79,9 @@ def create_router(service) -> APIRouter:
     # ── Tickets ──
 
     @router.post("/tickets", response_model=TicketResponse, status_code=201)
-    async def create_ticket(req: CreateTicketRequest, tenant_id: str = "default") -> TicketResponse:
+    async def create_ticket(
+        req: CreateTicketRequest, tenant_id: str = "default"
+    ) -> TicketResponse:
         """Create a one-time P2P transfer ticket."""
         ticket = await service.create_ticket(
             tenant_id=tenant_id,
@@ -148,7 +151,9 @@ def create_router(service) -> APIRouter:
     # ── Sessions ──
 
     @router.post("/sessions", response_model=SessionResponse, status_code=201)
-    async def start_session(req: SessionRequest, tenant_id: str = "default") -> SessionResponse:
+    async def start_session(
+        req: SessionRequest, tenant_id: str = "default"
+    ) -> SessionResponse:
         session = await service.start_session(tenant_id, req.device_name)
         return SessionResponse(
             session_id=session.session_id,
@@ -186,10 +191,13 @@ def create_router(service) -> APIRouter:
         )
 
     @router.put("/relay", response_model=RelayConfigResponse)
-    async def set_relay_config(req: RelayConfigRequest, tenant_id: str = "default") -> RelayConfigResponse:
+    async def set_relay_config(
+        req: RelayConfigRequest, tenant_id: str = "default"
+    ) -> RelayConfigResponse:
         try:
             config = service.set_relay_config(
-                tenant_id, req.relay_url,
+                tenant_id,
+                req.relay_url,
                 tier=req.tier,
                 discovery_nodes=req.discovery_nodes,
             )
@@ -206,7 +214,9 @@ def create_router(service) -> APIRouter:
     # ── Monero Share ──
 
     @router.post("/monero/share", response_model=MoneroShareResponse)
-    async def share_monero(req: MoneroShareRequest, tenant_id: str = "default") -> MoneroShareResponse:
+    async def share_monero(
+        req: MoneroShareRequest, tenant_id: str = "default"
+    ) -> MoneroShareResponse:
         from plugins.dashbeam.integrations.crypto_wallets import MoneroSharingValidator
 
         validator = MoneroSharingValidator()
@@ -244,11 +254,13 @@ def create_router(service) -> APIRouter:
                     ticket_id = data.get("ticket_id", "")
                     ticket = service.get_ticket(ticket_id)
                     if ticket:
-                        await ws.send_json({
-                            "type": "dashbeam:transfer:status",
-                            "ticket_id": ticket_id,
-                            "status": ticket.status.value,
-                        })
+                        await ws.send_json(
+                            {
+                                "type": "dashbeam:transfer:status",
+                                "ticket_id": ticket_id,
+                                "status": ticket.status.value,
+                            }
+                        )
         except WebSocketDisconnect:
             pass
 

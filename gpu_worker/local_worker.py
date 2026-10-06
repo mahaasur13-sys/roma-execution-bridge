@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """ROMA Local Worker — финальная версия с памятью сессии"""
+
 import time
 import json
 import os
@@ -41,8 +42,15 @@ def run_cmd(task):
         argv, err = _argv_from_command(task)
         if err:
             return {"ok": False, "error": err}
-        r = subprocess.run(argv, shell=False, capture_output=True, text=True, timeout=300)
-        return {"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr, "code": r.returncode}
+        r = subprocess.run(
+            argv, shell=False, capture_output=True, text=True, timeout=300
+        )
+        return {
+            "ok": r.returncode == 0,
+            "out": r.stdout,
+            "err": r.stderr,
+            "code": r.returncode,
+        }
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -55,25 +63,82 @@ def main():
     while True:
         try:
             jobs = api_get("/jobs").get("jobs", [])
-            queued = [j for j in jobs if j.get("status") == "queued" and j["job_id"] not in processed_ids]
+            queued = [
+                j
+                for j in jobs
+                if j.get("status") == "queued" and j["job_id"] not in processed_ids
+            ]
             if not queued:
-                print(f"[{time.strftime('%H:%M:%S')}] Очередь пуста (обработано: {len(processed_ids)})")
+                print(
+                    f"[{time.strftime('%H:%M:%S')}] Очередь пуста (обработано: {len(processed_ids)})"
+                )
                 time.sleep(POLL_INTERVAL)
                 continue
 
-            queued.sort(key=lambda j: (-j.get("priority", 5), j.get("submitted_at", "")))
+            queued.sort(
+                key=lambda j: (-j.get("priority", 5), j.get("submitted_at", ""))
+            )
             job = queued[0]
             jid, payload = job["job_id"], job.get("payload", {})
-            task, mode, pri = payload.get("task", ""), payload.get("execution_mode", "?"), payload.get("priority", 5)
+            task, mode, pri = (
+                payload.get("task", ""),
+                payload.get("execution_mode", "?"),
+                payload.get("priority", 5),
+            )
             print(f"\n📥 {jid[:8]}... | приоритет={pri} | режим={mode}")
             print(f"   Команда: {task[:65]}{'...' if len(task)>65 else ''}")
 
-            if not task or task[0].isspace() or all(c.isalpha() or c.isspace() for c in task.split()[0] if task.split()):
+            if (
+                not task
+                or task[0].isspace()
+                or all(
+                    c.isalpha() or c.isspace() for c in task.split()[0] if task.split()
+                )
+            ):
                 first = task.split()[0].lower() if task.split() else ""
-                known = {'echo','date','ls','cat','uname','nvidia-smi','python','python3','curl','wget',
-                         'git','docker','kubectl','mkdir','rm','cp','mv','find','grep','awk','sed',
-                         'ps','top','df','du','free','ping','whoami','id','pwd','clear','exit',
-                         'bash','sh','zsh','htop','neofetch','lscpu','lsmem','lsusb','lspci'}
+                known = {
+                    'echo',
+                    'date',
+                    'ls',
+                    'cat',
+                    'uname',
+                    'nvidia-smi',
+                    'python',
+                    'python3',
+                    'curl',
+                    'wget',
+                    'git',
+                    'docker',
+                    'kubectl',
+                    'mkdir',
+                    'rm',
+                    'cp',
+                    'mv',
+                    'find',
+                    'grep',
+                    'awk',
+                    'sed',
+                    'ps',
+                    'top',
+                    'df',
+                    'du',
+                    'free',
+                    'ping',
+                    'whoami',
+                    'id',
+                    'pwd',
+                    'clear',
+                    'exit',
+                    'bash',
+                    'sh',
+                    'zsh',
+                    'htop',
+                    'neofetch',
+                    'lscpu',
+                    'lsmem',
+                    'lsusb',
+                    'lspci',
+                }
                 has_shell = any(c in task for c in '";|&`$()[]{}<>!#=\\')
                 if first not in known and not has_shell and '/' not in task:
                     print("   ⏭️  Пропущено: не команда")
@@ -90,7 +155,9 @@ def main():
                 if len(result["out"].strip().split("\n")) > 6:
                     print("      ...")
             else:
-                print(f"   ❌ Ошибка: {result.get('error', result.get('err','?'))[:100]}")
+                print(
+                    f"   ❌ Ошибка: {result.get('error', result.get('err','?'))[:100]}"
+                )
             print("-" * 60)
         except urllib.error.URLError as e:
             print(f"❌ Нет связи с API: {e.reason}")

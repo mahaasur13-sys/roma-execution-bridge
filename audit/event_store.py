@@ -1,4 +1,5 @@
 """Audit event store — append-only, PG-backed."""
+
 from __future__ import annotations
 
 import uuid
@@ -8,27 +9,86 @@ import db_adapter as db
 logger = logging.getLogger("roma.audit")
 
 
-def write_event(tenant_id: str, event_type: str, entity_type: str,
-                entity_id: str, data: dict) -> dict:
+def write_event(
+    tenant_id: str, event_type: str, entity_type: str, entity_id: str, data: dict
+) -> dict:
     """Write a single audit event. Returns {id, …}."""
     eid = str(uuid.uuid4())
-    return db.insert_audit_event(eid, tenant_id, event_type, entity_type, entity_id, data)
+    return db.insert_audit_event(
+        eid, tenant_id, event_type, entity_type, entity_id, data
+    )
 
 
-def on_decision_allowed(tenant_id: str, decision_id: str, request_id: str,
-                        quota: int, cost: float) -> dict:
+def event_exists(tenant_id: str, event_type: str, entity_id: str) -> bool:
+    """Есть ли уже событие (tenant_id, event_type, entity_id) в леджере."""
+    return bool(db.audit_event_exists(tenant_id, event_type, entity_id))
+
+
+def write_event_once(
+    tenant_id: str,
+    event_type: str,
+    entity_type: str,
+    entity_id: str,
+    data: dict,
+    *,
+    dedupe: bool = True,
+) -> dict:
+    """Идемпотентная запись: повторный проход не дублирует тот же факт.
+
+    G-CONFIRM-LEDGER-DOUBLE-WRITE (P3.9, исход А дознания №45): подтверждённая
+    задача проходит `route_job` дважды (submit → execute_job), и каждое
+    прохождение писало своё событие с новым uuid4 — на один факт подтверждения
+    получалось два иммутабельных аудит-события. Здесь второй проход пропускается
+    (структурно наблюдаемо возвратом `skipped: True`); чужие задачи не склеиваются —
+    ключ включает entity_id.
+
+    T2 (фоллоу-ап тредов #93): при `dedupe=False` — у вызывающего нет устойчивого
+    ключа (например, у задачи нет job_id) — запись выполняется ВСЕГДА. Нет ключа,
+    нет идемпотентности, но нет и склейки чужих фактов: разные неключевые события
+    не сливаются в одно под общим entity_id.
+    """
+    if not dedupe:
+        logger.debug(
+            "audit event written without idempotency key: %s tenant=%s entity=%s",
+            event_type,
+            tenant_id,
+            entity_id,
+        )
+        return write_event(tenant_id, event_type, entity_type, entity_id, data)
+
+    if event_exists(tenant_id, event_type, entity_id):
+        logger.debug(
+            "audit event skipped (already present): %s tenant=%s entity=%s",
+            event_type,
+            tenant_id,
+            entity_id,
+        )
+        return {"id": None, "skipped": True}
+    return write_event(tenant_id, event_type, entity_type, entity_id, data)
+
+
+def on_decision_allowed(
+    tenant_id: str, decision_id: str, request_id: str, quota: int, cost: float
+) -> dict:
     """Shortcut: write decision.allowed audit event."""
     return write_event(
-        tenant_id, "decision.allowed", "decision", decision_id,
+        tenant_id,
+        "decision.allowed",
+        "decision",
+        decision_id,
         {"request_id": request_id, "quota_remaining": quota, "estimated_cost": cost},
     )
 
 
-def on_decision_denied(tenant_id: str, decision_id: str, request_id: str,
-                       reason: str) -> dict:
+def on_decision_denied(
+    tenant_id: str, decision_id: str, request_id: str, reason: str
+) -> dict:
     """Shortcut: write decision.denied audit event."""
     return write_event(
-        tenant_id, "decision.denied", "decision", decision_id,
+        tenant_id,
+        "decision.denied",
+        "decision",
+        decision_id,
         {"request_id": request_id, "reason": reason},
     )
 
@@ -36,6 +96,9 @@ def on_decision_denied(tenant_id: str, decision_id: str, request_id: str,
 def on_job_created(tenant_id: str, job_id: str, decision_id: str) -> dict:
     """Shortcut: write job.created audit event."""
     return write_event(
-        tenant_id, "job.created", "job", job_id,
+        tenant_id,
+        "job.created",
+        "job",
+        job_id,
         {"decision_id": decision_id},
     )

@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+"""R5: доказательство ветки budget_exceeded контролируемым прогоном (без боевого кластера).
+
+Выбор (R5): unit/behavioral-тест вместо живого прогона со остановкой PG.
+Обоснование: живой прогон требует остановки боевого кластера и последующего ручного
+подъёма — риск для append-only ledger и для доступности; бюджетная логика
+детерминирована, поэтому проверяется изолированно (pg_is_ready/start_cluster
+подменяются, никаких обращений к PostgreSQL).
+
+Что проверяется:
+  1) при restarts_last_hour >= RESTART_BUDGET_PER_HOUR и pg_up=0 событие ровно
+     `pg_down_budget_exceeded` (action=none);
+  2) `start_cluster` НЕ вызывается (кластер не поднимается при исчерпанном бюджете);
+  3) state["budget_exceeded"] == True.
+
+Запуск:  python3 test_budget_exceeded.py     (exit 0 = доказано)
+"""
+from __future__ import annotations
+
+import contextlib
+import datetime
+import importlib.util
+import io
+import json
+import pathlib
+import sys
+import tempfile
+
+HERE = pathlib.Path(__file__).resolve().parent
+
+
+def load_watchdog():
+    spec = importlib.util.spec_from_file_location("pg_watchdog_under_test", HERE / "pg_watchdog.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def main() -> int:
+    wd = load_watchdog()
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="r5_budget_"))
+    wd.STATE_DIR = str(tmp)
+    wd.STATE_PATH = str(tmp / "state.json")
+    wd.LOG_PATH = str(tmp / "watchdog.log")
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    recent = [(now - datetime.timedelta(minutes=m)).isoformat(timespec="seconds").replace("+00:00", "Z")
+              for m in (1, 5, 10, 20, 30)]
+    (tmp / "state.json").write_text(json.dumps({
+        "restarts": recent,
+        "restarts_total": 5,
+        "ledger_baseline": 309,
+        "was_down": False,
+    }), encoding="utf-8")
+
+    calls: list[str] = []
+
+    def fake_start_cluster() -> bool:
+        calls.append("start_cluster")
+        return True
+
+    wd.pg_is_ready = lambda: False          # кластер «лежит»
+    wd.start_cluster = fake_start_cluster   # реальный pg_ctlcluster не вызывается
+    wd.ledger_rows = lambda: None           # к боевой БД не ходим
+
+    cycles = {"n": 0}
+    real_sleep = wd.time.sleep
+
+    def fake_sleep(_seconds):
+        cycles["n"] += 1
+        if cycles["n"] >= 2:                # двух циклов достаточно
+            raise SystemExit(0)
+        real_sleep(0)
+
+    wd.time.sleep = fake_sleep
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        try:
+            wd.main()
+        except SystemExit:
+            pass
+
+    events = [json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")]
+    budget_events = [e for e in events if e.get("event") == "pg_down_budget_exceeded"]
+    state = json.loads((tmp / "state.json").read_text(encoding="utf-8"))
+    log_lines = (tmp / "watchdog.log").read_text(encoding="utf-8").strip().splitlines()
+
+    print("== R5 доказательство: budget_exceeded ==")
+    print(f"циклов: {cycles['n']} · бюджет/час: {wd.RESTART_BUDGET_PER_HOUR} · "
+          f"restarts_last_hour: {len(recent)}")
+    for e in budget_events[:2]:
+        print("событие :", json.dumps(e, ensure_ascii=False))
+    print(f"start_cluster вызовов: {len(calls)}  (ожидаем 0 — кластер НЕ поднимался)")
+    print(f"state.budget_exceeded: {state.get('budget_exceeded')}")
+    print("строка журнала (persistent LOG_PATH):")
+    for l in log_lines:
+        if "budget" in l:
+            print("  " + l)
+
+    ok = bool(budget_events) and not calls and state.get("budget_exceeded") is True
+    print("R5 VERDICT:", "PASS — ветка budget_exceeded доказана" if ok else "FAIL")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

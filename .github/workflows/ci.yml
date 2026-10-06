@@ -16,13 +16,67 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install deps
-        run: pip install typer rich requests pyyaml plotly dash pytest pytest-cov
+        # G-CI-DEPS-INCOMPLETE: список зависимостей живёт в репозитории
+        # (requirements-ci.txt), а не в этом файле — иначе он разъезжается с деревом.
+        run: pip install -r requirements-ci.txt
       - name: Compile check
         run: |
           find . -name "*.py" -not -path "./__pycache__/*" -exec python -m py_compile {} + 2>&1 | tail -5
           echo "Compile OK"
+      - name: Import smoke (repo-wide, без env/GPU)
+        run: |
+          python -c "import gpu_worker.connector; print('import-smoke OK: gpu_worker.connector')"
+          python -c "import scheduler.roma_scheduler; print('import-smoke OK: scheduler.roma_scheduler')"
       - name: Run tests
-        run: python3 test_ci.py
+        run: python3 scripts/ci_smoke.py
+  pytest-suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # G-CI-PG-CANON: реальный PostgreSQL вместо скипов. Без него PG-зависимые
+    # проверки (ledger-триггеры, money-path, миграции) уходили в env-skip, и
+    # «зелёный» CI не подтверждал ни покрытие money-path, ни схему.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: roma
+          # CI-эфемерал, localhost: значение живёт только внутри job'а
+          POSTGRES_PASSWORD: ci-ephemeral-localhost
+          POSTGRES_DB: roma_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U roma -d roma_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # CI-эфемерал, localhost: тестовая БД roma_test (изоляция A1: точное имя)
+      PG_DSN: "postgresql://roma:ci-ephemeral-localhost@localhost:5432/roma_test"
+      # CI-эфемерал, не секрет: базис измерения тот же, что в каноне ноды — ветка
+      # GPU-бэкенда исполняется (без VAST_KEY она честно уходит в local с
+      # предупреждением). Без этой переменной знаменатель покрытия иной, и
+      # сравнение CI с каноном было бы сравнением разных областей измерения.
+      ROMA_EXECUTION_BACKEND: vastai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        # G-CI-DEPS-INCOMPLETE: тот же список, что в test-джобе (единый источник).
+        run: pip install -r requirements-ci.txt
+      - name: Apply migrations to CI test DB (реальный вход миграций, без глушителей)
+        run: python scripts/run_migrations.py
+      - name: "Full suite — repo-wide (A-2/N7b: область прогона = весь репозиторий)"
+        run: |
+          python -m pytest -q -rs --junitxml=junit.xml
+          python scripts/ci_junit_smoke.py junit.xml
+      - name: Single-file parity gate (P1-C)
+        run: bash ci/parity_check.sh
+      - name: Coverage ratchet gate (P1-D)
+        run: bash ci/coverage_gate.sh
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -31,9 +85,13 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install ruff
-        run: pip install ruff
+        # G-TOOL-PIN: точный пин версии. Без него CI получал свежий ruff
+        # (0.16.8: 1286 замечаний на неизменном дереве, run 35697239211) —
+        # «зелёный lint» зависел от даты запуска, а не от содержимого коммита.
+        # Версия ниже — та, на которой дерево зелёное на ноде (ruff 0.15.20).
+        run: pip install ruff==0.15.20
       - name: Lint
-        run: ruff check . --output-format=full 2>&1 | head -20 || true
+        run: ruff check . --output-format=concise
 
   helm-validate:
     runs-on: ubuntu-latest
@@ -65,3 +123,48 @@ jobs:
         run: |
           grep -c "kind: PodDisruptionBudget" /tmp/roma-template.yaml
           echo "PDB count OK"
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Secret scan (gitleaks)
+        uses: docker://zricethezav/gitleaks:latest
+        with:
+          args: detect --source=/github/workspace --redact --config=/github/workspace/.gitleaks.toml --exit-code=1
+
+  # G-CI-SOFTENED (2026-09-22): обе security-джобы были смягчены ДВАЖДЫ —
+  # `continue-on-error: true` (джоба не может покраснеть) и `|| echo "... non-blocking"`
+  # (команда не может вернуть ненулевой код). Из-за этого pip-audit-шаг с
+  # неразрешимым входом (ResolutionImpossible в requirements-worker.txt) выглядел
+  # зелёным. Смягчение снято: ворота твёрдые. Профиль bandit — тот же, что в
+  # security.yml (единственный владелец профиля severity): money path medium+,
+  # repo-wide high. Находки Low/Medium вне money path ворот не открывали никогда;
+  # это зарегистрированный долг, а не молчаливый пропуск.
+  pip-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: pip-audit (enforced — любая известная уязвимость валит джобу)
+        run: |
+          pip install "pip-audit==2.7.3"
+          pip-audit -r requirements-worker.txt --progress-spinner off
+
+  bandit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: bandit — money path (medium+)
+        run: |
+          pip install "bandit==1.8.0"
+          bandit -r billing/ routers/ auth/ monitoring/ security/ main.py db_adapter.py -ll -q
+      - name: bandit — repo-wide (high only)
+        run: bandit -r . -x ./.venv,./node_modules,./tests,./.git -lll -q

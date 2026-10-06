@@ -4,6 +4,7 @@ The worker (gpu_worker/server.py) exposes /health, /execute, /status/{job_id}.
 If the worker is down or reports gpu_available=false, dispatch returns an honest
 status=failed with backend="gpu_worker" (no silent fallback to local).
 """
+
 from __future__ import annotations
 
 import logging
@@ -81,11 +82,18 @@ class GpuWorkerBackend(BaseBackend):
             "worker_id": data.get("worker_id"),
         }
 
-    async def run_command(self, ctx: JobContext, command: str, timeout: int = 600) -> dict:
+    async def run_command(
+        self, ctx: JobContext, command: str, timeout: int = 600
+    ) -> dict:
         url = _worker_url()
         payload = {"job_id": ctx.job_id, "command": command, "timeout": timeout}
         try:
-            resp = requests.post(f"{url}/execute", json=payload, headers=self._worker_headers(), timeout=timeout + 30)
+            resp = requests.post(
+                f"{url}/execute",
+                json=payload,
+                headers=self._worker_headers(),
+                timeout=timeout + 30,
+            )
         except Exception as exc:
             return {"status": "failed", "output": "", "error": str(exc)}
 
@@ -95,7 +103,11 @@ class GpuWorkerBackend(BaseBackend):
                 detail = resp.json().get("detail", "")
             except Exception:
                 pass
-            return {"status": "failed", "output": "", "error": detail or f"HTTP {resp.status_code}"}
+            return {
+                "status": "failed",
+                "output": "",
+                "error": detail or f"HTTP {resp.status_code}",
+            }
 
         data = resp.json()
         worker_status = data.get("status", "failed")  # success | failed | timeout
@@ -113,7 +125,11 @@ class GpuWorkerBackend(BaseBackend):
         except Exception as exc:
             return {"status": "failed", "job_id": job_id, "message": str(exc)}
         if resp.status_code != 200:
-            return {"status": "failed", "job_id": job_id, "message": f"HTTP {resp.status_code}"}
+            return {
+                "status": "failed",
+                "job_id": job_id,
+                "message": f"HTTP {resp.status_code}",
+            }
         # One-shot worker: signal "running" + host so the caller triggers run_command.
         return {"status": "running", "job_id": job_id, "host": url}
 

@@ -1,0 +1,34 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /var/lib/loki/positions.yaml
+
+clients:
+  - url: http://localhost:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: system
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: varlogs
+          __path__: /var/log/*log
+
+  - job_name: zo_services
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: zo_services
+          __path__: /dev/shm/*.log
+
+  - job_name: pg_watchdog_persistent
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: pg_watchdog
+          __path__: /var/lib/pg-watchdog/*.log

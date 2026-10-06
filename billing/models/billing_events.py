@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """ROMA Billing Events — Core billing event definitions for GPU usage."""
+
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
 from enum import Enum
+
 
 class BillingEventType(Enum):
     JOB_SUBMITTED = "job.submitted"
@@ -16,6 +18,7 @@ class BillingEventType(Enum):
     INVOICE_FINALIZED = "invoice.finalized"
     PAYMENT_SUCCEEDED = "payment.succeeded"
     PAYMENT_FAILED = "payment.failed"
+
 
 @dataclass
 class BillingEvent:
@@ -40,6 +43,7 @@ class BillingEvent:
             "tenant_id": self.tenant_id,
         }
 
+
 class BillingEventStore:
     def __init__(self):
         self._events: list[BillingEvent] = []
@@ -54,12 +58,17 @@ class BillingEventStore:
     def get_for_tenant(self, tenant_id: str) -> list[BillingEvent]:
         return self._by_tenant.get(tenant_id, [])
 
-    def get_in_range(self, tenant_id: str, start: float, end: float) -> list[BillingEvent]:
-        return [e for e in self.get_for_tenant(tenant_id) if start <= e.timestamp <= end]
+    def get_in_range(
+        self, tenant_id: str, start: float, end: float
+    ) -> list[BillingEvent]:
+        return [
+            e for e in self.get_for_tenant(tenant_id) if start <= e.timestamp <= end
+        ]
 
     def last_event(self, tenant_id: str) -> Optional[BillingEvent]:
         tenant_events = self.get_for_tenant(tenant_id)
         return tenant_events[-1] if tenant_events else None
+
 
 @dataclass
 class Invoice:

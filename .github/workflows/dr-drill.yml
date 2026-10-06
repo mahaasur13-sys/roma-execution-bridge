@@ -61,6 +61,11 @@ jobs:
             - name: minio
               image: minio/minio:latest
               args: ["server", "/data"]
+              env:
+              - name: MINIO_ROOT_USER
+                value: ${{ secrets.MINIO_ROOT_USER }}
+              - name: MINIO_ROOT_PASSWORD
+                value: ${{ secrets.MINIO_ROOT_PASSWORD }}
               ports:
               - containerPort: 9000
               volumeMounts:
@@ -89,7 +94,7 @@ jobs:
           velero install \
             --provider aws \
             --bucket velero-bucket \
-            --secret-file <(echo -e "[default]\naws_access_key_id=minioadmin\naws_secret_access_key=minioadmin") \
+            --secret-file <(echo -e "[default]\naws_access_key_id=${{ secrets.MINIO_ROOT_USER }}\naws_secret_access_key=${{ secrets.MINIO_ROOT_PASSWORD }}") \
             --backup-location-config region=us-east-1,s3ForcePathStyle=true,s3Url=http://minio.velero:9000 \
             --use-volume-snapshots=false \
             --wait

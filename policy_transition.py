@@ -1,4 +1,5 @@
 """DecisionOS — Status Transition Guard (root-level, sandbox-safe)."""
+
 TRANSITION_GRAPH = {
     "queued": ["running", "cancelled"],
     "running": ["completed", "failed", "cancelled"],
@@ -15,4 +16,7 @@ def validate_transition(current_status: str, new_status: str) -> dict:
     allowed_targets = TRANSITION_GRAPH[current_status]
     if new_status in allowed_targets:
         return {"allowed": True, "reason": "ok"}
-    return {"allowed": False, "reason": f"transition_denied: {current_status} → {new_status} invalid"}
+    return {
+        "allowed": False,
+        "reason": f"transition_denied: {current_status} → {new_status} invalid",
+    }

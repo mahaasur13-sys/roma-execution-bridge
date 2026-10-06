@@ -159,7 +159,11 @@ func (c *ROMAClient) GetUsage() (*BillingUsage, error) {
 // ═══════════════════════════════════════════════════════════════════════
 
 func main() {
-	client := NewROMAClient(BaseURL, "roma-demo-key-2026")
+	apiKey := os.Getenv("ROMA_API_KEY")
+	if apiKey == "" {
+		apiKey = "YOUR_API_KEY"
+	}
+	client := NewROMAClient(BaseURL, apiKey)
 
 	// 1. Check balance before submitting
 	usage, err := client.GetUsage()

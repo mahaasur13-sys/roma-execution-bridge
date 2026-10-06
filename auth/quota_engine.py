@@ -1,27 +1,43 @@
 #!/usr/bin/env python3
-"""ROMA Quota Engine — Per-tenant quota tracking and enforcement."""
+"""ROMA Quota Engine — Per-tenant quota tracking and enforcement.
+
+G-QUOTA-SOURCE-FRAGMENTED (P3 PRICING-INTEGRITY / C3): квоты больше не хранятся
+литералами в этом модуле. Единственный источник — `config/plans.json` (через
+`plan_source`), где тир описан двумя полями: jobs_per_month и gpu_s_per_job.
+Месячный ресурс — производное (jobs × per_job), отдельным литералом не хранится.
+Здесь остаётся только чтение-вывод: PLAN_QUOTAS строится из источника.
+"""
+
 from typing import Dict
+
+from plan_source import plan_limits
+
+
+def _derived_plan_quotas() -> Dict[str, int]:
+    """GPU-секунды/месяц по тарифу — вывод из plans.json, не литерал."""
+    quotas: Dict[str, int] = {}
+    for plan in ("free", "pro", "enterprise"):
+        quotas[plan.upper()] = plan_limits(plan).gpu_s_per_month
+    return quotas
+
 
 class QuotaEngine:
     """
     Tracks per-tenant quota usage against plan limits.
     Enforces GPU-second quotas per billing cycle.
     """
-    PLAN_QUOTAS = {
-        "FREE":       360_000,    # GPU-seconds / month
-        "PRO":       3_600_000,
-        "ENTERPRISE": 36_000_000,
-    }
+
+    PLAN_QUOTAS = _derived_plan_quotas()
     PLAN_PRIORITY = {
-        "FREE":       1,
-        "PRO":        2,
+        "FREE": 1,
+        "PRO": 2,
         "ENTERPRISE": 3,
     }
 
     def __init__(self, metering_engine=None):
         self.metering = metering_engine
-        self.usage: Dict[str, float] = {}     # tenant_id → GPU-sec used
-        self.cycle_start: Dict[str, float] = {} # tenant_id → cycle start
+        self.usage: Dict[str, float] = {}  # tenant_id → GPU-sec used
+        self.cycle_start: Dict[str, float] = {}  # tenant_id → cycle start
 
     def get_usage(self, tenant_id: str) -> float:
         return self.usage.get(tenant_id, 0.0)
@@ -29,9 +45,14 @@ class QuotaEngine:
     def get_limit(self, tenant_id: str, plan: str = "FREE") -> float:
         return self.PLAN_QUOTAS.get(plan, 0.0)
 
-    def check_quota(self, tenant_id: str, requested: float, plan: str = "FREE") -> tuple[bool, str]:
+    def check_quota(
+        self, tenant_id: str, requested: float, plan: str = "FREE"
+    ) -> tuple[bool, str]:
         used = self.get_usage(tenant_id)
         limit = self.get_limit(tenant_id, plan)
+        # Отрицательное значение = безлимит (семантика источника), а не «0 остатка».
+        if limit < 0:
+            return True, f"Unlimited ({plan}): {used:.0f} GPU-s used"
         if used + requested > limit:
             return False, f"Quota exceeded: {used:.0f}/{limit:.0f} GPU-s"
         return True, "OK"
@@ -47,8 +68,9 @@ class QuotaEngine:
     def quota_headers(self, tenant_id: str, plan: str = "FREE") -> dict:
         used = self.get_usage(tenant_id)
         limit = self.get_limit(tenant_id, plan)
+        remaining = -1 if limit < 0 else int(max(0, limit - used))
         return {
             "X-ROMA-Quota-Used": str(int(used)),
             "X-ROMA-Quota-Limit": str(int(limit)),
-            "X-ROMA-Quota-Remaining": str(int(max(0, limit - used))),
+            "X-ROMA-Quota-Remaining": str(remaining),
         }

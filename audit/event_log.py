@@ -1,8 +1,10 @@
 """ROMA Audit Log — Immutable append-only event log."""
+
 import time
 import json
 import csv
 import io
+
 
 class AuditLog:
     def __init__(self):
@@ -18,12 +20,17 @@ class AuditLog:
             "org_id": org_id,
             "event_type": event_type,
             "metadata": metadata,
-            "immutable": True
+            "immutable": True,
         }
         self._events.append(entry)
 
-    def query_events(self, org_id: str = None, user_id: str = None,
-                     event_type: str = None, limit: int = 100) -> list:
+    def query_events(
+        self,
+        org_id: str = None,
+        user_id: str = None,
+        event_type: str = None,
+        limit: int = 100,
+    ) -> list:
         results = self._events
         if org_id:
             results = [e for e in results if e["org_id"] == org_id]
@@ -35,7 +42,9 @@ class AuditLog:
 
     def export_json(self, org_id: str) -> str:
         events = self.query_events(org_id=org_id, limit=10000)
-        return json.dumps({"org_id": org_id, "events": events, "count": len(events)}, indent=2)
+        return json.dumps(
+            {"org_id": org_id, "events": events, "count": len(events)}, indent=2
+        )
 
     def export_csv(self, org_id: str) -> str:
         events = self.query_events(org_id=org_id, limit=10000)
@@ -50,12 +59,15 @@ class AuditLog:
         events = self.query_events(org_id=org_id, limit=10000)
         return {
             "org_id": org_id,
-            "period": {"from": events[0]["timestamp"] if events else None,
-                       "to": events[-1]["timestamp"] if events else None},
+            "period": {
+                "from": events[0]["timestamp"] if events else None,
+                "to": events[-1]["timestamp"] if events else None,
+            },
             "total_events": len(events),
             "event_types": list(set(e["event_type"] for e in events)),
-            "report_url": f"/audit/org/{org_id}/report.pdf"
+            "report_url": f"/audit/org/{org_id}/report.pdf",
         }
+
 
 if __name__ == "__main__":
     log = AuditLog()

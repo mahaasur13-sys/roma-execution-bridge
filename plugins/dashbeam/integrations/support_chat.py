@@ -13,6 +13,7 @@ from enum import StrEnum
 
 class DashBeamChatEvent(StrEnum):
     """WebSocket events for DashBeam chat integration."""
+
     TICKET_CREATED = "dashbeam:ticket:created"
     TICKET_ACCEPTED = "dashbeam:ticket:accepted"
     TICKET_COMPLETED = "dashbeam:ticket:completed"

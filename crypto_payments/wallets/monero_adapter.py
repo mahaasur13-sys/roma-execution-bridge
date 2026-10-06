@@ -1,4 +1,5 @@
 """Crypto Payments — Monero Wallet Adapter (monero-wallet-rpc + Feather)."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -18,8 +19,12 @@ class MoneroWalletAdapter:
     All interactions go through monero-wallet-rpc (JSON-RPC 2.0).
     """
 
-    def __init__(self, config: MoneroViewOnlyConfig | None = None, wallet_rpc_url: str = "") -> None:
-        self._config = config or MoneroViewOnlyConfig(primary_address="", view_key_private="")
+    def __init__(
+        self, config: MoneroViewOnlyConfig | None = None, wallet_rpc_url: str = ""
+    ) -> None:
+        self._config = config or MoneroViewOnlyConfig(
+            primary_address="", view_key_private=""
+        )
         self._rpc_url = wallet_rpc_url or self._config.wallet_rpc_url
         self._http = httpx.AsyncClient(timeout=30)
         self._subaddress_counter: dict[str, int] = {}
@@ -40,10 +45,13 @@ class MoneroWalletAdapter:
     ) -> MoneroSubaddress:
         key = f"{wallet_id}:{account_index}"
         index = self._subaddress_counter.get(key, 0)
-        result = await self._rpc_call("create_address", {
-            "account_index": account_index,
-            "label": label or f"DecisionOS-{wallet_id[:8]}",
-        })
+        result = await self._rpc_call(
+            "create_address",
+            {
+                "account_index": account_index,
+                "label": label or f"DecisionOS-{wallet_id[:8]}",
+            },
+        )
         data = result.get("result", {})
         self._subaddress_counter[key] = index + 1
         logger.info("monero_subaddress_created", wallet_id=wallet_id, index=index)
@@ -59,7 +67,9 @@ class MoneroWalletAdapter:
         result = await self._rpc_call("get_balance", {"account_index": account_index})
         return result.get("result", {})
 
-    async def get_transfers(self, account_index: int = 0, min_confirmations: int | None = None) -> list[dict]:
+    async def get_transfers(
+        self, account_index: int = 0, min_confirmations: int | None = None
+    ) -> list[dict]:
         params: dict[str, Any] = {
             "account_index": account_index,
             "in": True,
@@ -69,16 +79,23 @@ class MoneroWalletAdapter:
         result = await self._rpc_call("get_transfers", params)
         transfers = result.get("result", {}).get("in", [])
         if min_confirmations:
-            transfers = [t for t in transfers if t.get("confirmations", 0) >= min_confirmations]
+            transfers = [
+                t for t in transfers if t.get("confirmations", 0) >= min_confirmations
+            ]
         return transfers
 
     async def import_view_only(self, restore_height: int = 0) -> dict[str, Any]:
-        result = await self._rpc_call("generate_from_keys", {
-            "restore_height": restore_height,
-            "address": self._config.primary_address,
-            "viewkey": self._config.view_key_private,
-        })
-        logger.info("monero_view_only_imported", address=self._config.primary_address[:12])
+        result = await self._rpc_call(
+            "generate_from_keys",
+            {
+                "restore_height": restore_height,
+                "address": self._config.primary_address,
+                "viewkey": self._config.view_key_private,
+            },
+        )
+        logger.info(
+            "monero_view_only_imported", address=self._config.primary_address[:12]
+        )
         return result.get("result", {})
 
     async def close(self) -> None:

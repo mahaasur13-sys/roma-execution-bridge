@@ -1,4 +1,5 @@
 """DecisionOS Support Chat — 12 smoke tests."""
+
 from __future__ import annotations
 
 from uuid import uuid4
@@ -7,7 +8,13 @@ import pytest
 
 from support_chat.models import (
     CsatRating,
-    TicketStatus, TicketPriority, ParticipantRole, CreateTicketRequest, CreateMessageRequest, AssignTicketRequest, CsatSubmitRequest,
+    TicketStatus,
+    TicketPriority,
+    ParticipantRole,
+    CreateTicketRequest,
+    CreateMessageRequest,
+    AssignTicketRequest,
+    CsatSubmitRequest,
 )
 from support_chat.service import SupportTicketService
 from support_chat.chat_service import ChatService
@@ -47,7 +54,9 @@ class TestTicketCreation:
         assert result.tenant_id == "t1"
 
     @pytest.mark.asyncio
-    async def test_02_create_ticket_with_crypto_context(self, service: SupportTicketService) -> None:
+    async def test_02_create_ticket_with_crypto_context(
+        self, service: SupportTicketService
+    ) -> None:
         """Smoke 2: Create ticket linked to crypto invoice."""
         invoice_id = uuid4()
         req = CreateTicketRequest(
@@ -57,14 +66,20 @@ class TestTicketCreation:
             priority=TicketPriority.CRITICAL,
             context_type="crypto_invoice",
             context_id=invoice_id,
-            context_data={"invoice_status": "pending", "network": "TRC20", "amount": "49.00"},
+            context_data={
+                "invoice_status": "pending",
+                "network": "TRC20",
+                "amount": "49.00",
+            },
         )
         result = await service.create_ticket(req, "user1")
         assert result.context_type == "crypto_invoice"
         assert result.context_id == invoice_id
 
     @pytest.mark.asyncio
-    async def test_03_create_ticket_with_monero_context(self, service: SupportTicketService) -> None:
+    async def test_03_create_ticket_with_monero_context(
+        self, service: SupportTicketService
+    ) -> None:
         """Smoke 3: Create ticket linked to Monero wallet."""
         wallet_id = uuid4()
         req = CreateTicketRequest(
@@ -84,7 +99,9 @@ class TestTicketCreation:
         assert result.context_type == "crypto_wallet"
 
     @pytest.mark.asyncio
-    async def test_04_ticket_tenant_isolation(self, service: SupportTicketService) -> None:
+    async def test_04_ticket_tenant_isolation(
+        self, service: SupportTicketService
+    ) -> None:
         """Smoke 4: Tenant isolation — tenant A can't see tenant B tickets."""
         req1 = CreateTicketRequest(tenant_id="t1", subject="T1 ticket")
         req2 = CreateTicketRequest(tenant_id="t2", subject="T2 ticket")
@@ -95,7 +112,12 @@ class TestTicketCreation:
         t2_tickets = service.list_tickets("t2")
         assert t1_tickets.total == 1
         assert t2_tickets.total == 1
-        assert service.get_ticket(str(list(service._tickets.values())[0].ticket_id), tenant_id="t2") is None
+        assert (
+            service.get_ticket(
+                str(list(service._tickets.values())[0].ticket_id), tenant_id="t2"
+            )
+            is None
+        )
 
 
 class TestMessages:
@@ -117,18 +139,28 @@ class TestMessages:
         assert msg.body == "Hello, I need help"
 
     @pytest.mark.asyncio
-    async def test_06_internal_note_hidden_from_tenant(self, service: SupportTicketService, chat_service: ChatService) -> None:
+    async def test_06_internal_note_hidden_from_tenant(
+        self, service: SupportTicketService, chat_service: ChatService
+    ) -> None:
         """Smoke 6: Internal notes visible only to agents."""
         req = CreateTicketRequest(tenant_id="t1", subject="Test")
         ticket = await service.create_ticket(req, "user1")
 
-        await service.assign_agent(str(ticket.ticket_id), AssignTicketRequest(agent_id="agent1"))
-        await chat_service.add_internal_note(ticket.ticket_id, "agent1", "Customer might be fraud")
+        await service.assign_agent(
+            str(ticket.ticket_id), AssignTicketRequest(agent_id="agent1")
+        )
+        await chat_service.add_internal_note(
+            ticket.ticket_id, "agent1", "Customer might be fraud"
+        )
 
-        visible_msgs = chat_service.get_visible_messages(str(ticket.ticket_id), ParticipantRole.TENANT_USER.value)
+        visible_msgs = chat_service.get_visible_messages(
+            str(ticket.ticket_id), ParticipantRole.TENANT_USER.value
+        )
         assert not any(m.is_internal for m in visible_msgs)
 
-        agent_msgs = chat_service.get_visible_messages(str(ticket.ticket_id), ParticipantRole.SUPPORT_AGENT.value)
+        agent_msgs = chat_service.get_visible_messages(
+            str(ticket.ticket_id), ParticipantRole.SUPPORT_AGENT.value
+        )
         assert any(m.is_internal for m in agent_msgs)
 
 
@@ -139,16 +171,22 @@ class TestStatusTransitions:
         """Smoke 7: Valid status transition open → in_progress."""
         req = CreateTicketRequest(tenant_id="t1", subject="Test")
         ticket = await service.create_ticket(req, "user1")
-        updated = await service.transition_status(str(ticket.ticket_id), TicketStatus.IN_PROGRESS)
+        updated = await service.transition_status(
+            str(ticket.ticket_id), TicketStatus.IN_PROGRESS
+        )
         assert updated.status == TicketStatus.IN_PROGRESS
 
     @pytest.mark.asyncio
-    async def test_08_invalid_transition_blocked(self, service: SupportTicketService) -> None:
+    async def test_08_invalid_transition_blocked(
+        self, service: SupportTicketService
+    ) -> None:
         """Smoke 8: Invalid transition open → resolved blocked."""
         req = CreateTicketRequest(tenant_id="t1", subject="Test")
         ticket = await service.create_ticket(req, "user1")
         with pytest.raises(ValueError, match="Cannot transition from open"):
-            await service.transition_status(str(ticket.ticket_id), TicketStatus.RESOLVED)
+            await service.transition_status(
+                str(ticket.ticket_id), TicketStatus.RESOLVED
+            )
 
 
 class TestAgentAssignment:
@@ -158,7 +196,9 @@ class TestAgentAssignment:
         """Smoke 9: Assign agent to ticket."""
         req = CreateTicketRequest(tenant_id="t1", subject="Test")
         ticket = await service.create_ticket(req, "user1")
-        updated = await service.assign_agent(str(ticket.ticket_id), AssignTicketRequest(agent_id="agent42"))
+        updated = await service.assign_agent(
+            str(ticket.ticket_id), AssignTicketRequest(agent_id="agent42")
+        )
         assert updated.assigned_agent_id == "agent42"
         assert updated.status == TicketStatus.IN_PROGRESS
 
@@ -173,7 +213,9 @@ class TestCSAT:
         await service.transition_status(str(ticket.ticket_id), TicketStatus.IN_PROGRESS)
         await service.transition_status(str(ticket.ticket_id), TicketStatus.RESOLVED)
 
-        csat = await service.submit_csat(str(ticket.ticket_id), CsatSubmitRequest(score=5, comment="Great!"), "user1")
+        csat = await service.submit_csat(
+            str(ticket.ticket_id), CsatSubmitRequest(score=5, comment="Great!"), "user1"
+        )
         assert csat.score == 5
         assert csat.comment == "Great!"
 

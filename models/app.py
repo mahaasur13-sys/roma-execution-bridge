@@ -25,8 +25,18 @@ class RomaTaskInput(BaseModel):
     gpu_required: bool = Field(default=False)
     priority: int = Field(default=5, ge=1, le=10)
     execution_mode: str = Field(default="k8s_job")
-    backend: Optional[str] = Field(default=None, pattern="^(local|slurm|ray|tensordock|vastai|runpod|gpu_worker|aws_ec2)$")
-    instance_type: str = Field(default="any", description="GPU type: any, RTX 3060, A100, H100")
+    backend: Optional[str] = Field(
+        default=None,
+        pattern="^(local|slurm|ray|tensordock|vastai|runpod|gpu_worker|aws_ec2)$",
+    )
+    instance_type: str = Field(
+        default="any", description="GPU type: any, RTX 3060, A100, H100"
+    )
+    # G-CONFIRM-PASSTHROUGH-SCHED: подтверждение крупной сметы. Строгий boolean;
+    # отсутствие/иные формы флага подтверждением не считаются.
+    confirmed: bool = Field(
+        default=False, description="Подтверждение крупной сметы (REQUIRES_CONFIRMATION)"
+    )
 
 
 class RomaTaskResponse(BaseModel):
@@ -80,5 +90,6 @@ class ChatRequest(BaseModel):
 
 class TestAlertRequest(BaseModel):
     """Запрос на тестовую отправку алерта."""
+
     channel: str | None = None  # telegram, discord, email или None = все
     message: str = "🧪 Тестовый алерт ROMA Execution Bridge v2.1.0"

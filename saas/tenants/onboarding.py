@@ -1,4 +1,5 @@
 """saas.tenants.onboarding — Tenant onboarding wizard."""
+
 from __future__ import annotations
 
 import re
@@ -52,11 +53,15 @@ class OnboardingSession:
     stripe_onboarding_url: str = ""
     tenant_id: str = ""
     errors: list[str] = field(default_factory=list)
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
 
     def _validate_slug(self) -> bool:
         if not re.match(r"^[a-z0-9][a-z0-9-]{2,62}[a-z0-9]$", self.slug):
-            self.errors.append(f"Invalid slug: '{self.slug}' (use lowercase letters, numbers, hyphens)")
+            self.errors.append(
+                f"Invalid slug: '{self.slug}' (use lowercase letters, numbers, hyphens)"
+            )
             return False
         return True
 
@@ -68,12 +73,18 @@ class OnboardingSession:
 
     def _validate_revenue_share(self) -> bool:
         if not (5.0 <= self.revenue_share <= 30.0):
-            self.errors.append(f"Revenue share must be 5-30%, got {self.revenue_share}%")
+            self.errors.append(
+                f"Revenue share must be 5-30%, got {self.revenue_share}%"
+            )
             return False
         return True
 
-    def set_branding(self, app_name: str, primary_color: str = "#6366f1", **kwargs: Any) -> OnboardingSession:
-        self.branding = BrandingData(app_name=app_name, primary_color=primary_color, **kwargs)
+    def set_branding(
+        self, app_name: str, primary_color: str = "#6366f1", **kwargs: Any
+    ) -> OnboardingSession:
+        self.branding = BrandingData(
+            app_name=app_name, primary_color=primary_color, **kwargs
+        )
         self.step = OnboardingStep.BRANDING
         return self
 
@@ -118,7 +129,11 @@ class OnboardingSession:
         self.step = OnboardingStep.BILLING_SETUP
         return self, tenant
 
-    def start_stripe_onboarding(self, return_url: str = "https://dashboard.roma.ai/stripe/return", refresh_url: str = "https://dashboard.roma.ai/stripe/refresh") -> OnboardingSession:
+    def start_stripe_onboarding(
+        self,
+        return_url: str = "https://dashboard.roma.ai/stripe/return",
+        refresh_url: str = "https://dashboard.roma.ai/stripe/refresh",
+    ) -> OnboardingSession:
         self.stripe_onboarding_url = f"https://connect.stripe.com/oauth/authorize?response_type=code&client_id={{ROM_A_STOR E_CLIENT_ID}}&scope=read_write&redirect_uri={return_url}&state={self.tenant_id}"
         self.step = OnboardingStep.STRIPE_CONNECT
         return self
@@ -135,15 +150,31 @@ class OnboardingSession:
             "stripe_onboarding_url": self.stripe_onboarding_url,
             "progress": {
                 "basic_info": True,
-                "branding": self.step in (OnboardingStep.BRANDING, OnboardingStep.BILLING_SETUP, OnboardingStep.STRIPE_CONNECT, OnboardingStep.READY),
-                "billing_setup": self.step in (OnboardingStep.BILLING_SETUP, OnboardingStep.STRIPE_CONNECT, OnboardingStep.READY),
+                "branding": self.step
+                in (
+                    OnboardingStep.BRANDING,
+                    OnboardingStep.BILLING_SETUP,
+                    OnboardingStep.STRIPE_CONNECT,
+                    OnboardingStep.READY,
+                ),
+                "billing_setup": self.step
+                in (
+                    OnboardingStep.BILLING_SETUP,
+                    OnboardingStep.STRIPE_CONNECT,
+                    OnboardingStep.READY,
+                ),
                 "stripe_connect": self.step == OnboardingStep.READY,
             },
         }
 
 
 if __name__ == "__main__":
-    s = OnboardingSession(display_name="VEGA Cloud", slug="vega-kz", email="ops@vega.kz", revenue_share=15.0)
+    s = OnboardingSession(
+        display_name="VEGA Cloud",
+        slug="vega-kz",
+        email="ops@vega.kz",
+        revenue_share=15.0,
+    )
     s, tenant = s.create_tenant()
     print(f"Tenant: {tenant['id']}")
     print(f"Step: {s.step.value}")

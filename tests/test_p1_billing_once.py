@@ -23,6 +23,11 @@ from starlette.testclient import TestClient
 import db_adapter as db
 import main
 
+# G-CI-PG-CANON: класс env-скипа ставится ОДНИМ механизмом — маркером `pg` в conftest
+# (отсутствие PG_DSN → env-skip с тройкой issue/expiry), а не локальным skipif:
+# два разных порога на одно явление — источник дефекта (скип уходил в класс admission
+# и «зелёный» CI не отличал неисполненный money-path от осознанного скипа).
+
 
 def _uniq(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
@@ -31,6 +36,7 @@ def _uniq(prefix: str) -> str:
 @pytest.fixture(autouse=True)
 def _disable_background_worker(monkeypatch):
     """Prevent startup from launching the infinite poll_and_execute loop."""
+
     async def _noop():
         return None
 
@@ -41,9 +47,10 @@ def _disable_background_worker(monkeypatch):
 @pytest.fixture()
 def tenant(monkeypatch):
     """Seed one tenant with a known API key and bypass email verification."""
-    tenant_id = _uniq("t-bill")
+    tenant_id = _uniq("test-bill")
     key = _uniq("key-bill")
     db.seed_tenants({key: {"tenant_id": tenant_id, "name": "A"}})
+    main.billing_ledger.credit(tenant_id, 1.0)
     monkeypatch.setattr(main, "is_email_verified", lambda api_key: True)
     return {"tenant_id": tenant_id, "key": key}
 
@@ -51,6 +58,7 @@ def tenant(monkeypatch):
 def _count_debits(tenant_id: str, job_id: str) -> int:
     """Count DEBIT ledger entries attributed to a specific job_id."""
     import json
+
     n = 0
     for entry in main.billing_ledger.get_tenant_entries(tenant_id):
         meta = entry.get("metadata") or {}
@@ -65,8 +73,11 @@ def _seed_running_job(tenant_id: str) -> str:
     """Insert a job and move it to running with started_at set in the past."""
     jid = _uniq("job")
     db.insert_execution_job(
-        job_id=jid, decision_id=_uniq("dec"),
-        tenant_id=tenant_id, status="queued", payload={},
+        job_id=jid,
+        decision_id=_uniq("dec"),
+        tenant_id=tenant_id,
+        status="queued",
+        payload={},
     )
     db.update_execution_job(jid, status="running")  # sets started_at = now()
     time.sleep(1.1)  # ensure actual duration > 0 so a debit is applied
@@ -85,6 +96,7 @@ def test_submit_does_not_debit(tenant):
     assert _count_debits(tenant["tenant_id"], job_id) == 0
 
 
+@pytest.mark.pg  # G-CI-PG-CANON: env-skip без живого PG
 def test_complete_debits_exactly_once(tenant):
     job_id = _seed_running_job(tenant["tenant_id"])
     client = TestClient(main.app, raise_server_exceptions=False)
@@ -113,3 +125,19 @@ def test_worker_db_functions_exist(tenant):
     db.register_worker("w-bill-1", tenant["tenant_id"], {"gpu": 1})
     db.update_worker_heartbeat("w-bill-1")
     db.release_worker("w-bill-1")
+
+
+@pytest.mark.pg  # G-CI-PG-CANON: env-skip без живого PG
+def test_complete_without_funds_returns_402(monkeypatch):
+    """fail-closed: no CREDIT → /complete 402, no debit, status unchanged."""
+    tenant_id = _uniq("test-bill")
+    key = _uniq("key-bill")
+    db.seed_tenants({key: {"tenant_id": tenant_id, "name": "A"}})
+    monkeypatch.setattr(main, "is_email_verified", lambda api_key: True)
+    job_id = _seed_running_job(tenant_id)
+    client = TestClient(main.app, raise_server_exceptions=False)
+    r1 = client.post(f"/complete/{job_id}", headers={"X-API-Key": key})
+    assert r1.status_code == 402
+    assert _count_debits(tenant_id, job_id) == 0
+    job = db.get_execution_job(job_id)
+    assert job["status"] == "running"

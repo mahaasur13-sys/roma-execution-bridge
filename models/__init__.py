@@ -14,6 +14,7 @@ def _now() -> datetime:
 
 # ── Enums ──────────────────────────────────────────────
 
+
 class GateResult(str, Enum):
     ALLOWED = "allowed"
     DENIED = "denied"
@@ -29,6 +30,7 @@ class JobStatus(str, Enum):
 
 
 # ── Entities ───────────────────────────────────────────
+
 
 @dataclass
 class Tenant:

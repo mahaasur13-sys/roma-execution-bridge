@@ -18,6 +18,12 @@ import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from env_loader import load_env
+
+load_env()
+
 
 def _dsn() -> str | None:
     return os.environ.get("PG_DSN") or os.environ.get("DATABASE_URL")
@@ -31,15 +37,36 @@ def _migration_files() -> list[Path]:
 def _strip_txn_wrappers(sql: str) -> str:
     """Remove standalone BEGIN;/COMMIT; lines so the runner owns the transaction."""
     return "\n".join(
-        line for line in sql.splitlines()
+        line
+        for line in sql.splitlines()
         if line.strip().upper() not in ("BEGIN;", "COMMIT;")
     )
+
+
+LEDGER_DDL = (
+    "CREATE TABLE IF NOT EXISTS schema_migrations ("
+    " filename TEXT PRIMARY KEY,"
+    " applied_at timestamptz NOT NULL DEFAULT now())"
+)
+
+
+def ensure_ledger(conn) -> None:
+    """Create the `schema_migrations` ledger if absent (idempotent).
+
+    Narrow alternative to `main()`: restores only the book-keeping table, without
+    applying any pending migration. The runner stays the single owner of this DDL.
+    """
+    with conn.cursor() as cur:
+        cur.execute(LEDGER_DDL)
 
 
 def main() -> int:
     dsn = _dsn()
     if not dsn:
-        print("PG only: PG_DSN / DATABASE_URL not set — no-op (SQLite uses db_adapter)", file=sys.stderr)
+        print(
+            "PG only: PG_DSN / DATABASE_URL not set — no-op (SQLite uses db_adapter)",
+            file=sys.stderr,
+        )
         return 0
 
     import psycopg2
@@ -48,11 +75,7 @@ def main() -> int:
     try:
         conn.autocommit = True
         cur = conn.cursor()
-        cur.execute(
-            "CREATE TABLE IF NOT EXISTS schema_migrations ("
-            " filename TEXT PRIMARY KEY,"
-            " applied_at timestamptz NOT NULL DEFAULT now())"
-        )
+        cur.execute(LEDGER_DDL)
 
         files = _migration_files()
         applied = skipped = 0
@@ -68,7 +91,9 @@ def main() -> int:
             conn.autocommit = False
             try:
                 cur.execute(body)
-                cur.execute("INSERT INTO schema_migrations (filename) VALUES (%s)", (name,))
+                cur.execute(
+                    "INSERT INTO schema_migrations (filename) VALUES (%s)", (name,)
+                )
                 conn.commit()
             except Exception:
                 conn.rollback()

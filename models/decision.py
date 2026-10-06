@@ -18,6 +18,7 @@ def utcnow() -> datetime:
 # Enums
 # ═══════════════════════════════════════════════════════
 
+
 class GateResult(str, Enum):
     ALLOWED = "allowed"
     DENIED = "denied"
@@ -41,6 +42,7 @@ class JobStatus(str, Enum):
 # ═══════════════════════════════════════════════════════
 # Decision State
 # ═══════════════════════════════════════════════════════
+
 
 @dataclass
 class DecisionRequest:
@@ -70,6 +72,7 @@ class DecisionRecord:
 # Execution State
 # ═══════════════════════════════════════════════════════
 
+
 @dataclass
 class ExecutionJob:
     decision_id: UUID
@@ -91,6 +94,7 @@ class ExecutionJob:
 # Economic State
 # ═══════════════════════════════════════════════════════
 
+
 @dataclass
 class UsageEvent:
     tenant_id: str
@@ -107,11 +111,12 @@ class UsageEvent:
 # Audit State
 # ═══════════════════════════════════════════════════════
 
+
 @dataclass
 class AuditEvent:
     tenant_id: str
-    event_type: str          # "decision.allowed" | "decision.denied" | "job.started" | ...
-    entity_type: str         # "decision" | "job" | "billing"
+    event_type: str  # "decision.allowed" | "decision.denied" | "job.started" | ...
+    entity_type: str  # "decision" | "job" | "billing"
     entity_id: UUID
     data: dict = field(default_factory=dict)
     id: UUID = field(default_factory=uuid4)
@@ -121,6 +126,7 @@ class AuditEvent:
 # ═══════════════════════════════════════════════════════
 # Tenant
 # ═══════════════════════════════════════════════════════
+
 
 @dataclass
 class TenantQuota:

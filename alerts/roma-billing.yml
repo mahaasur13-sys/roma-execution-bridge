@@ -1,0 +1,34 @@
+groups:
+- name: roma-billing
+  rules:
+  - alert: RomaLowBalance
+    expr: roma_tenant_balance < 0.001
+    for: 5m
+    labels: {severity: warning}
+    annotations:
+      summary: "Low balance {{ $labels.tenant_id }}"
+      description: "Balance {{ $value }} < 0.001, jobs will fail-closed with 402"
+
+  - alert: RomaNoFundsRate
+    expr: rate(roma_debit_no_funds_total[5m]) > 0
+    for: 2m
+    labels: {severity: critical}
+    annotations:
+      summary: "no_funds detected for {{ $labels.tenant_id }}"
+      description: "debit_if_funds returned None, fail-closed 402"
+
+  - alert: RomaLedgerReconciliationDiff
+    expr: abs(roma_ledger_computed_balance - roma_api_balance) > 0.000001
+    for: 10m
+    labels: {severity: critical}
+    annotations:
+      summary: "Ledger diff for {{ $labels.tenant_id }}"
+      description: "SUM(CREDIT-DEBIT) != API balance"
+
+  - alert: RomaBackupStale
+    expr: time() - roma_backup_last_success_timestamp > 172800
+    for: 0m
+    labels: {severity: warning}
+    annotations:
+      summary: "Backup stale >2d"
+      description: "No successful backup in /home/felix/backups/roma for 2 days"

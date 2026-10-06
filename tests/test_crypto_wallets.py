@@ -1,4 +1,5 @@
 """DecisionOS Crypto Wallets — 8 smoke tests (3+ Monero)."""
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -67,7 +68,9 @@ class TestWalletCreation:
                 assert result.wallet_type == WalletType.PROVIDER
 
     @pytest.mark.asyncio
-    async def test_02_create_monero_view_only_wallet(self, settings: CryptoSettings, monero_config: MoneroViewOnlyConfig) -> None:
+    async def test_02_create_monero_view_only_wallet(
+        self, settings: CryptoSettings, monero_config: MoneroViewOnlyConfig
+    ) -> None:
         """Smoke 2: Create Monero view-only wallet (privacy-first)."""
         svc = CryptoWalletService(settings=settings)
         req = CreateWalletRequest(
@@ -101,7 +104,9 @@ class TestWalletCreation:
             await svc.create_wallet(req)
 
     @pytest.mark.asyncio
-    async def test_04_monero_missing_config_blocked(self, settings: CryptoSettings) -> None:
+    async def test_04_monero_missing_config_blocked(
+        self, settings: CryptoSettings
+    ) -> None:
         """Smoke 4: Monero wallet without config raises error."""
         svc = CryptoWalletService(settings=settings)
         req = CreateWalletRequest(
@@ -117,7 +122,9 @@ class TestWalletCreation:
 class TestMoneroWallet:
 
     @pytest.mark.asyncio
-    async def test_05_generate_monero_subaddress(self, settings: CryptoSettings, monero_config: MoneroViewOnlyConfig) -> None:
+    async def test_05_generate_monero_subaddress(
+        self, settings: CryptoSettings, monero_config: MoneroViewOnlyConfig
+    ) -> None:
         """Smoke 5: Generate Monero subaddress from view-only wallet."""
         svc = CryptoWalletService(settings=settings)
         req = CreateWalletRequest(
@@ -129,28 +136,37 @@ class TestMoneroWallet:
         )
         mock_adapter = MagicMock(spec=MoneroWalletAdapter)
         mock_adapter.health_check = AsyncMock(return_value=True)
-        mock_adapter.generate_subaddress = AsyncMock(return_value=MoneroSubaddress(
-            wallet_id=UUID("11111111-1111-1111-1111-111111111111"),
-            account_index=0,
-            subaddress_index=5,
-            address="8Abc...monero_subaddress",
-            label="DecisionOS-w1",
-        ))
+        mock_adapter.generate_subaddress = AsyncMock(
+            return_value=MoneroSubaddress(
+                wallet_id=UUID("11111111-1111-1111-1111-111111111111"),
+                account_index=0,
+                subaddress_index=5,
+                address="8Abc...monero_subaddress",
+                label="DecisionOS-w1",
+            )
+        )
 
-        with patch("crypto_payments.wallets.service.MoneroWalletAdapter", return_value=mock_adapter):
+        with patch(
+            "crypto_payments.wallets.service.MoneroWalletAdapter",
+            return_value=mock_adapter,
+        ):
             wallet = await svc.create_wallet(req)
             sub_req = GenerateMoneroSubaddressRequest(
                 account_index=0,
                 label="invoice-123",
                 invoice_id=uuid4(),
             )
-            result = await svc.generate_monero_subaddress(str(wallet.wallet_id), sub_req)
+            result = await svc.generate_monero_subaddress(
+                str(wallet.wallet_id), sub_req
+            )
             assert result.subaddress_index == 5
             assert "monero_subaddress" in result.address
             assert result.wallet_id == wallet.wallet_id
 
     @pytest.mark.asyncio
-    async def test_06_monero_generate_address_creates_subaddress(self, settings: CryptoSettings, monero_config: MoneroViewOnlyConfig) -> None:
+    async def test_06_monero_generate_address_creates_subaddress(
+        self, settings: CryptoSettings, monero_config: MoneroViewOnlyConfig
+    ) -> None:
         """Smoke 6: generate_address for Monero wallet creates a subaddress."""
         svc = CryptoWalletService(settings=settings)
         req = CreateWalletRequest(
@@ -162,14 +178,19 @@ class TestMoneroWallet:
         )
         mock_adapter = MagicMock(spec=MoneroWalletAdapter)
         mock_adapter.health_check = AsyncMock(return_value=True)
-        mock_adapter.generate_subaddress = AsyncMock(return_value=MoneroSubaddress(
-            wallet_id=UUID("11111111-1111-1111-1111-111111111111"),
-            account_index=0,
-            subaddress_index=3,
-            address="8Xyz...monero_deposit_subaddress",
-        ))
+        mock_adapter.generate_subaddress = AsyncMock(
+            return_value=MoneroSubaddress(
+                wallet_id=UUID("11111111-1111-1111-1111-111111111111"),
+                account_index=0,
+                subaddress_index=3,
+                address="8Xyz...monero_deposit_subaddress",
+            )
+        )
 
-        with patch("crypto_payments.wallets.service.MoneroWalletAdapter", return_value=mock_adapter):
+        with patch(
+            "crypto_payments.wallets.service.MoneroWalletAdapter",
+            return_value=mock_adapter,
+        ):
             wallet = await svc.create_wallet(req)
             addr_req = GenerateAddressRequest(
                 currency="XMR",
@@ -183,7 +204,9 @@ class TestMoneroWallet:
             assert result.network == "MONERO"
 
     @pytest.mark.asyncio
-    async def test_07_monero_view_only_no_spend_key(self, settings: CryptoSettings, monero_config: MoneroViewOnlyConfig) -> None:
+    async def test_07_monero_view_only_no_spend_key(
+        self, settings: CryptoSettings, monero_config: MoneroViewOnlyConfig
+    ) -> None:
         """Smoke 7: Monero wallet adapter never exposes spend keys."""
         adapter = MoneroWalletAdapter(config=monero_config)
         assert adapter._config.view_key_private is not None
@@ -195,7 +218,9 @@ class TestMoneroWallet:
 class TestWalletRotation:
 
     @pytest.mark.asyncio
-    async def test_08_wallet_rotation(self, settings: CryptoSettings, monero_config: MoneroViewOnlyConfig) -> None:
+    async def test_08_wallet_rotation(
+        self, settings: CryptoSettings, monero_config: MoneroViewOnlyConfig
+    ) -> None:
         """Smoke 8: Rotate wallet and track event."""
         svc = CryptoWalletService(settings=settings)
         req = CreateWalletRequest(
@@ -208,7 +233,10 @@ class TestWalletRotation:
         mock_adapter = MagicMock(spec=MoneroWalletAdapter)
         mock_adapter.health_check = AsyncMock(return_value=True)
 
-        with patch("crypto_payments.wallets.service.MoneroWalletAdapter", return_value=mock_adapter):
+        with patch(
+            "crypto_payments.wallets.service.MoneroWalletAdapter",
+            return_value=mock_adapter,
+        ):
             wallet = await svc.create_wallet(req)
 
         rotate_req = RotateWalletRequest(

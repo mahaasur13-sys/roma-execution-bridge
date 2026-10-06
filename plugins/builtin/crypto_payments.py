@@ -27,37 +27,44 @@ class CryptoPaymentsPlugin:
         self._config = config
         self._nowpayments_key = config.get("nowpayments_key", "")
         self._monero_view_key = config.get("monero_view_key", "")
-        logger.info("CryptoPaymentsPlugin enabled (NOWPayments: %s)", "yes" if self._nowpayments_key else "no")
+        logger.info(
+            "CryptoPaymentsPlugin enabled (NOWPayments: %s)",
+            "yes" if self._nowpayments_key else "no",
+        )
 
     async def run(self, action: str, **kwargs: Any) -> dict[str, Any]:
         """Primary entry point."""
         if action == "create_invoice":
             return await self._create_invoice(
-                kwargs["amount"], kwargs.get("currency", "USDT"),
+                kwargs["amount"],
+                kwargs.get("currency", "USDT"),
                 kwargs.get("description", "ROMA Invoice"),
             )
         elif action == "check_status":
             return await self._check_status(kwargs["invoice_id"])
         elif action == "add_monero_wallet":
-            return self._add_monero_wallet(
-                kwargs["address"], kwargs["view_key"]
-            )
+            return self._add_monero_wallet(kwargs["address"], kwargs["view_key"])
         elif action == "check_monero_balance":
             return await self._check_monero_balance(kwargs["address"])
         else:
             return {"error": f"Unknown action: {action}"}
 
-    async def _create_invoice(self, amount: float, currency: str, description: str) -> dict[str, Any]:
+    async def _create_invoice(
+        self, amount: float, currency: str, description: str
+    ) -> dict[str, Any]:
         """Create a NOWPayments invoice."""
         if currency not in SUPPORTED_CURRENCIES:
             return {"error": f"Unsupported currency: {currency}"}
 
         invoice_id = hmac.new(
             self._nowpayments_key.encode() or b"demo",
-            f"{amount}{currency}".encode(), hashlib.sha256,
+            f"{amount}{currency}".encode(),
+            hashlib.sha256,
         ).hexdigest()[:16]
 
-        logger.info("Invoice created: %s %s %s → %s", amount, currency, description, invoice_id)
+        logger.info(
+            "Invoice created: %s %s %s → %s", amount, currency, description, invoice_id
+        )
 
         return {
             "invoice_id": invoice_id,
@@ -82,7 +89,9 @@ class CryptoPaymentsPlugin:
     def _add_monero_wallet(self, address: str, view_key: str) -> dict[str, Any]:
         """Register a Monero view-only wallet. NEVER store spend_key."""
         if "spend" in view_key.lower():
-            return {"error": "SPEND KEY DETECTED. View-only wallets only. Spend key rejected automatically."}
+            return {
+                "error": "SPEND KEY DETECTED. View-only wallets only. Spend key rejected automatically."
+            }
 
         if not address.startswith("4") and not address.startswith("8"):
             return {"error": "Invalid Monero address format"}

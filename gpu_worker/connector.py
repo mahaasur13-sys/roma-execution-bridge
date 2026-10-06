@@ -7,17 +7,64 @@ import uuid
 import asyncio
 import logging
 from typing import Optional
+from urllib.parse import urlsplit
 
 import requests
 
 logger = logging.getLogger("roma.gpu_connector")
 
 # =============================================================================
-# Config
+# Config — разбор env ЛЕНИВЫЙ (R-5, грабли Г5)
 # =============================================================================
-ROMA_GPU_WORKER_URL = os.getenv("ROMA_GPU_WORKER_URL", "http://localhost:8000")
-ROMA_GPU_TIMEOUT = int(os.getenv("ROMA_GPU_TIMEOUT", "300"))
-GPU_POOL_DISCOVERY = os.getenv("GPU_POOL_DISCOVERY", "static")  # static | dynamic
+# Импорт модуля не должен зависеть от окружения: никаких int() над env, никакой
+# индексации и никаких обращений к env на уровне модуля. Ошибка конфигурации
+# поднимается в точке ИСПОЛЬЗОВАНИЯ и с внятным сообщением (fail-closed там, где
+# значение реально нужно), а не при импорте (иначе любой repo-wide контроль —
+# collect, import-smoke, compileall — падает из-за чужого env).
+DEFAULT_WORKER_URL = "http://localhost:8000"
+DEFAULT_TIMEOUT_S = 300
+DEFAULT_POOL_DISCOVERY = "static"
+
+
+class ConnectorConfigError(ValueError):
+    """Некорректная конфигурация коннектора (поднимается при использовании)."""
+
+
+def _env(name: str, default: str = "") -> str:
+    raw = os.environ.get(name)
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return default
+
+
+def worker_url() -> str:
+    return _env("ROMA_GPU_WORKER_URL", DEFAULT_WORKER_URL)
+
+
+def gpu_timeout() -> int:
+    raw = _env("ROMA_GPU_TIMEOUT")
+    if not raw:
+        return DEFAULT_TIMEOUT_S
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ConnectorConfigError(
+            f"ROMA_GPU_TIMEOUT must be an integer number of seconds, got {raw!r}"
+        ) from None
+    if value <= 0:
+        raise ConnectorConfigError(f"ROMA_GPU_TIMEOUT must be > 0, got {value}")
+    return value
+
+
+def pool_discovery() -> str:
+    return _env("GPU_POOL_DISCOVERY", DEFAULT_POOL_DISCOVERY)
+
+
+def worker_id_for(url: str) -> str:
+    """Идентификатор воркера из URL. Не падает на форме без схемы (host:port)."""
+    candidate = url if "://" in url else f"//{url}"
+    host = urlsplit(candidate).hostname
+    return f"worker-{host or url}"
 
 
 # =============================================================================
@@ -31,17 +78,19 @@ class GPUWorkerPool:
 
     def _load_static_workers(self):
         """Load workers from environment variables."""
-        worker_urls = os.getenv("ROMA_GPU_WORKERS", ROMA_GPU_WORKER_URL)
+        worker_urls = _env("ROMA_GPU_WORKERS", worker_url())
         for url in worker_urls.split(","):
             url = url.strip()
             if url:
-                self.workers.append({
-                    "url": url,
-                    "id": f"worker-{url.split('://')[1].split(':')[0]}",
-                    "available": True,
-                    "gpu_name": "unknown",
-                    "load": 0
-                })
+                self.workers.append(
+                    {
+                        "url": url,
+                        "id": worker_id_for(url),
+                        "available": True,
+                        "gpu_name": "unknown",
+                        "load": 0,
+                    }
+                )
 
     def discover_workers(self) -> list[dict]:
         """Discover available GPU workers via health check."""
@@ -86,17 +135,15 @@ class GPUWorkerPool:
                 "memory": job.get("memory", "8GB"),
                 "timeout": job.get("timeout", 3600),
                 "environment": job.get("environment", {}),
-                "mount_paths": job.get("mount_paths", {})
+                "mount_paths": job.get("mount_paths", {}),
             }
 
             loop = asyncio.get_event_loop()
             resp = await loop.run_in_executor(
                 None,
                 lambda: requests.post(
-                    f"{worker['url']}/execute",
-                    json=payload,
-                    timeout=ROMA_GPU_TIMEOUT
-                )
+                    f"{worker['url']}/execute", json=payload, timeout=gpu_timeout()
+                ),
             )
 
             if resp.status_code == 200:
@@ -108,7 +155,7 @@ class GPUWorkerPool:
                     "status": "worker_error",
                     "job_id": job_id,
                     "worker_id": worker_id,
-                    "error": f"HTTP {resp.status_code}"
+                    "error": f"HTTP {resp.status_code}",
                 }
 
         except requests.exceptions.Timeout:
@@ -116,14 +163,14 @@ class GPUWorkerPool:
                 "status": "timeout",
                 "job_id": job_id,
                 "worker_id": worker_id,
-                "error": "Job timed out on GPU worker"
+                "error": "Job timed out on GPU worker",
             }
         except Exception as e:
             return {
                 "status": "failed",
                 "job_id": job_id,
                 "worker_id": worker_id,
-                "error": str(e)
+                "error": str(e),
             }
         finally:
             worker["load"] = max(0, worker["load"] - 1)
@@ -151,13 +198,15 @@ class ROMAGPUConnector:
             return {
                 "status": "no_gpu_available",
                 "job_id": job.get("job_id"),
-                "message": "No GPU workers available in pool"
+                "message": "No GPU workers available in pool",
             }
 
         result = await self.pool.submit_job(job)
 
         if result.get("status") == "success":
-            logger.info(f"Job {result['job_id']} completed on {result['worker_id']} in {result.get('duration_seconds', 0):.2f}s")
+            logger.info(
+                f"Job {result['job_id']} completed on {result['worker_id']} in {result.get('duration_seconds', 0):.2f}s"
+            )
         else:
             logger.warning(f"Job {result.get('job_id')} failed: {result.get('status')}")
 
@@ -170,13 +219,16 @@ class ROMAGPUConnector:
             "connector_available": self.is_available(),
             "worker_count": len(workers),
             "available_workers": len([w for w in workers if w.get("available")]),
-            "workers": [{
-                "id": w["id"],
-                "url": w["url"],
-                "available": w.get("available", False),
-                "gpu": w.get("gpu_name", "unknown"),
-                "load": w.get("load", 0)
-            } for w in workers]
+            "workers": [
+                {
+                    "id": w["id"],
+                    "url": w["url"],
+                    "available": w.get("available", False),
+                    "gpu": w.get("gpu_name", "unknown"),
+                    "load": w.get("load", 0),
+                }
+                for w in workers
+            ],
         }
 
 
@@ -204,6 +256,7 @@ async def execute_on_gpu(job: dict) -> dict:
 # Demo / test
 # =============================================================================
 if __name__ == "__main__":
+
     async def demo():
         connector = get_gpu_connector()
         metrics = connector.get_metrics()
@@ -211,14 +264,14 @@ if __name__ == "__main__":
         print("=== ROMA GPU Connector ===")
         print(f"Available: {metrics['connector_available']}")
         print(f"Workers: {metrics['worker_count']}")
-        print(f"URL: {ROMA_GPU_WORKER_URL}")
+        print(f"URL: {worker_url()}")
 
         # Test job
         test_job = {
             "job_id": f"test-{uuid.uuid4().hex[:8]}",
             "command": "echo 'ROM A GPU working!' && nvidia-smi --query-gpu=name --format=csv,noheader",
             "memory": "4GB",
-            "timeout": 30
+            "timeout": 30,
         }
 
         print(f"\n--- Test job: {test_job['job_id']} ---")

@@ -1,0 +1,333 @@
+"""G-AUDIT-DDL-DRIFT (reconciling): прод-безопасность migrations/011_audit_events.sql.
+
+Акт 2 аудита P3.10 (v4): на проде таблица `audit_events` могла существовать из
+рантайм-бутстрапа со схемой БЕЗ `created_at` (факт из INSERT db_adapter.py) и с
+историей эпохи double-write (дубли по `(tenant_id, event_type, entity_id)`).
+Миграция обязана: не падать на CREATE (IF NOT EXISTS); сверить сигнатуру в обе
+стороны (имена+типы+PK ровно (id)+лишние NOT NULL-без-default) fail-closed;
+заблокировать параллельные записи (TOCTOU); снять дубли keep-«ранняя» по ctid с
+backup-таблицей и протоколом, NULL-ключи исключены (согласовано с частичным UNIQUE);
+сохранить безключевые (`entity_id='unknown'`) и кросс-тенантные строки; создать
+частичный UNIQUE; повторный накат — no-op.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+MIGRATION_011 = REPO_ROOT / "migrations" / "011_audit_events.sql"
+
+PROD_FORM_SCHEMA = """
+CREATE TABLE audit_events (
+    id          TEXT PRIMARY KEY,
+    tenant_id   TEXT,
+    event_type  TEXT,
+    entity_type TEXT,
+    entity_id   TEXT,
+    data        JSONB
+)
+"""
+
+DUP_ROWS = [
+    ("a1", "tA", "job.user_confirmed", "job", "job-A"),   # (a) дубль одной задачи
+    ("a2", "tA", "job.user_confirmed", "job", "job-A"),
+    ("u1", "tA", "job.user_confirmed", "job", "unknown"),  # (b) два unknown одной задачи
+    ("u2", "tA", "job.user_confirmed", "job", "unknown"),
+    ("x1", "tA", "job.user_confirmed", "job", "job-X"),   # (c) один job_id у разных tenant
+    ("x2", "tB", "job.user_confirmed", "job", "job-X"),
+]
+
+def _pg_dsn() -> str | None:
+    return os.environ.get("PG_DSN") or os.environ.get("DATABASE_URL")
+
+
+def _pg_reachable() -> bool:
+    dsn = _pg_dsn()
+    if not dsn:
+        return False
+    try:
+        import psycopg2
+
+        conn = psycopg2.connect(dsn)
+        conn.close()
+        return True
+    except Exception:
+        return False
+
+
+def _apply_011(conn) -> None:
+    """Накат 011 телом целиком, как это делает run_migrations.py."""
+    body = MIGRATION_011.read_text()
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        cur.execute(body)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def _reset_tables(conn) -> None:
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute("DROP TABLE IF EXISTS audit_events")
+    cur.execute("DROP TABLE IF EXISTS audit_events_dedupe_backup")
+
+
+def _cleanup(conn) -> None:
+    """Восстановить чистую migrated-форму и закрыть соединение (идемпотентно)."""
+    try:
+        _reset_tables(conn)
+        _apply_011(conn)
+    finally:
+        conn.close()
+
+
+def _split_migration(body: str):
+    """Разбить тело 011 на «до индекса» (CREATE + DO-блок с LOCK/DELETE) и «индекс»."""
+    marker = "CREATE UNIQUE INDEX IF NOT EXISTS audit_events_dedupe_uidx"
+    idx = body.rindex(marker)
+    return body[:idx], body[idx:]
+
+
+@pytest.fixture()
+def prod_form():
+    """audit_events в прод-форме (без created_at) + дубли эпохи double-write."""
+    if not _pg_reachable():
+        pytest.skip("PG not reachable — reconciling audit requires live PG; issue: P1-C · expiry: 2026-12-31")
+    import psycopg2
+
+    conn = psycopg2.connect(_pg_dsn())
+    try:
+        _reset_tables(conn)
+        cur = conn.cursor()
+        cur.execute(PROD_FORM_SCHEMA)
+        for rid, tid, et, ent, eid in DUP_ROWS:
+            cur.execute(
+                "INSERT INTO audit_events (id,tenant_id,event_type,entity_type,entity_id,data)"
+                " VALUES (%s,%s,%s,%s,%s,%s::jsonb)",
+                (rid, tid, et, ent, eid, '{"user_confirmed": true}'),
+            )
+        yield conn
+    finally:
+        _cleanup(conn)
+
+
+@pytest.mark.pg
+def test_011_reconciles_prod_form_with_duplicates(prod_form):
+    """CREATE не падает; дубли сняты keep-ранняя; unknown/кросс-тенант живы; backup + UNIQUE."""
+    conn = prod_form
+    _apply_011(conn)
+
+    conn.autocommit = True
+    cur = conn.cursor()
+
+    cur.execute("SELECT id FROM audit_events WHERE entity_id='job-A'")
+    assert [r[0] for r in cur.fetchall()] == ["a1"]
+
+    cur.execute("SELECT count(*) FROM audit_events WHERE entity_id='unknown'")
+    assert cur.fetchone()[0] == 2
+
+    cur.execute("SELECT count(*) FROM audit_events WHERE entity_id='job-X'")
+    assert cur.fetchone()[0] == 2
+
+    cur.execute("SELECT id FROM audit_events_dedupe_backup")
+    assert [r[0] for r in cur.fetchall()] == ["a2"]
+
+    cur.execute(
+        "SELECT 1 FROM pg_indexes WHERE tablename='audit_events' AND indexname='audit_events_dedupe_uidx'"
+    )
+    assert cur.fetchone() is not None
+
+
+@pytest.mark.pg
+def test_011_reapply_is_noop(prod_form):
+    """Повторный накат — no-op: строки не удаляются, backup не растёт."""
+    conn = prod_form
+    _apply_011(conn)
+
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute("SELECT count(*) FROM audit_events")
+    n_before = cur.fetchone()[0]
+    cur.execute("SELECT count(*) FROM audit_events_dedupe_backup")
+    b_before = cur.fetchone()[0]
+
+    _apply_011(conn)
+
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute("SELECT count(*) FROM audit_events")
+    assert cur.fetchone()[0] == n_before
+    cur.execute("SELECT count(*) FROM audit_events_dedupe_backup")
+    assert cur.fetchone()[0] == b_before
+
+
+@pytest.mark.pg
+def test_011_type_drift_fails_closed():
+    """entity_id INTEGER → сверка типов роняет миграцию с протоколом различий."""
+    if not _pg_reachable():
+        pytest.skip("PG not reachable — reconciling audit requires live PG; issue: P1-C · expiry: 2026-12-31")
+    import psycopg2
+
+    conn = psycopg2.connect(_pg_dsn())
+    try:
+        _reset_tables(conn)
+        cur = conn.cursor()
+        cur.execute(
+            "CREATE TABLE audit_events (id TEXT PRIMARY KEY, tenant_id TEXT, event_type TEXT,"
+            " entity_type TEXT, entity_id INTEGER, data JSONB)"
+        )
+        with pytest.raises(Exception) as exc:
+            _apply_011(conn)
+        assert "schema drift" in str(exc.value)
+        assert "entity_id" in str(exc.value)
+    finally:
+        _cleanup(conn)
+
+
+@pytest.mark.pg
+def test_011_extra_required_column_fails_closed():
+    """Лишняя NOT NULL-колонка без default (created_at) → fail-closed."""
+    if not _pg_reachable():
+        pytest.skip("PG not reachable — reconciling audit requires live PG; issue: P1-C · expiry: 2026-12-31")
+    import psycopg2
+
+    conn = psycopg2.connect(_pg_dsn())
+    try:
+        _reset_tables(conn)
+        cur = conn.cursor()
+        cur.execute(
+            "CREATE TABLE audit_events (id TEXT PRIMARY KEY, tenant_id TEXT, event_type TEXT,"
+            " entity_type TEXT, entity_id TEXT, data JSONB, created_at TIMESTAMP NOT NULL)"
+        )
+        with pytest.raises(Exception) as exc:
+            _apply_011(conn)
+        assert "extra required columns" in str(exc.value)
+    finally:
+        _cleanup(conn)
+
+
+@pytest.mark.pg
+def test_011_composite_pk_fails_closed():
+    """Составной PRIMARY KEY (id, tenant_id) → fail-closed."""
+    if not _pg_reachable():
+        pytest.skip("PG not reachable — reconciling audit requires live PG; issue: P1-C · expiry: 2026-12-31")
+    import psycopg2
+
+    conn = psycopg2.connect(_pg_dsn())
+    try:
+        _reset_tables(conn)
+        cur = conn.cursor()
+        cur.execute(
+            "CREATE TABLE audit_events (id TEXT, tenant_id TEXT, event_type TEXT,"
+            " entity_type TEXT, entity_id TEXT, data JSONB, PRIMARY KEY (id, tenant_id))"
+        )
+        with pytest.raises(Exception) as exc:
+            _apply_011(conn)
+        assert "ровно (id)" in str(exc.value)
+    finally:
+        _cleanup(conn)
+
+
+@pytest.mark.pg
+def test_011_null_keys_not_deduped():
+    """NULL-ключи (tenant_id IS NULL) дедуп не трогает; частичный UNIQUE их допускает."""
+    if not _pg_reachable():
+        pytest.skip("PG not reachable — reconciling audit requires live PG; issue: P1-C · expiry: 2026-12-31")
+    import psycopg2
+
+    conn = psycopg2.connect(_pg_dsn())
+    try:
+        _reset_tables(conn)
+        cur = conn.cursor()
+        cur.execute(PROD_FORM_SCHEMA)
+        cur.execute(
+            "INSERT INTO audit_events VALUES ('n1',NULL,'job.user_confirmed','job','job-N','{}'::jsonb)"
+        )
+        cur.execute(
+            "INSERT INTO audit_events VALUES ('n2',NULL,'job.user_confirmed','job','job-N','{}'::jsonb)"
+        )
+        _apply_011(conn)
+
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute("SELECT count(*) FROM audit_events WHERE entity_id='job-N'")
+        assert cur.fetchone()[0] == 2  # NULL-ключи не склеены дедупом
+        cur.execute(
+            "SELECT 1 FROM pg_indexes WHERE tablename='audit_events' AND indexname='audit_events_dedupe_uidx'"
+        )
+        assert cur.fetchone() is not None
+    finally:
+        _cleanup(conn)
+
+
+@pytest.mark.pg
+def test_011_lock_blocks_concurrent_write():
+    """TOCTOU: LOCK миграции (не ручной) блокирует параллельный INSERT до индекса.
+
+    Миграция исполняется в соединении-держателе до CREATE INDEX (LOCK удерживается);
+    конкурентный INSERT между DELETE и INDEX обязан упереться в лок. Мутация-пруф:
+    при удалении LOCK TABLE из 011 тест краснеет (INSERT не блокируется).
+    """
+    if not _pg_reachable():
+        pytest.skip("PG not reachable — reconciling audit requires live PG; issue: P1-C · expiry: 2026-12-31")
+    import psycopg2
+    import psycopg2.errors
+
+    conn = psycopg2.connect(_pg_dsn())
+    holder = None
+    writer = None
+    try:
+        _reset_tables(conn)
+        cur = conn.cursor()
+        cur.execute(PROD_FORM_SCHEMA)
+        cur.execute(
+            "INSERT INTO audit_events VALUES ('a1','tA','job.user_confirmed','job','job-A','{}'::jsonb)"
+        )
+        cur.execute(
+            "INSERT INTO audit_events VALUES ('a2','tA','job.user_confirmed','job','job-A','{}'::jsonb)"
+        )
+
+        pre, index_stmt = _split_migration(MIGRATION_011.read_text())
+
+        holder = psycopg2.connect(_pg_dsn())
+        holder.autocommit = False
+        hcur = holder.cursor()
+        hcur.execute(pre)  # CREATE + DO-блок (LOCK + DELETE) — LOCK удерживается
+
+        writer = psycopg2.connect(_pg_dsn())
+        writer.autocommit = True
+        wcur = writer.cursor()
+        wcur.execute("SET statement_timeout = 700")
+        blocked = False
+        try:
+            wcur.execute(
+                "INSERT INTO audit_events VALUES ('a3','tA','job.user_confirmed','job','job-A','{}'::jsonb)"
+            )
+        except psycopg2.errors.QueryCanceled:
+            blocked = True
+
+        assert blocked, "LOCK миграции не заблокировал параллельный INSERT (TOCTOU открыт)"
+
+        hcur.execute(index_stmt)  # CREATE INDEX под удерживаемым локом
+        holder.commit()
+    finally:
+        if holder is not None:
+            try:
+                holder.commit()
+            except Exception:
+                holder.rollback()
+            holder.close()
+        if writer is not None:
+            writer.close()
+        _cleanup(conn)

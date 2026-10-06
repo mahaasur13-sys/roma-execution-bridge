@@ -1,4 +1,5 @@
 """Tests for rate_limiter.py."""
+
 import pytest
 import asyncio
 from saas.gateway.rate_limiter import TokenBucket
@@ -25,7 +26,7 @@ class TestTokenBucket:
     async def test_consume_returns_false_when_empty(self):
         bucket = TokenBucket(rate=0.001, burst=1)
         allowed1 = await bucket.consume(1)  # exhaust
-        allowed2 = await bucket.consume(1)   # should be denied
+        allowed2 = await bucket.consume(1)  # should be denied
         assert allowed1 is True
         assert allowed2 is False
 
@@ -46,6 +47,7 @@ class TestRateLimitWithMockedRequest:
     @pytest.mark.asyncio
     async def test_allows_request_under_limit(self):
         from saas.gateway.rate_limiter import _buckets, check_rate_limit
+
         _buckets.clear()
 
         from unittest.mock import MagicMock

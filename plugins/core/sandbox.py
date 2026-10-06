@@ -21,10 +21,11 @@ logger = logging.getLogger("roma.plugin_sandbox")
 
 class SandboxPolicy(StrEnum):
     """Sandbox restriction levels."""
+
     RESTRICTED = "restricted"  # No fs write, no network, no subprocess
-    NETWORK = "network"        # Network allowed, no fs write
-    FILE_SYSTEM = "fs"         # FS read/write in allowed dirs
-    FULL = "full"              # Full access (enterprise custom plugins only)
+    NETWORK = "network"  # Network allowed, no fs write
+    FILE_SYSTEM = "fs"  # FS read/write in allowed dirs
+    FULL = "full"  # Full access (enterprise custom plugins only)
 
 
 ALLOWED_PERMISSIONS: dict[str, set[str]] = {
@@ -48,7 +49,9 @@ class PluginSandbox:
         self._allowed = ALLOWED_PERMISSIONS.get(policy.value, set())
         logger.debug(
             "Sandbox created for '%s': policy=%s, allowed=%s",
-            manifest.name, policy.value, self._allowed,
+            manifest.name,
+            policy.value,
+            self._allowed,
         )
 
     def check_permission(self, permission: str) -> bool:
@@ -60,7 +63,10 @@ class PluginSandbox:
         violations: list[str] = []
 
         # Enterprise-only: full sandbox
-        if self.manifest.sandbox_policy == "full" and self.manifest.minimum_tier.value != "enterprise":
+        if (
+            self.manifest.sandbox_policy == "full"
+            and self.manifest.minimum_tier.value != "enterprise"
+        ):
             violations.append(
                 "Only enterprise tier plugins can use 'full' sandbox policy"
             )
@@ -72,7 +78,10 @@ class PluginSandbox:
                 violations.append(f"Config schema must not contain '{field}' field")
 
         # Restricted permissions on sensitive operations
-        if "subprocess" in self.manifest.permissions and self.manifest.minimum_tier.value != "enterprise":
+        if (
+            "subprocess" in self.manifest.permissions
+            and self.manifest.minimum_tier.value != "enterprise"
+        ):
             violations.append("Subprocess permission requires enterprise tier")
 
         return violations
@@ -97,10 +106,13 @@ class PluginSandbox:
         """Apply resource limits if available."""
         try:
             import resource
+
             # CPU time: 30 seconds
             resource.setrlimit(resource.RLIMIT_CPU, (30, 30))
             # Memory: 512 MB
-            resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
+            resource.setrlimit(
+                resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024)
+            )
         except (ImportError, ValueError):
             pass
 

@@ -18,8 +18,9 @@ import db_adapter as db
 logger = logging.getLogger("roma.decision_store")
 
 
-def submit_job_through_gate(tenant_id: str, request_type: str, payload: dict,
-                             idempotency_key: str | None = None) -> dict:
+def submit_job_through_gate(
+    tenant_id: str, request_type: str, payload: dict, idempotency_key: str | None = None
+) -> dict:
     """Full submit flow: request → gate → decision → job.
 
     Returns: {decision_id, result, reason, job_id, estimated_cost, quota_remaining}
@@ -30,7 +31,9 @@ def submit_job_through_gate(tenant_id: str, request_type: str, payload: dict,
     request_id = str(uuid.uuid4())
 
     # 1. Create DecisionRequest
-    db.insert_decision_request(request_id, tenant_id, request_type, payload, idempotency_key)
+    db.insert_decision_request(
+        request_id, tenant_id, request_type, payload, idempotency_key
+    )
 
     # 2. Idempotency check
     if idempotency_key:
@@ -64,8 +67,20 @@ def submit_job_through_gate(tenant_id: str, request_type: str, payload: dict,
     plan_name = tenant.get("plan", "free")
 
     # 4. Quota check
+    import plan_source
+    from monitoring import metrics as _metrics
+
     job_count = db.count_jobs_by_tenant(tenant_id)
-    max_jobs = _get_plan_limit(plan_name)
+    try:
+        max_jobs = _get_plan_limit(plan_name)
+    except plan_source.PlanSourceError as exc:
+        # Источник квот недоступен: вердикт не выносится — отказ отдельным кодом,
+        # никогда не молчаливый allow (GATE_UNAVAILABLE-ряд).
+        _metrics.track_gate_unavailable("decision_store.submit")
+        reason = f"{plan_source.GATE_UNAVAILABLE}: квота тарифа не установлена ({exc})"
+        logger.error("GATE_UNAVAILABLE: submit заблокирован — %s", exc)
+        _deny(tenant_id, request_id, reason, job_count, 0)
+        raise HTTPException(status_code=402, detail=reason)
     if max_jobs != -1 and job_count >= max_jobs:
         reason = f"Plan '{plan_name}' limit: {job_count}/{max_jobs}"
         _deny(tenant_id, request_id, reason, job_count, 0)
@@ -80,20 +95,29 @@ def submit_job_through_gate(tenant_id: str, request_type: str, payload: dict,
 
     # 7. Allow
     from cost.gate import GateResult
+
     decision_id = str(uuid.uuid4())
     db.insert_decision_record(
-        decision_id, request_id, tenant_id,
-        GateResult.ALLOWED.value, "ok",
-        job_count + 1, estimated_cost, policy_name,
+        decision_id,
+        request_id,
+        tenant_id,
+        GateResult.ALLOWED.value,
+        "ok",
+        job_count + 1,
+        estimated_cost,
+        policy_name,
     )
 
     # 8. Create job
     job_id = str(uuid.uuid4())
-    job = db.insert_job(job_id, tenant_id, "queued", decision_id, payload)
+    _job = db.insert_job(job_id, tenant_id, "queued", decision_id, payload)
 
     # 9. Audit
     from audit.event_store import on_decision_allowed, on_job_created
-    on_decision_allowed(tenant_id, decision_id, request_id, job_count + 1, estimated_cost)
+
+    on_decision_allowed(
+        tenant_id, decision_id, request_id, job_count + 1, estimated_cost
+    )
     on_job_created(tenant_id, job_id, decision_id, "job_submit")
 
     # 10. Record usage
@@ -131,17 +155,39 @@ def complete_job(job_id: str, tenant_id: str) -> dict | None:
     if not job:
         return None
     import datetime
-    db.update_job_status(job_id, "completed", completed_at=datetime.datetime.utcnow().isoformat())
+
+    db.update_job_status(
+        job_id, "completed", completed_at=datetime.datetime.utcnow().isoformat()
+    )
     return db.get_job(job_id, tenant_id)
 
 
 def get_tenant_usage(tenant_id: str) -> dict:
     """Return current month usage + limits."""
+    import plan_source
+
     tenant = db.get_tenant(tenant_id)
     plan_name = tenant.get("plan", "free") if tenant else "free"
-    max_jobs = _get_plan_limit(plan_name)
     job_count = db.count_jobs_by_tenant(tenant_id)
     sub_status = tenant.get("subscription_status", "inactive") if tenant else "inactive"
+
+    # Источник недоступен → лимит не выдумывается: null + honest display.
+    try:
+        max_jobs = _get_plan_limit(plan_name)
+    except plan_source.PlanSourceError as exc:
+        from monitoring import metrics as _metrics
+
+        _metrics.track_gate_unavailable("decision_store.usage")
+        logger.error(
+            "GATE_UNAVAILABLE: лимит тарифа %r не установлен — %s", plan_name, exc
+        )
+        max_jobs = None
+    if max_jobs is None:
+        display = "unavailable"
+    elif max_jobs == -1:
+        display = "unlimited"
+    else:
+        display = str(max_jobs)
 
     return {
         "tenant_id": tenant_id,
@@ -150,7 +196,7 @@ def get_tenant_usage(tenant_id: str) -> dict:
         "usage": {"total_jobs": job_count, "total_gpu_seconds": 0},
         "limits": {
             "max_jobs_per_month": max_jobs,
-            "max_jobs_per_month_display": "unlimited" if max_jobs == -1 else str(max_jobs),
+            "max_jobs_per_month_display": display,
         },
     }
 
@@ -161,17 +207,20 @@ def count_jobs(tenant_id: str) -> int:
 
 # ── Internals ──────────────────────────────────────────────────
 
+
 def _get_plan_limit(plan_name: str) -> int:
-    """Look up max_jobs_per_month from plans.json."""
-    try:
-        import json
-        from pathlib import Path
-        plans_path = Path(__file__).parent / "plans.json"
-        plans = json.loads(plans_path.read_text())
-        plan = plans.get(plan_name, plans.get("start", {}))
-        return plan.get("max_jobs_per_month", 50)
-    except Exception:
-        return 50
+    """Лимит джобов/месяц — из единственного источника квот (`config/plans.json`).
+
+    G-QUOTA-SOURCE-FRAGMENTED: здесь читался КОРНЕВОЙ `plans.json`
+    (`Path(__file__).parent / "plans.json"`), которого в дереве нет. Доказательство
+    мёртвого чтения: `ls plans.json` → файла нет, `plans.get("start", {})` → {},
+    итог — литерал «50» из последней ветки `.get` для ЛЮБОГО тарифа, молча.
+    Значение выводится из источника; недоступность источника — отказ (fail-closed),
+    а не выдуманное число.
+    """
+    import plan_source
+
+    return plan_source.plan_limits(plan_name).jobs_per_month
 
 
 def _estimate_cost(payload: dict) -> float:
@@ -179,14 +228,28 @@ def _estimate_cost(payload: dict) -> float:
     return 0.01
 
 
-def _deny(tenant_id: str, request_id: str, reason: str,
-          quota_remaining: int, estimated_cost: float):
+def _deny(
+    tenant_id: str,
+    request_id: str,
+    reason: str,
+    quota_remaining: int,
+    estimated_cost: float,
+):
     """Record a denied decision."""
     from cost.gate import GateResult
     import uuid
+
     did = str(uuid.uuid4())
-    db.insert_decision_record(did, request_id, tenant_id,
-                              GateResult.DENIED.value, reason,
-                              quota_remaining, estimated_cost, "")
+    db.insert_decision_record(
+        did,
+        request_id,
+        tenant_id,
+        GateResult.DENIED.value,
+        reason,
+        quota_remaining,
+        estimated_cost,
+        "",
+    )
     from audit.event_store import on_decision_denied
+
     on_decision_denied(tenant_id, did, request_id, reason)

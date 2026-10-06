@@ -163,7 +163,7 @@ create_static_secrets() {
 
   # Stripe API keys
   vault kv put roma/stripe \
-    secret_key="sk_live_XXXXXXXXXXXXXXXXXXXXXXXX" \
+    secret_key="sk_live_REPLACE_ME" \
     webhook_secret="whsec_XXXXXXXXXXXXXXXXXXXXXXXX" \
     2>/dev/null || warn "Stripe secrets already exist"
 
@@ -178,7 +178,7 @@ create_static_secrets() {
 
   # ROMA API keys
   vault kv put roma/api \
-    roma_api_key="roma_sk_live_XXXXXXXXXXXXXXXXXXXXXXXX" \
+    roma_api_key="roma_sk_live_REPLACE_ME" \
     roma_webhook_secret="whsec_roma_XXXXXXXXXXXXXXXX" \
     2>/dev/null || warn "API secrets already exist"
 

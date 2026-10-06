@@ -1,11 +1,12 @@
 """Revenue Share Calculator — tiered, per partner, per month"""
 
+
 class RevenueShareCalculator:
     # Tier thresholds: (max_gross_INCLUSIVE, rate)
     # $0-$1000 → 10%, $1001-$5000 → 15%, $5001+ → 20%
     TIERS = [
-        (1000.0, 0.10),   # $0 - $1000 inclusive
-        (5000.0, 0.15),   # $1001 - $5000 inclusive
+        (1000.0, 0.10),  # $0 - $1000 inclusive
+        (5000.0, 0.15),  # $1001 - $5000 inclusive
         (float('inf'), 0.20),
     ]
 
@@ -34,17 +35,22 @@ class RevenueShareCalculator:
                 return rate
         return 0.20
 
-    def record_revenue(self, partner_id: str, amount: float, invoice_id: str, period: str) -> int:
+    def record_revenue(
+        self, partner_id: str, amount: float, invoice_id: str, period: str
+    ) -> int:
         key = (partner_id, period)
         if key not in self._store:
             self._store[key] = {'total': 0.0, 'invoices': []}
         self._store[key]['total'] += amount
-        self._store[key]['invoices'].append({'invoice_id': invoice_id, 'amount': amount})
+        self._store[key]['invoices'].append(
+            {'invoice_id': invoice_id, 'amount': amount}
+        )
         return len(self._store[key]['invoices'])
 
     def get_partner_monthly_revenue(self, partner_id: str, period: str) -> dict:
         entry = self._store.get((partner_id, period), {'total': 0.0, 'invoices': []})
         return {'partner_id': partner_id, 'period': period, 'total': entry['total']}
+
 
 if __name__ == "__main__":
     calc = RevenueShareCalculator()

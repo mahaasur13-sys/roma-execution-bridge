@@ -1,0 +1,59 @@
+# G-CI-DEPS-INCOMPLETE (P2-FIX-CI-2, 2026-09-22): единственный источник истины для
+# install-шагов CI (`test` и `pytest-suite` ставили список, вписанный прямо в workflow).
+#
+# Зачем файл вместо строки в ci.yml: список в workflow разъехался с деревом — коллекция
+# канон-набора падала на отсутствующих модулях (jwt → PyJWT, slowapi, structlog,
+# pydantic_settings), а асинхронные проверки — без plugin'а (pytest-asyncio), потому что
+# в списке не было ни одной зависимости из объявленных в pyproject.toml.
+#
+# Версии — фактические версии КАНОН-СРЕДЫ (нода, где доказано 335 = 329 + 6). Это условие,
+# а не украшение: при непинованном fastapi CI ставит 0.141.x, где app.include_router() не
+# монтирует маршруты роутеров — 6 проверок route-surface краснеют на неизменном дереве
+# (воспроизведено в чистой комнате: fastapi 0.141.1 → админ/авторизация/биллинг-маршруты
+# не появляются в app.routes; fastapi 0.115.14 → появляются).
+# Расхождение с декларацией pyproject (там fastapi>=0.136,<0.137 · starlette>=1.3.1,<2.0,
+# а в канон-среде стоят 0.115.14 / 0.46.2) — отдельное владельческое решение; здесь
+# фиксируется воспроизводимость канона.
+#
+# Состав: [project].dependencies (runtime-цепочка набора) + dev-инструменты прогона
+# (pytest/pytest-asyncio/pytest-cov из [dependency-groups].dev) + четыре записи, которые
+# уже стояли в CI-списке до аудита (typer, rich, plotly, dash — dashboard/ и scripts/) и
+# prometheus-client.
+#
+# Правило: новая зависимость добавляется СНАЧАЛА сюда (и в pyproject), workflow не правится.
+
+# --- runtime (pyproject [project].dependencies) ---
+fastapi==0.115.14
+uvicorn[standard]==0.31.1
+pydantic==2.13.4
+prometheus-fastapi-instrumentator==1.3.0
+pyyaml==6.0.3
+kubernetes==29.0.0
+jinja2==3.1.6
+httpx==0.28.1
+openai==2.45.0
+python-dotenv==1.2.2
+psycopg2-binary==2.9.12
+asyncpg==0.31.0
+requests==2.34.2
+PyJWT==2.13.0
+redis==5.3.1
+psutil==5.9.8
+sqlalchemy==2.0.48
+starlette==0.46.2
+slowapi==0.1.9
+pydantic-settings==2.14.2
+structlog==25.5.0
+opentelemetry-api==1.42.1
+
+# --- tooling прогона ([dependency-groups].dev) ---
+pytest==9.0.3
+pytest-asyncio==1.3.0
+pytest-cov==6.0.0
+
+# --- CI-записи до аудита (dashboard/, scripts/ci_smoke.py) ---
+typer==0.24.1
+rich==13.9.4
+plotly==6.6.0
+dash==4.1.0
+prometheus-client==0.8.0

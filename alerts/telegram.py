@@ -23,14 +23,18 @@ def send_telegram_alert(bot_token: str, chat_id: str, message: str) -> bool:
 
     try:
         data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+        req = urllib.request.Request(
+            url, data=data, headers={"Content-Type": "application/json"}
+        )
         with urllib.request.urlopen(req, timeout=10) as resp:
             result = json.loads(resp.read().decode())
             if result.get("ok"):
                 logger.info("Telegram alert sent to chat %s", chat_id)
                 return True
             else:
-                logger.error("Telegram API error: %s", result.get("description", "unknown"))
+                logger.error(
+                    "Telegram API error: %s", result.get("description", "unknown")
+                )
                 return False
     except Exception as exc:
         logger.error("Telegram alert failed: %s", exc)

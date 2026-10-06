@@ -12,7 +12,6 @@ import uuid
 
 from plugins.dashbeam.domain import DashBeamRelayConfig
 
-
 DEFAULT_RELAY = "https://relay.dashbeam.io"
 DEFAULT_DISCOVERY = [
     "https://discovery1.dashbeam.io",
@@ -50,9 +49,7 @@ class RelayManager:
         """Set relay config. Custom relay only for Enterprise tier."""
         is_custom = relay_url != DEFAULT_RELAY
         if is_custom and tier != "enterprise":
-            raise PermissionError(
-                "Custom relay configuration requires Enterprise tier"
-            )
+            raise PermissionError("Custom relay configuration requires Enterprise tier")
 
         config = DashBeamRelayConfig(
             config_id=str(uuid.uuid4()),

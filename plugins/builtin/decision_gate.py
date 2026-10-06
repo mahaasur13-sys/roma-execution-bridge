@@ -38,6 +38,7 @@ class DecisionGatePlugin:
 
     Evaluates cost, quota, and tier constraints.
     """
+
     name = "decision-gate"
     display_name = "Decision Gate"
 

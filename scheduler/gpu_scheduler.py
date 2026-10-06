@@ -61,7 +61,9 @@ class GPUScheduler:
         """Current GPU scheduler state."""
         return {
             "vram_used_mb": self._vram_used_mb,
-            "vram_available_mb": self.MAX_VRAM_MB - self.OVERHEAD_MB - self._vram_used_mb,
+            "vram_available_mb": self.MAX_VRAM_MB
+            - self.OVERHEAD_MB
+            - self._vram_used_mb,
             "gpu_busy": self.queue.is_gpu_busy,
             "queue_depth": self.queue.queue_depth,
         }

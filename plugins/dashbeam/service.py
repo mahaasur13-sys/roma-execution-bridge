@@ -12,8 +12,11 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from plugins.dashbeam.domain import (
-    DashBeamTicket, DashBeamSession, DashBeamRelayConfig,
-    PairedDevice, TicketState,
+    DashBeamTicket,
+    DashBeamSession,
+    DashBeamRelayConfig,
+    PairedDevice,
+    TicketState,
 )
 from plugins.dashbeam.iroh_adapter import IrohAdapter
 from plugins.dashbeam.relay_manager import RelayManager
@@ -52,8 +55,12 @@ class DashBeamTransferService:
                 self._iroh.configure_relay(
                     DashBeamRelayConfig(relay_url=config["relay_url"])
                 )
-            self._max_file_size_mb = config.get("max_file_size_mb", self._max_file_size_mb)
-            self._ticket_ttl_minutes = config.get("ticket_ttl_minutes", self._ticket_ttl_minutes)
+            self._max_file_size_mb = config.get(
+                "max_file_size_mb", self._max_file_size_mb
+            )
+            self._ticket_ttl_minutes = config.get(
+                "ticket_ttl_minutes", self._ticket_ttl_minutes
+            )
 
     async def on_disable(self) -> None:
         """Called when plugin is disabled."""
@@ -150,7 +157,9 @@ class DashBeamTransferService:
 
     # ─── Device Pairing ───
 
-    async def pair_device(self, tenant_id: str, device_name: str, fingerprint: str) -> PairedDevice:
+    async def pair_device(
+        self, tenant_id: str, device_name: str, fingerprint: str
+    ) -> PairedDevice:
         device = await self._iroh.pair_device(device_name, fingerprint)
         device.tenant_id = tenant_id
         self._devices[device.device_id] = device
@@ -170,13 +179,22 @@ class DashBeamTransferService:
 
     def validate_monero_view_only(self, data: dict[str, Any]) -> bool:
         """Validate that shared data contains NO spend keys."""
-        forbidden = ["spend_key", "spendkey", "secret_spend_key", "seed", "mnemonic", "private_key"]
+        forbidden = [
+            "spend_key",
+            "spendkey",
+            "secret_spend_key",
+            "seed",
+            "mnemonic",
+            "private_key",
+        ]
         for key in forbidden:
             if key in data:
                 raise ValueError(f"Blocked: spend key detected in field '{key}'")
         return True
 
-    def share_monero_config(self, tenant_id: str, address: str, view_key: str) -> dict[str, Any]:
+    def share_monero_config(
+        self, tenant_id: str, address: str, view_key: str
+    ) -> dict[str, Any]:
         """Create a shareable view-only Monero config (NEVER includes spend key)."""
         if self._block_spend_keys:
             # Double-check: no spend key in any form

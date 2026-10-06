@@ -65,4 +65,8 @@ curl -X POST http://localhost:8900/webhooks/cloudpayments \
 - Алгоритм: HMAC-SHA256
 - Заголовок: `Content-HMAC` or `X-Content-HMAC`
 - Проверка через `cloudpayments_client.verify_webhook()`
-- При отсутствии ключей — fallback на `api_secret`
+- Ключ: только `CLOUDPAYMENTS_WEBHOOK_SECRET`; `api_secret` **не** используется как
+  fallback (fail closed: нет webhook-секрета → вебхук отклоняется). Изменено в `117fe5b`.
+- **UNVERIFIED:** формат на стороне провайдера (hex vs base64 и какой именно ключ
+  подписывает) в репозитории не доказан — нужен живой тест CloudPayments или выписка
+  из их документации.

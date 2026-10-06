@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """ROMA Raft Consensus Layer — True distributed consensus implementation."""
+
 import time
 import threading
 import random
 from dataclasses import dataclass, field
 from typing import List, Optional, Set, Dict
+
 
 @dataclass
 class LogEntry:
@@ -12,6 +14,7 @@ class LogEntry:
     term: int
     command: dict
     committed: bool = False
+
 
 @dataclass
 class NodeState:
@@ -24,6 +27,7 @@ class NodeState:
     last_applied: int = 0
     last_contact: float = field(default_factory=time.time)
     alive: bool = True
+
 
 class ROMARaftNode:
     """True Raft consensus node — leader election + log replication + membership."""
@@ -168,7 +172,9 @@ class ROMARaftNode:
         with self._lock:
             if last_included_index <= self.state.commit_index:
                 # Truncate log before snapshot
-                self.state.log = [e for e in self.state.log if e.index >= last_included_index]
+                self.state.log = [
+                    e for e in self.state.log if e.index >= last_included_index
+                ]
                 self.state.last_applied = last_included_index
                 return True
             return False
@@ -204,7 +210,12 @@ class ROMARaftCluster:
         with self._lock:
             election_results = {}
             for nid, node in self.nodes.items():
-                t = threading.Thread(target=lambda n: election_results.update({n.node_id: n.start_election()}), args=(node,))
+                t = threading.Thread(
+                    target=lambda n: election_results.update(
+                        {n.node_id: n.start_election()}
+                    ),
+                    args=(node,),
+                )
                 t.start()
 
             # Wait and find leader
@@ -245,4 +256,6 @@ if __name__ == "__main__":
 
     status = cluster.get_cluster_status()
     for nid, s in status["nodes"].items():
-        print(f"  {nid}: role={s['role']}, term={s['term']}, commit_index={s['commit_index']}")
+        print(
+            f"  {nid}: role={s['role']}, term={s['term']}, commit_index={s['commit_index']}"
+        )

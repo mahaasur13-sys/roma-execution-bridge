@@ -8,12 +8,21 @@ from __future__ import annotations
 
 from typing import Any
 
-FORBIDDEN_KEYS = frozenset({
-    "spend_key", "spendkey", "secret_spend_key",
-    "seed", "mnemonic", "seed_phrase",
-    "private_key", "secret_key", "master_key",
-    "wallet_password", "passphrase",
-})
+FORBIDDEN_KEYS = frozenset(
+    {
+        "spend_key",
+        "spendkey",
+        "secret_spend_key",
+        "seed",
+        "mnemonic",
+        "seed_phrase",
+        "private_key",
+        "secret_key",
+        "master_key",
+        "wallet_password",
+        "passphrase",
+    }
+)
 
 
 class MoneroSharingValidator:
@@ -77,4 +86,8 @@ class MoneroSharingValidator:
 
     def is_monero_data(self, data: dict[str, Any]) -> bool:
         """Check if the shared data appears to be Monero wallet data."""
-        return data.get("type") == "monero_view_only_share" or "address" in data and "view_key" in data
+        return (
+            data.get("type") == "monero_view_only_share"
+            or "address" in data
+            and "view_key" in data
+        )

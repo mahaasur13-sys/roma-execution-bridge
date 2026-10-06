@@ -19,6 +19,7 @@ logger = logging.getLogger("decisionos.gate")
 
 # ── DB Protocol (minimal interface) ────────────────────
 
+
 class GateDB(Protocol):
     """Minimal DB interface required by EnterpriseDecisionGate."""
 
@@ -30,6 +31,7 @@ class GateDB(Protocol):
 
 
 # ── Gate ───────────────────────────────────────────────
+
 
 class EnterpriseDecisionGate:
     """Mandatory entry point for all execution paths.
@@ -83,17 +85,23 @@ class EnterpriseDecisionGate:
 
     # ── Internal Steps ─────────────────────────────────
 
-    async def _check_idempotent(self, request: DecisionRequest) -> DecisionRecord | None:
+    async def _check_idempotent(
+        self, request: DecisionRequest
+    ) -> DecisionRecord | None:
         row = await self._db.fetchrow(
             """SELECT dr.id, dr.gate_result, dr.gate_reason, dr.quota_remaining,
                       dr.estimated_cost, dr.decided_at, dr.request_id
                FROM decisionos_records dr
                JOIN decisionos_requests dreq ON dr.request_id = dreq.id
                WHERE dreq.tenant_id = $1 AND dreq.idempotency_key = $2""",
-            request.tenant_id, request.idempotency_key,
+            request.tenant_id,
+            request.idempotency_key,
         )
         if row:
-            logger.info("idempotency_hit", extra={"tenant": request.tenant_id, "key": request.idempotency_key})
+            logger.info(
+                "idempotency_hit",
+                extra={"tenant": request.tenant_id, "key": request.idempotency_key},
+            )
             return DecisionRecord(
                 id=row["id"],
                 request_id=row["request_id"],
@@ -101,7 +109,9 @@ class EnterpriseDecisionGate:
                 gate_result=GateResult(row["gate_result"]),
                 gate_reason=row["gate_reason"],
                 quota_remaining=row["quota_remaining"],
-                estimated_cost=float(row["estimated_cost"]) if row["estimated_cost"] else None,
+                estimated_cost=(
+                    float(row["estimated_cost"]) if row["estimated_cost"] else None
+                ),
                 decided_at=row["decided_at"],
             )
         return None
@@ -114,8 +124,12 @@ class EnterpriseDecisionGate:
         if not row:
             raise GateDeniedError("unknown_tenant", f"Tenant '{tenant_id}' not found")
         if not row["active"]:
-            raise GateDeniedError("tenant_disabled", f"Tenant '{tenant_id}' is disabled")
-        return Tenant(id=row["id"], name=row["name"] or "", tier=row["tier"], active=row["active"])
+            raise GateDeniedError(
+                "tenant_disabled", f"Tenant '{tenant_id}' is disabled"
+            )
+        return Tenant(
+            id=row["id"], name=row["name"] or "", tier=row["tier"], active=row["active"]
+        )
 
     async def _get_quota(self, tenant_id: str) -> TenantQuota:
         row = await self._db.fetchrow(
@@ -129,7 +143,9 @@ class EnterpriseDecisionGate:
             max_jobs_month=row["max_jobs_month"],
             max_gpu_seconds_month=row["max_gpu_seconds_month"],
             max_concurrent=row["max_concurrent"],
-            budget_limit=float(row["budget_limit"]) if row.get("budget_limit") else None,
+            budget_limit=(
+                float(row["budget_limit"]) if row.get("budget_limit") else None
+            ),
             reset_day=row["reset_day"] or 1,
         )
 
@@ -170,7 +186,10 @@ class EnterpriseDecisionGate:
 
     async def _check_policy(self, tenant: Tenant, request: DecisionRequest) -> None:
         # Minimal tier-based policy
-        if tenant.tier == "start" and request.payload.get("execution_mode") == "k8s_job":
+        if (
+            tenant.tier == "start"
+            and request.payload.get("execution_mode") == "k8s_job"
+        ):
             return
 
     async def _persist_record(self, record: DecisionRecord) -> None:
@@ -179,27 +198,40 @@ class EnterpriseDecisionGate:
             """INSERT INTO decisionos_requests (id, tenant_id, request_type, payload, idempotency_key, created_at)
                VALUES ($1, $2, $3, $4, $5, $6)
                ON CONFLICT DO NOTHING""",
-            record.request_id, record.tenant_id, "job_submit",
-            "{}", None, datetime.now(timezone.utc),
+            record.request_id,
+            record.tenant_id,
+            "job_submit",
+            "{}",
+            None,
+            datetime.now(timezone.utc),
         )
         # Then the record
         await self._db.execute(
             """INSERT INTO decisionos_records (id, request_id, tenant_id, gate_result, gate_reason,
                quota_remaining, estimated_cost, decided_at)
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
-            record.id, record.request_id, record.tenant_id,
-            record.gate_result.value, record.gate_reason,
-            record.quota_remaining, record.estimated_cost, record.decided_at,
+            record.id,
+            record.request_id,
+            record.tenant_id,
+            record.gate_result.value,
+            record.gate_reason,
+            record.quota_remaining,
+            record.estimated_cost,
+            record.decided_at,
         )
-        logger.info("decision_recorded", extra={
-            "decision_id": str(record.id),
-            "tenant": record.tenant_id,
-            "result": record.gate_result.value,
-            "reason": record.gate_reason,
-        })
+        logger.info(
+            "decision_recorded",
+            extra={
+                "decision_id": str(record.id),
+                "tenant": record.tenant_id,
+                "result": record.gate_result.value,
+                "reason": record.gate_reason,
+            },
+        )
 
 
 # ── Exceptions ─────────────────────────────────────────
+
 
 class GateDeniedError(Exception):
     """Raised when gate denies a request — caught in endpoint to return 402/403."""

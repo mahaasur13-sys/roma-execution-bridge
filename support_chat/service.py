@@ -1,4 +1,5 @@
 """Support Chat — SupportTicketService."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -7,10 +8,20 @@ from structlog import get_logger
 
 from support_chat.chat_service import ChatService
 from support_chat.models import (
-    AssignTicketRequest, ChatMessage, ChatParticipant, CreateMessageRequest,
-    CreateTicketRequest, CreateTicketResponse, CsatRating, CsatSubmitRequest,
-    ParticipantRole, SupportTicket, TicketAttachment, TicketDetailResponse,
-    TicketListResponse, TicketStatus,
+    AssignTicketRequest,
+    ChatMessage,
+    ChatParticipant,
+    CreateMessageRequest,
+    CreateTicketRequest,
+    CreateTicketResponse,
+    CsatRating,
+    CsatSubmitRequest,
+    ParticipantRole,
+    SupportTicket,
+    TicketAttachment,
+    TicketDetailResponse,
+    TicketListResponse,
+    TicketStatus,
 )
 from support_chat.settings import SupportSettings
 
@@ -18,7 +29,11 @@ logger = get_logger(__name__)
 
 VALID_STATUS_TRANSITIONS: dict[TicketStatus, list[TicketStatus]] = {
     TicketStatus.OPEN: [TicketStatus.IN_PROGRESS, TicketStatus.CLOSED],
-    TicketStatus.IN_PROGRESS: [TicketStatus.WAITING_CUSTOMER, TicketStatus.RESOLVED, TicketStatus.CLOSED],
+    TicketStatus.IN_PROGRESS: [
+        TicketStatus.WAITING_CUSTOMER,
+        TicketStatus.RESOLVED,
+        TicketStatus.CLOSED,
+    ],
     TicketStatus.WAITING_CUSTOMER: [TicketStatus.IN_PROGRESS, TicketStatus.CLOSED],
     TicketStatus.RESOLVED: [TicketStatus.CLOSED, TicketStatus.OPEN],
     TicketStatus.CLOSED: [TicketStatus.OPEN],
@@ -26,7 +41,11 @@ VALID_STATUS_TRANSITIONS: dict[TicketStatus, list[TicketStatus]] = {
 
 
 class SupportTicketService:
-    def __init__(self, chat_service: ChatService | None = None, settings: SupportSettings | None = None) -> None:
+    def __init__(
+        self,
+        chat_service: ChatService | None = None,
+        settings: SupportSettings | None = None,
+    ) -> None:
         self._chat = chat_service or ChatService()
         self._settings = settings or SupportSettings()
         self._tickets: dict[str, SupportTicket] = {}
@@ -34,7 +53,9 @@ class SupportTicketService:
         self._attachments: dict[str, list[TicketAttachment]] = {}
         self._csat: dict[str, CsatRating] = {}
 
-    async def create_ticket(self, request: CreateTicketRequest, user_id: str) -> CreateTicketResponse:
+    async def create_ticket(
+        self, request: CreateTicketRequest, user_id: str
+    ) -> CreateTicketResponse:
         ticket = SupportTicket(
             tenant_id=request.tenant_id,
             subject=request.subject,
@@ -65,8 +86,15 @@ class SupportTicketService:
             )
             await self._chat.add_message(msg)
 
-        await self._chat.add_system_message(ticket.ticket_id, f"Ticket created by {user_id}")
-        logger.info("support_ticket_created", ticket_id=tid, tenant_id=request.tenant_id, context_type=request.context_type)
+        await self._chat.add_system_message(
+            ticket.ticket_id, f"Ticket created by {user_id}"
+        )
+        logger.info(
+            "support_ticket_created",
+            ticket_id=tid,
+            tenant_id=request.tenant_id,
+            context_type=request.context_type,
+        )
         return CreateTicketResponse(
             ticket_id=ticket.ticket_id,
             tenant_id=ticket.tenant_id,
@@ -91,13 +119,20 @@ class SupportTicketService:
             is_internal=request.is_internal,
             attachment_ids=request.attachment_ids,
         )
-        if ticket.status == TicketStatus.WAITING_CUSTOMER and request.sender_role == ParticipantRole.TENANT_USER:
+        if (
+            ticket.status == TicketStatus.WAITING_CUSTOMER
+            and request.sender_role == ParticipantRole.TENANT_USER
+        ):
             ticket.status = TicketStatus.IN_PROGRESS
-            await self._chat.add_system_message(request.ticket_id, "Customer replied — status → in_progress")
+            await self._chat.add_system_message(
+                request.ticket_id, "Customer replied — status → in_progress"
+            )
         ticket.updated_at = datetime.now(timezone.utc)
         return await self._chat.add_message(msg)
 
-    async def assign_agent(self, ticket_id: str, request: AssignTicketRequest) -> SupportTicket:
+    async def assign_agent(
+        self, ticket_id: str, request: AssignTicketRequest
+    ) -> SupportTicket:
         ticket = self._tickets.get(ticket_id)
         if not ticket:
             raise ValueError(f"Ticket {ticket_id} not found")
@@ -112,28 +147,46 @@ class SupportTicketService:
             tenant_id=ticket.tenant_id,
         )
         self._participants.setdefault(ticket_id, []).append(participant)
-        await self._chat.add_system_message(ticket.ticket_id, f"Agent {request.agent_id} assigned")
-        logger.info("support_agent_assigned", ticket_id=ticket_id, agent_id=request.agent_id)
+        await self._chat.add_system_message(
+            ticket.ticket_id, f"Agent {request.agent_id} assigned"
+        )
+        logger.info(
+            "support_agent_assigned", ticket_id=ticket_id, agent_id=request.agent_id
+        )
         return ticket
 
-    def get_ticket(self, ticket_id: str, tenant_id: str | None = None) -> SupportTicket | None:
+    def get_ticket(
+        self, ticket_id: str, tenant_id: str | None = None
+    ) -> SupportTicket | None:
         ticket = self._tickets.get(ticket_id)
         if ticket and tenant_id and ticket.tenant_id != tenant_id:
             return None
         return ticket
 
-    def list_tickets(self, tenant_id: str, status: TicketStatus | None = None, page: int = 1, page_size: int = 20) -> TicketListResponse:
+    def list_tickets(
+        self,
+        tenant_id: str,
+        status: TicketStatus | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> TicketListResponse:
         tickets = [t for t in self._tickets.values() if t.tenant_id == tenant_id]
         if status:
             tickets = [t for t in tickets if t.status == status]
         total = len(tickets)
         start = (page - 1) * page_size
         return TicketListResponse(
-            tickets=[t.model_dump(mode="json") for t in tickets[start:start + page_size]],
-            total=total, page=page, page_size=page_size,
+            tickets=[
+                t.model_dump(mode="json") for t in tickets[start : start + page_size]
+            ],
+            total=total,
+            page=page,
+            page_size=page_size,
         )
 
-    def get_ticket_detail(self, ticket_id: str, user_role: str, tenant_id: str) -> TicketDetailResponse | None:
+    def get_ticket_detail(
+        self, ticket_id: str, user_role: str, tenant_id: str
+    ) -> TicketDetailResponse | None:
         ticket = self.get_ticket(ticket_id, tenant_id)
         if not ticket:
             return None
@@ -149,7 +202,9 @@ class SupportTicketService:
             csat=csat.model_dump(mode="json") if csat else None,
         )
 
-    async def transition_status(self, ticket_id: str, new_status: TicketStatus) -> SupportTicket:
+    async def transition_status(
+        self, ticket_id: str, new_status: TicketStatus
+    ) -> SupportTicket:
         ticket = self._tickets.get(ticket_id)
         if not ticket:
             raise ValueError(f"Ticket {ticket_id} not found")
@@ -160,11 +215,20 @@ class SupportTicketService:
         ticket.updated_at = datetime.now(timezone.utc)
         if new_status == TicketStatus.RESOLVED:
             ticket.resolved_at = datetime.now(timezone.utc)
-        await self._chat.add_system_message(ticket.ticket_id, f"Status → {new_status.value}")
-        logger.info("support_ticket_transition", ticket_id=ticket_id, old_status=ticket.status.value, new_status=new_status.value)
+        await self._chat.add_system_message(
+            ticket.ticket_id, f"Status → {new_status.value}"
+        )
+        logger.info(
+            "support_ticket_transition",
+            ticket_id=ticket_id,
+            old_status=ticket.status.value,
+            new_status=new_status.value,
+        )
         return ticket
 
-    async def submit_csat(self, ticket_id: str, request: CsatSubmitRequest, user_id: str) -> CsatRating:
+    async def submit_csat(
+        self, ticket_id: str, request: CsatSubmitRequest, user_id: str
+    ) -> CsatRating:
         ticket = self._tickets.get(ticket_id)
         if not ticket:
             raise ValueError(f"Ticket {ticket_id} not found")
@@ -176,7 +240,9 @@ class SupportTicketService:
             rated_by=user_id,
         )
         self._csat[ticket_id] = rating
-        await self._chat.add_system_message(ticket.ticket_id, f"CSAT: {request.score}/5")
+        await self._chat.add_system_message(
+            ticket.ticket_id, f"CSAT: {request.score}/5"
+        )
         logger.info("support_csat_submitted", ticket_id=ticket_id, score=request.score)
         return rating
 
