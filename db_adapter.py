@@ -289,18 +289,18 @@ def list_webhook_events(limit: int = 20) -> list[dict]:
     return db.list_webhook_events(limit)
 
 
-def is_invoice_processed(invoice_id: str) -> bool:
+def is_invoice_processed(invoice_id: str, tenant_id: str = "") -> bool:
     if _pg_enabled():
         from db_pg_sync import is_invoice_processed as pg_fn
 
         conn = _pg_conn()
         try:
-            return pg_fn(conn, invoice_id)
+            return pg_fn(conn, invoice_id, tenant_id)
         finally:
             _pg_return(conn)
     import db
 
-    return db.is_invoice_processed(invoice_id)
+    return db.is_invoice_processed(invoice_id, tenant_id)
 
 
 def mark_invoice_processed(

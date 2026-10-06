@@ -179,13 +179,17 @@ async def list_webhook_events(limit: int = 20) -> list[dict]:
 # ── Processed Invoices ──────────────────────────────────────
 
 
-async def is_invoice_processed(invoice_id: str) -> bool:
+async def is_invoice_processed(invoice_id: str, tenant_id: str = "") -> bool:
+    """F-005: an empty ``tenant_id`` keeps the legacy "any tenant" lookup."""
     if not invoice_id:
         return False
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT 1 FROM processed_invoices WHERE invoice_id = $1 LIMIT 1", invoice_id
+            "SELECT 1 FROM processed_invoices WHERE invoice_id = $1 "
+            "AND ($2 = '' OR tenant_id = $2) LIMIT 1",
+            invoice_id,
+            tenant_id,
         )
     return row is not None
 

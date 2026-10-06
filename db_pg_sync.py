@@ -196,9 +196,13 @@ def list_webhook_events(conn, limit: int = 20) -> list[dict]:
     return [dict(zip(cols, row)) for row in cur.fetchall()]
 
 
-def is_invoice_processed(conn, invoice_id: str) -> bool:
+def is_invoice_processed(conn, invoice_id: str, tenant_id: str = "") -> bool:
     cur = conn.cursor()
-    cur.execute("SELECT 1 FROM processed_invoices WHERE invoice_id = %s", (invoice_id,))
+    cur.execute(
+        "SELECT 1 FROM processed_invoices WHERE invoice_id = %s "
+        "AND (%s = '' OR tenant_id = %s)",
+        (invoice_id, tenant_id, tenant_id),
+    )
     return cur.fetchone() is not None
 
 
