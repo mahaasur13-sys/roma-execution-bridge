@@ -364,9 +364,16 @@
       "passed": 480,
       "skipped": 6,
       "change": "G-SEC4 auth hash-only (INCIDENT ZO-SEC2/SEC3): убран plaintext-fallback и lazy-backfill в db_adapter._find_tenant_by_key_pg; sqlite-ветка переведена на api_key_hash; пути создания тенанта (db_pg_sync.seed_tenants, db_adapter._seed_tenants_pg, db.py.seed_tenants) пишут api_key_hash + api_key=''; db.py tenants-схема + идемпотентный ALTER api_key_hash. Новые тесты: +7 tests/test_auth_hash_only.py (hash-only lookup, негативные wrong/plaintext, sqlite-ветка), +2 tests/test_sqlite_init_alter_scope.py (узкий ALTER), +5 tests/test_sqlite_legacy_key_backfill.py (идемпотентный backfill; строка с уже заполненным hash — plaintext очищается всегда; повторный init — no-op); tests/test_quota_plan_tier_key.py выровнен на hash-only sqlite-контракт. После merge master 0babc028 (#113) и фикса CodeRabbit 4119075863: collected 472 → 486; node passed 466 → 480; CI passed 465 → 479; env-skip=25, admission=6/7 не менялись."
+    },
+    {
+      "date": "2026-10-06",
+      "collected": 531,
+      "passed": 525,
+      "skipped": 6,
+      "change": "Канон выровнен на последний полный repo-wide прогон после #115 (billing webhook, CloudPayments): collected 486 → 531, node passed 480 → 525, CI passed 479 → 524. Правка только этого файла; логика чекера и пороги не менялись."
     }
   ],
-  "measurement": "Профили среды (G-CANON-ENV-PARITY): нода 486 = 480 passed + 6 admission-скипов; CI 486 = 479 passed + 7 admission-скипов (CI-исключительный — R6-live). collected одинаков в обеих средах: набор один. Предыдущее: 472 = 466 + 6 (нода) / 465 + 7 (CI). История набора: 254 → 263 → 270 → 276 → 280 → 281 → 287 → 331 → 335 → 338 → 362 → 371 → 382 → 384 → 396 → 412 → 417 → 423 → 429 → 431 → 434 → 436 → 438 → 441 → 449 → 451 → 456 → 458 → 459 → 460 → 461 → 467 → 471 → 472 → 486.",
+  "measurement": "Профили среды (G-CANON-ENV-PARITY): нода 531 = 525 passed + 6 admission-скипов; CI 531 = 524 passed + 7 admission-скипов (CI-исключительный — R6-live). collected одинаков в обеих средах: набор один. Предыдущее: 486 = 480 + 6 (нода) / 479 + 7 (CI). История набора: 254 → 263 → 270 → 276 → 280 → 281 → 287 → 331 → 335 → 338 → 362 → 371 → 382 → 384 → 396 → 412 → 417 → 423 → 429 → 431 → 434 → 436 → 438 → 441 → 449 → 451 → 456 → 458 → 459 → 460 → 461 → 467 → 471 → 472 → 486 → 531.",
   "profiles": {
     "node": {
       "label": "node",
