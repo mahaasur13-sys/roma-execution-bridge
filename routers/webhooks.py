@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+from decimal import Decimal, InvalidOperation
 
 import db_adapter as db
 from fastapi import APIRouter, HTTPException, Request
@@ -30,32 +31,49 @@ router = APIRouter(tags=["webhooks"])
 # shared with the Fail branch below so the two cannot drift apart.
 _REFUSED_STATUSES = ("Declined", "Cancelled")
 
-# F-004: the amount CloudPayments reports must match the plan price before any
-# credit/activation. Tolerance covers kopeck rounding only.
-_AMOUNT_TOLERANCE = 0.01
-
-
-def _expected_plan_amount(plan: str) -> float | None:
-    """Plan price from ``main.CLOUDPAYMENTS_PLANS``; None if the plan is unknown."""
+# F-004: the amount AND the currency CloudPayments reports must match the plan
+# before any credit/activation. Compared as exact ``Decimal`` values — the old
+# float tolerance is gone, so a drifted kopeck is a mismatch, not rounding.
+def _expected_plan_money(plan: str) -> tuple[Decimal, str] | None:
+    """Plan price + currency from ``main.CLOUDPAYMENTS_PLANS``; None if unknown."""
     plans = getattr(main, "CLOUDPAYMENTS_PLANS", None) or {}
     try:
-        return float(plans[plan]["amount"])
-    except (KeyError, TypeError, ValueError):
+        amount = Decimal(str(plans[plan]["amount"]))
+        currency = str(plans[plan]["currency"] or "").strip().upper()
+    except (KeyError, TypeError, ValueError, InvalidOperation):
         return None
+    if not amount.is_finite() or not currency:
+        return None
+    return amount, currency
 
 
 def _amount_matches_plan(payload: dict, plan: str) -> bool:
-    """Fail closed: missing, unparsable or mismatching Amount never matches."""
-    expected = _expected_plan_amount(plan)
+    """Fail closed on missing, unparsable or mismatching Amount or Currency.
+
+    The currency is checked against the plan's currency and is never assumed:
+    a missing, empty, non-string or unknown currency is a mismatch.
+    """
+    expected = _expected_plan_money(plan)
     if expected is None:
         return False
+    expected_amount, expected_currency = expected
+
+    raw_currency = payload.get("Currency")
+    if not isinstance(raw_currency, str) or not raw_currency.strip():
+        return False
+    if raw_currency.strip().upper() != expected_currency:
+        return False
+
     raw = payload.get("Amount")
     if raw is None or isinstance(raw, bool):
         return False
     try:
-        return abs(float(raw) - expected) <= _AMOUNT_TOLERANCE
-    except (TypeError, ValueError):
+        amount = Decimal(str(raw))
+    except (InvalidOperation, ValueError, TypeError):
         return False
+    if not amount.is_finite():
+        return False
+    return amount == expected_amount
 
 
 @limiter.limit("20/minute")
@@ -135,15 +153,17 @@ async def cloudpayments_webhook(request: Request):
                 # F-004: never activate a tenant on an amount that does not
                 # match the plan price. Fail closed on a missing Amount.
                 if not _amount_matches_plan(payload, plan):
+                    # Deliberately NOT marked processed (F-004): the invoice
+                    # is left open so a corrected notification for the same
+                    # InvoiceId can still activate. Logged on every mismatch,
+                    # so a retry loop resending the wrong amount stays visible.
                     logger.warning(
-                        "cloudpayments_webhook: amount does not match plan "
-                        "invoice=%s account=%s plan=%s",
+                        "cloudpayments_webhook: amount does not match plan — "
+                        "not marked processed, invoice left open for a "
+                        "corrected retry invoice=%s account=%s plan=%s",
                         invoice_id,
                         tenant_id,
                         plan,
-                    )
-                    db.mark_invoice_processed(
-                        invoice_id, "amount_mismatch", tenant_id
                     )
                     return {"code": 0}
                 db.update_tenant_subscription(
@@ -159,15 +179,16 @@ async def cloudpayments_webhook(request: Request):
             if plan:
                 # F-004: recurrent charges are checked against the plan too.
                 if not _amount_matches_plan(payload, plan):
+                    # Same F-004 rule for recurrent charges: not marked
+                    # processed, so the invoice stays open for a corrected
+                    # retry, and every mismatch is logged.
                     logger.warning(
-                        "cloudpayments_webhook: recurrent amount does not match "
-                        "plan invoice=%s account=%s plan=%s",
+                        "cloudpayments_webhook: recurrent amount does not "
+                        "match plan — not marked processed, invoice left open "
+                        "for a corrected retry invoice=%s account=%s plan=%s",
                         invoice_id,
                         tenant_id,
                         plan,
-                    )
-                    db.mark_invoice_processed(
-                        invoice_id, "amount_mismatch", tenant_id
                     )
                     return {"code": 0}
                 db.update_tenant_subscription(

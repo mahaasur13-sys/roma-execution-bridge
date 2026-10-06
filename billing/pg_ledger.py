@@ -81,7 +81,11 @@ class PGBillingLedger:
         reject_nullable_money("ledger_entries", "currency", currency)
         entry_type = entry_type.upper()
         meta_json = json.dumps(metadata or {})
-        ledger_id = f"led-{int(time.time() * 1000)}-{hash(tenant_id + entry_type + str(amount)) & 0xFFFFF:05x}"
+        # uuid4, not hash(): the built-in hash() is salted per process
+        # (PYTHONHASHSEED), so the same entry got a different ledger_id in every
+        # worker and the unique-key contract was not reproducible. One id is used
+        # for both the in-memory mirror and the PG row.
+        ledger_id = f"led-{int(time.time() * 1000)}-{uuid4().hex[:12]}"
         # Always mirror into the in-memory ledger (used as a PG-down fallback and
         # for tests); the PG write is best-effort and never drops the entry on failure.
         self._entries.append(
@@ -102,8 +106,19 @@ class PGBillingLedger:
                    VALUES (%s, %s, %s, %s, %s, %s::jsonb)""",
                 (ledger_id, tenant_id, entry_type, amount, currency, meta_json),
             )
-        except PGUnavailableError:
-            pass
+        except PGUnavailableError as exc:
+            # Never silent: the entry survives only in the in-memory mirror, so
+            # a dropped PG write must be visible. _pg_execute already logs the
+            # underlying error (including a unique-key collision, which it
+            # wraps into PGUnavailableError) under operation="ledger_append".
+            logger.warning(
+                "ledger_append: PG write failed, entry kept in memory only "
+                "ledger_id=%s tenant_id=%s currency=%s error=%s",
+                ledger_id,
+                tenant_id,
+                currency,
+                exc,
+            )
         return ledger_id
 
     def credit(

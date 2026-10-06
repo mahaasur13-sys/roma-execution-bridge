@@ -29,12 +29,14 @@ def _payload(
     operation="Payment",
     status="Completed",
     amount=4900.00,
+    currency="RUB",
 ):
     body = {
         "OperationType": operation,
         "Status": status,
         "InvoiceId": invoice_id,
         "Amount": amount,
+        "Currency": currency,
         "Data": {"plan": plan},
     }
     if account_id is not None:

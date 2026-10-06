@@ -125,3 +125,57 @@ def test_top_up_route_returns_non_empty_entry_id(monkeypatch):
     body = resp.json()
     assert body["entry_id"], f"entry_id must not be empty: {body!r}"
     assert body["entry_id"] in _ids(fresh, target)
+
+def test_identical_entries_get_distinct_ids(ledger):
+    """The id must not come from the built-in ``hash()``.
+
+    ``hash()`` is salted per process (PYTHONHASHSEED), so the old
+    ``led-{ms}-{hash(...)}`` scheme produced the SAME id for two identical
+    entries recorded in the same millisecond — unreproducible across workers
+    and a real unique-key collision. Same inputs must now yield distinct ids.
+    """
+    tenant_id = _uniq("nf1")
+    first = ledger.append(tenant_id, "CREDIT", 4.0, "USD")
+    second = ledger.append(tenant_id, "CREDIT", 4.0, "USD")
+
+    assert first != second
+    assert {first, second} == set(_ids(ledger, tenant_id))
+
+
+def test_ledger_id_is_unique_across_many_appends(ledger):
+    tenant_id = _uniq("nf1")
+    ids = [ledger.credit(tenant_id, 1.0) for _ in range(50)]
+
+    assert len(set(ids)) == 50
+    assert set(ids) == set(_ids(ledger, tenant_id))
+
+
+def test_pg_down_is_logged_not_swallowed(monkeypatch, ledger):
+    """A dropped PG write must be visible in logs, not silently passed.
+
+    ``caplog`` cannot see this logger — the project installs its own JSON
+    handler — so the module logger is spied on directly.
+    """
+    import billing.pg_ledger as pg_ledger_mod
+
+    def _boom(*args, **kwargs):
+        raise PGUnavailableError("PG not configured or unavailable")
+
+    monkeypatch.setattr(ledger, "_pg_execute", _boom)
+
+    seen: list[str] = []
+    real_warning = pg_ledger_mod.logger.warning
+
+    def _spy(msg, *args, **kwargs):
+        seen.append(msg % args if args else str(msg))
+        return real_warning(msg, *args, **kwargs)
+
+    monkeypatch.setattr(pg_ledger_mod.logger, "warning", _spy)
+
+    tenant_id = _uniq("nf1")
+    entry_id = ledger.credit(tenant_id, 9.0)
+
+    assert entry_id and entry_id in _ids(ledger, tenant_id)
+    assert any(
+        "kept in memory only" in line and entry_id in line for line in seen
+    ), seen
