@@ -72,7 +72,13 @@ def tenants(monkeypatch):
 
 
 def test_top_up_without_api_key_401(tenants):
-    """POST /billing/top-up with no X-API-Key must be rejected (401)."""
+    """POST /billing/top-up with no X-API-Key must be rejected (401).
+
+    The rejection must not credit the target tenant: a gate that returned 401
+    after the ledger write would still leave tenant B richer.
+    """
+    before_b = main.billing_ledger.get_tenant_entries(tenants["b_id"])
+
     client = TestClient(main.app, raise_server_exceptions=False)
     # X-Forwarded-For places us inside the admin IP allowlist so the check
     # reaches the API-key gate (rather than failing on IP).
@@ -83,9 +89,18 @@ def test_top_up_without_api_key_401(tenants):
     )
     assert resp.status_code == 401
 
+    after_b = main.billing_ledger.get_tenant_entries(tenants["b_id"])
+    assert after_b == before_b, "401 top-up must not credit tenant B"
+
 
 def test_top_up_non_admin_403(tenants):
-    """A non-admin key (tenant != tenant-demo) must not top up (403)."""
+    """A non-admin key (tenant != tenant-demo) must not top up (403).
+
+    As with the 401 path, the denied request must leave the target tenant's
+    ledger byte-for-byte unchanged.
+    """
+    before_b = main.billing_ledger.get_tenant_entries(tenants["b_id"])
+
     client = TestClient(main.app, raise_server_exceptions=False)
     resp = client.post(
         "/billing/top-up",
@@ -94,20 +109,36 @@ def test_top_up_non_admin_403(tenants):
     )
     assert resp.status_code == 403
 
+    after_b = main.billing_ledger.get_tenant_entries(tenants["b_id"])
+    assert after_b == before_b, "403 top-up must not credit tenant B"
+
 
 def test_ledger_returns_only_caller_entries(tenants):
     """GET /billing/ledger must scope entries to the caller's tenant."""
     # Seed a distinct credit for A and B so we can detect cross-tenant leakage.
     main.billing_ledger.credit(tenants["a_id"], 123.45, note="a-only")
     main.billing_ledger.credit(tenants["b_id"], 678.90, note="b-only")
+    before_b = main.billing_ledger.get_tenant_entries(tenants["b_id"])
 
     client = TestClient(main.app, raise_server_exceptions=False)
     resp = client.get("/billing/ledger", headers={"X-API-Key": tenants["key_a"]})
     assert resp.status_code == 200
 
-    amounts = {e["amount"] for e in resp.json()["entries"]}
+    body = resp.json()
+    assert body["tenant_id"] == tenants["a_id"], "ledger reported another tenant"
+
+    amounts = {e["amount"] for e in body["entries"]}
     assert 123.45 in amounts       # caller's own credit is visible
     assert 678.90 not in amounts   # other tenant's credit is not leaked
+
+    # Entries carry no tenant_id field, so prove ownership through the ledger
+    # itself: every returned amount belongs to A, and B is untouched by A's read.
+    a_amounts = {
+        e["amount"] for e in main.billing_ledger.get_tenant_entries(tenants["a_id"])
+    }
+    after_b = main.billing_ledger.get_tenant_entries(tenants["b_id"])
+    assert amounts <= a_amounts, "ledger returned entries not owned by the caller"
+    assert after_b == before_b, "tenant B ledger changed during tenant A read"
 
 
 def test_balance_without_api_key_401(tenants):
