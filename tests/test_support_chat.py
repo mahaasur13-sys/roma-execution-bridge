@@ -19,7 +19,11 @@ from support_chat.models import (
     AssignTicketRequest,
     CsatSubmitRequest,
 )
-from support_chat.service import SupportTicketService
+from support_chat.service import (
+    SupportTicketService,
+    TicketNotFoundError,
+    TicketStatusConflictError,
+)
 from support_chat.chat_service import ChatService
 from support_chat.settings import SupportSettings
 from support_chat.db import SupportDatabaseUnavailable, get_session_factory
@@ -563,3 +567,180 @@ class TestRuntimeBlockers:
         )
 
         assert len(calls) == 1
+
+
+class TestAssignStatusRace:
+    """E-15: assignment must not overwrite terminal or concurrently changed status."""
+
+    @pytest.mark.asyncio
+    async def test_26_assign_refused_for_terminal_status_without_side_effects(
+        self, service, chat_service
+    ) -> None:
+        """RESOLVED and CLOSED both refuse assignment and leave the row untouched."""
+        for terminal in (TicketStatus.RESOLVED, TicketStatus.CLOSED):
+            req = CreateTicketRequest(tenant_id="t1", subject=f"Terminal {terminal.value}")
+            ticket = await service.create_ticket(req, "user1")
+            tid = str(ticket.ticket_id)
+            await service.transition_status(tid, TicketStatus.IN_PROGRESS)
+            await service.transition_status(tid, terminal)
+
+            participants_before = len(service._participants.get(tid, []))
+            messages_before = len(chat_service.get_messages(tid))
+
+            with pytest.raises(TicketStatusConflictError):
+                await service.assign_agent(tid, AssignTicketRequest(agent_id="a1"))
+
+            stored = await service.get_ticket(tid)
+            assert stored is not None
+            assert stored.status == terminal
+            assert stored.assigned_agent_id is None
+            # create_ticket already registered the tenant participant; the failed
+            # assignment must not add a support-agent participant or a system note.
+            assert len(service._participants.get(tid, [])) == participants_before
+            assert all(
+                participant.role != ParticipantRole.SUPPORT_AGENT
+                for participant in service._participants.get(tid, [])
+            )
+            assert len(chat_service.get_messages(tid)) == messages_before
+
+    @pytest.mark.asyncio
+    async def test_27_assign_reassigns_within_in_progress(self, service) -> None:
+        """IN_PROGRESS -> IN_PROGRESS reassignment stays allowed and keeps the status."""
+        req = CreateTicketRequest(tenant_id="t1", subject="Reassign")
+        ticket = await service.create_ticket(req, "user1")
+        tid = str(ticket.ticket_id)
+        await service.transition_status(tid, TicketStatus.IN_PROGRESS)
+
+        first = await service.assign_agent(tid, AssignTicketRequest(agent_id="a1"))
+        assert first.assigned_agent_id == "a1"
+        assert first.status == TicketStatus.IN_PROGRESS
+
+        second = await service.assign_agent(tid, AssignTicketRequest(agent_id="a2"))
+        assert second.assigned_agent_id == "a2"
+        assert second.status == TicketStatus.IN_PROGRESS
+
+        stored = await service.get_ticket(tid)
+        assert stored is not None
+        assert stored.assigned_agent_id == "a2"
+        assert stored.status == TicketStatus.IN_PROGRESS
+
+    @pytest.mark.asyncio
+    async def test_28_stale_read_assignment_loses_to_concurrent_transition(
+        self, chat_service, tmp_path
+    ) -> None:
+        """CAS: a status committed after the read makes the assignment UPDATE match 0 rows."""
+        from sqlalchemy import update as sa_update
+
+        from support_chat.db_models import SupportTicketModel
+
+        factory = get_session_factory(f"sqlite:///{tmp_path}/assign-race.db")
+        service = SupportTicketService(chat_service=chat_service, session_factory=factory)
+
+        req = CreateTicketRequest(tenant_id="t1", subject="Assign race")
+        ticket = await service.create_ticket(req, "user1")
+        tid = str(ticket.ticket_id)
+        await service.transition_status(tid, TicketStatus.IN_PROGRESS)
+        await service.assign_agent(tid, AssignTicketRequest(agent_id="a1"))
+
+        read_seen = threading.Event()
+        winner_done = threading.Event()
+        observed: list[str] = []
+
+        class _StaleReadFactory:
+            """Snapshot the row in a short-lived Session, then pause before the UPDATE."""
+
+            def __call__(self):
+                session = factory()
+
+                def _stale_get(entity, ident, **kwargs):
+                    with factory() as snapshot:
+                        model = snapshot.get(entity, ident)
+                        observed.append(model.status)
+                        snapshot.expunge(model)
+                    read_seen.set()
+                    assert winner_done.wait(timeout=10), "winner transition never committed"
+                    return model
+
+                session.get = _stale_get
+                return session
+
+        service._session_factory = _StaleReadFactory()
+
+        def _winner_transition() -> None:
+            with factory() as session:
+                session.execute(
+                    sa_update(SupportTicketModel)
+                    .where(SupportTicketModel.ticket_id == ticket.ticket_id)
+                    .values(status=TicketStatus.CLOSED.value)
+                )
+                session.commit()
+
+        task = asyncio.create_task(
+            service.assign_agent(tid, AssignTicketRequest(agent_id="a2"))
+        )
+        try:
+            assert await asyncio.to_thread(read_seen.wait, 10), "assignment never read the row"
+            await asyncio.to_thread(_winner_transition)
+            winner_done.set()
+            with pytest.raises(TicketStatusConflictError):
+                await task
+        finally:
+            winner_done.set()
+            if not task.done():
+                task.cancel()
+
+        assert observed == [TicketStatus.IN_PROGRESS.value]
+        with factory() as session:
+            final = session.get(SupportTicketModel, ticket.ticket_id)
+            assert final.status == TicketStatus.CLOSED.value
+            assert final.assigned_agent_id == "a1"
+
+    @pytest.mark.asyncio
+    async def test_29_missing_ticket_raises_not_found(self, service) -> None:
+        """A missing ticket is a typed not-found, distinct from a status conflict."""
+        missing = str(uuid4())
+        with pytest.raises(TicketNotFoundError) as excinfo:
+            await service.assign_agent(missing, AssignTicketRequest(agent_id="a1"))
+        assert not isinstance(excinfo.value, TicketStatusConflictError)
+        assert missing in str(excinfo.value)
+
+    def test_30_assign_http_contract_404_409_200(
+        self, chat_service, monkeypatch, tmp_path
+    ) -> None:
+        """HTTP mapping: missing ticket -> 404, terminal status -> 409, normal -> 200."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        import support_chat.router as support_router
+
+        factory = get_session_factory(f"sqlite:///{tmp_path}/assign-http.db")
+        service = SupportTicketService(chat_service=chat_service, session_factory=factory)
+        monkeypatch.setattr(support_router, "_service", service)
+
+        app = FastAPI()
+        app.include_router(support_router.router)
+        client = TestClient(app)
+
+        missing = client.post(
+            f"/v1/support/tickets/{uuid4()}/assign", json={"agent_id": "a1"}
+        )
+        assert missing.status_code == 404
+
+        created = client.post(
+            "/v1/support/tickets", json={"tenant_id": "t1", "subject": "HTTP"}
+        )
+        assert created.status_code == 201
+        tid = created.json()["ticket_id"]
+
+        happy = client.post(f"/v1/support/tickets/{tid}/assign", json={"agent_id": "a1"})
+        assert happy.status_code == 200
+        assert happy.json()["assigned_agent_id"] == "a1"
+
+        closed = client.post(f"/v1/support/tickets/{tid}/transition?status=closed")
+        assert closed.status_code == 200
+
+        conflict = client.post(
+            f"/v1/support/tickets/{tid}/assign", json={"agent_id": "a2"}
+        )
+        assert conflict.status_code == 409
+        assert conflict.json()["detail"]

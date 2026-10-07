@@ -26,7 +26,11 @@ from support_chat.models import (
     TicketDetailResponse,
     TicketStatus,
 )
-from support_chat.service import SupportTicketService
+from support_chat.service import (
+    SupportTicketService,
+    TicketNotFoundError,
+    TicketStatusConflictError,
+)
 from support_chat.chat_service import ChatService
 from support_chat.settings import SupportSettings
 
@@ -98,8 +102,12 @@ async def add_message(ticket_id: str, request: CreateMessageRequest):
 async def assign_agent(ticket_id: str, request: AssignTicketRequest):
     try:
         return await _service.assign_agent(ticket_id, request)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except TicketNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TicketStatusConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/tickets/{ticket_id}/transition")

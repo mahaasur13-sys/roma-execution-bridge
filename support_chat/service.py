@@ -47,6 +47,14 @@ VALID_STATUS_TRANSITIONS: dict[TicketStatus, list[TicketStatus]] = {
 }
 
 
+class TicketNotFoundError(ValueError):
+    """Raised when a support ticket does not exist."""
+
+
+class TicketStatusConflictError(ValueError):
+    """Raised when ticket status prevents or races with an assignment."""
+
+
 def _coerce_uuid(value: object) -> UUID | None:
     if isinstance(value, UUID):
         return value
@@ -187,11 +195,38 @@ class SupportTicketService:
         with self._factory()() as session:
             model = session.get(SupportTicketModel, tid)
             if model is None:
-                raise ValueError(f"Ticket {ticket_id} not found")
-            model.assigned_agent_id = agent_id
-            model.status = TicketStatus.IN_PROGRESS.value
-            model.updated_at = datetime.now(timezone.utc)
+                raise TicketNotFoundError(f"Ticket {ticket_id} not found")
+            current = TicketStatus(model.status)
+            allowed = VALID_STATUS_TRANSITIONS.get(current, [])
+            if current is not TicketStatus.IN_PROGRESS and (
+                TicketStatus.IN_PROGRESS not in allowed
+            ):
+                raise TicketStatusConflictError(
+                    f"Ticket {ticket_id} is {current.value}; "
+                    "assignment is not allowed from this status"
+                )
+            now = datetime.now(timezone.utc)
+            # Optimistic status predicate: the read status is re-checked in the
+            # UPDATE, so a concurrent transition cannot be overwritten.
+            result = session.execute(
+                update(SupportTicketModel)
+                .where(
+                    SupportTicketModel.ticket_id == tid,
+                    SupportTicketModel.status == current.value,
+                )
+                .values(
+                    assigned_agent_id=agent_id,
+                    status=TicketStatus.IN_PROGRESS.value,
+                    updated_at=now,
+                )
+            )
+            if result.rowcount == 0:
+                raise TicketStatusConflictError(
+                    f"Ticket {ticket_id} status changed concurrently; "
+                    "assignment was not applied"
+                )
             session.commit()
+            session.refresh(model)
             return _model_to_ticket(model)
 
     def _get_ticket_sync(
