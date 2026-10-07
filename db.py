@@ -26,7 +26,8 @@ def init_db() -> None:
     c.executescript("""
         CREATE TABLE IF NOT EXISTS tenants (
             id TEXT PRIMARY KEY,
-            api_key TEXT NOT NULL,
+            api_key TEXT NOT NULL DEFAULT '',
+            api_key_hash TEXT NOT NULL DEFAULT '',
             name TEXT NOT NULL DEFAULT '',
             plan TEXT NOT NULL DEFAULT 'free',
             stripe_customer_id TEXT,
@@ -133,19 +134,46 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
         CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id);
     """)
+    # G-SEC4: tenants.api_key_hash added for hash-only lookup; additive, idempotent.
+    # Scope is explicit (PRAGMA probe rather than a blanket except): any other
+    # OperationalError is raised instead of being silently swallowed.
+    cols = {row[1] for row in c.execute("PRAGMA table_info(tenants)").fetchall()}
+    if "api_key_hash" not in cols:
+        c.execute(
+            "ALTER TABLE tenants ADD COLUMN api_key_hash TEXT NOT NULL DEFAULT ''"
+        )
+    # G-SEC4/M1+M3: every legacy row that still carries a plaintext key is visited —
+    # the hash is computed only when missing, but the plaintext is cleared in all of
+    # them (a row with both fields kept its plaintext before this fix).
+    # Idempotent: a re-run matches no rows.
+    import hashlib
+
+    legacy = c.execute(
+        "SELECT id, api_key, api_key_hash FROM tenants "
+        "WHERE coalesce(api_key, '') <> ''"
+    ).fetchall()
+    for row in legacy:
+        digest = row[2] or hashlib.sha256((row[1] or "").encode("utf-8")).hexdigest()
+        c.execute(
+            "UPDATE tenants SET api_key_hash = ?, api_key = '' WHERE id = ?",
+            (digest, row[0]),
+        )
     c.commit()
     c.close()
 
 
 def seed_tenants(api_keys: dict[str, dict]) -> None:
+    import hashlib
+
     c = _conn()
     for key, info in api_keys.items():
         tenant_id = info.get("tenant_id", "")
         name = info.get("name", tenant_id)
+        digest = hashlib.sha256((key or "").encode("utf-8")).hexdigest()
         c.execute(
-            """INSERT OR IGNORE INTO tenants (id, api_key, name, plan, subscription_status)
-               VALUES (?, ?, ?, 'free', 'inactive')""",
-            (tenant_id, key, name),
+            """INSERT OR IGNORE INTO tenants (id, api_key, api_key_hash, name, plan, subscription_status)
+               VALUES (?, '', ?, ?, 'free', 'inactive')""",
+            (tenant_id, digest, name),
         )
     c.commit()
     c.close()
@@ -641,15 +669,20 @@ def list_tenants() -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def is_invoice_processed(invoice_id: str) -> bool:
-    """Проверяет, был ли уже обработан данный InvoiceId."""
+def is_invoice_processed(invoice_id: str, tenant_id: str = "") -> bool:
+    """Проверяет, был ли уже обработан данный InvoiceId.
+
+    F-005: при непустом ``tenant_id`` проверка ограничена этим тенантом —
+    счёт, записанный за другим тенантом, не гасит событие текущего.
+    """
     if not invoice_id:
         return False
     c = _conn()
     try:
         c.execute(
-            "SELECT 1 FROM processed_invoices WHERE invoice_id = ? LIMIT 1",
-            (invoice_id,),
+            "SELECT 1 FROM processed_invoices WHERE invoice_id = ? "
+            "AND (? = '' OR tenant_id = ?) LIMIT 1",
+            (invoice_id, tenant_id, tenant_id),
         )
         return c.fetchone() is not None
     finally:

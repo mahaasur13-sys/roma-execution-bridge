@@ -101,7 +101,8 @@
       "**/test_*.py",
       "test_*.py",
       "**/*_test.py",
-      "deploy/ops/"
+      "deploy/ops/",
+      "adapters/"
     ],
     "note": "exclude: tests/ — тесты не измеряют сами себя; deploy/ops/ — операционные артефакты (сторожа, релей, барьеры): версионируются для воспроизводимости (N6), но не продукт. Остальной deploy/ остаётся в области измерения.",
     "exclude_reason": {
@@ -176,6 +177,11 @@
       "transition": "15607 -> 15347 statements",
       "reason": "A-1/N7a: exclude 'tests/' матчил только КОРНЕВОЙ каталог; вложенные наборы (plugins/*/tests, saas/gateway/tests, tests/integration) попадали в область измерения. Паттерны стали glob.",
       "commit": "A-1"
+    },
+    {
+      "date": "2026-10-06",
+      "scope": "product-only, exclude += adapters/",
+      "reason": "parked Jev sidecar spike (9 файлов, a41de71a) не product-only; снимает COVERAGE GATE FAILED unscoped adapters/__init__.py"
     }
   ],
   "measured_on": {

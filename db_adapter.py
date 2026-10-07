@@ -289,18 +289,18 @@ def list_webhook_events(limit: int = 20) -> list[dict]:
     return db.list_webhook_events(limit)
 
 
-def is_invoice_processed(invoice_id: str) -> bool:
+def is_invoice_processed(invoice_id: str, tenant_id: str = "") -> bool:
     if _pg_enabled():
         from db_pg_sync import is_invoice_processed as pg_fn
 
         conn = _pg_conn()
         try:
-            return pg_fn(conn, invoice_id)
+            return pg_fn(conn, invoice_id, tenant_id)
         finally:
             _pg_return(conn)
     import db
 
-    return db.is_invoice_processed(invoice_id)
+    return db.is_invoice_processed(invoice_id, tenant_id)
 
 
 def mark_invoice_processed(
@@ -856,9 +856,10 @@ async def _seed_tenants_pg(api_keys):
     async with pool.acquire() as conn:
         for key, info in api_keys.items():
             await conn.execute(
-                "INSERT INTO tenants (id, api_key, name, plan, subscription_status) VALUES ($1,$2,$3,'free','inactive') ON CONFLICT (id) DO NOTHING",
+                "INSERT INTO tenants (id, api_key, api_key_hash, name, plan, subscription_status) "
+                "VALUES ($1,'',$2,$3,'free','inactive') ON CONFLICT (id) DO NOTHING",
                 info.get("tenant_id", ""),
-                key,
+                _hash_api_key(key),
                 info.get("name", info.get("tenant_id", "")),
             )
 
@@ -1527,8 +1528,10 @@ def _insert_audit_event_sqlite(eid, tid, etype, ent_type, ent_id, data_json):
     try:
         _ensure_audit_events_table(c)
         cur = c.execute(
-            "INSERT OR IGNORE INTO audit_events (id, tenant_id, event_type, entity_type, entity_id, data)"
-            " VALUES (?,?,?,?,?,?)",
+            "INSERT INTO audit_events (id, tenant_id, event_type, entity_type, entity_id, data)"
+            " VALUES (?,?,?,?,?,?)"
+            " ON CONFLICT (tenant_id, event_type, entity_id)"
+            " WHERE entity_id IS NOT NULL AND entity_id <> 'unknown' DO NOTHING",
             (eid, tid, etype, ent_type, ent_id, data_json),
         )
         c.commit()
@@ -2508,35 +2511,6 @@ def _find_tenant_by_key_pg(api_key: str) -> dict | None:
             conn.rollback()
         if row:
             _bump_tenant_lookup("hash")
-        else:
-            _bump_tenant_lookup("plaintext")
-            logger.warning(
-                "tenant.lookup.fallback: plaintext path hit (unhashed tenant)"
-            )
-            try:
-                cur.execute(
-                    "SELECT id, name, plan FROM tenants "
-                    "WHERE api_key = %s AND (api_key_hash IS NULL OR api_key_hash = '')",
-                    (api_key,),
-                )
-                row = cur.fetchone()
-            except psycopg2.errors.UndefinedColumn:
-                conn.rollback()
-                cur.execute(
-                    "SELECT id, name, plan FROM tenants WHERE api_key = %s",
-                    (api_key,),
-                )
-                row = cur.fetchone()
-            if row:
-                try:
-                    cur.execute(
-                        "UPDATE tenants SET api_key_hash = %s "
-                        "WHERE id = %s AND (api_key_hash IS NULL OR api_key_hash = '')",
-                        (digest, row[0]),
-                    )
-                    conn.commit()
-                except psycopg2.errors.UndefinedColumn:
-                    conn.rollback()
         conn.commit()
         cur.close()
         if row:
@@ -2549,15 +2523,16 @@ def _find_tenant_by_key_pg(api_key: str) -> dict | None:
     return result
 
 
-def _find_tenant_by_key_sqlite(api_key_hash: str) -> dict | None:
+def _find_tenant_by_key_sqlite(api_key: str) -> dict | None:
+    digest = _hash_api_key(api_key)
     with _sqlite_conn() as conn:
         row = conn.execute(
-            "SELECT id, name, plan, api_key FROM tenants WHERE api_key = ?",
-            (api_key_hash,),
+            "SELECT id, name, plan FROM tenants WHERE api_key_hash = ?",
+            (digest,),
         ).fetchone()
     if not row:
         return None
-    return {"tenant_id": row[0], "name": row[1], "plan": row[2], "api_key": row[3]}
+    return {"tenant_id": row[0], "name": row[1], "plan": row[2]}
 
 
 # ── Email Verification ──────────────────────────────────────

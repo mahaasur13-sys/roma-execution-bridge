@@ -1,5 +1,17 @@
 name: ROMA Deploy to Zo
 
+# Pull-модель выката (G-ZO-DEPLOY-RED).
+#
+# Раннер GitHub Actions НЕ ходит на машину Zo: у него нет до неё ни маршрута, ни DNS
+# (`ssh: Could not resolve hostname ... Temporary failure in name resolution`, exit 255).
+# Выкат делает сама машина Zo (`deploy/ops/zo_deploy_agent.py`, Zo user service
+# `zo-deploy-agent`): тянет master, когда CI по этому SHA зелёный, применяет миграции,
+# рестартит `roma-execution-bridge` и ставит вердикт commit status `deploy/zo`.
+#
+# Этот workflow больше ничего не «деплоит» — он ЧИТАЕТ вердикт машины по своему SHA.
+# Красный здесь означает ровно одно: машина Zo не подтвердила выкат, причина — в описании
+# статуса `deploy/zo` (или статуса нет вовсе).
+
 on:
   workflow_run:
     workflows: ["ROMA CI"]
@@ -8,61 +20,49 @@ on:
   workflow_dispatch:
 
 jobs:
-  deploy:
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+  verdict:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: SSH key diagnostics (class only, no key material)
-        env:
-          ZO_SSH_KEY: ${{ secrets.ZO_SSH_KEY }}
+      - name: Только актуальный HEAD (устаревшие SHA пропускаем)
+        id: gate
         run: |
-          echo "ssh: $(ssh -V 2>&1 | head -1)"
-          if [ -z "$ZO_SSH_KEY" ]; then
-            echo "key: ABSENT"
-            exit 1
+          default_branch="$(gh api "/repos/$REPO" --jq .default_branch)"
+          head_sha="$(gh api "/repos/$REPO/commits/$default_branch" --jq .sha)"
+          echo "run_sha=$SHA head=$head_sha"
+          if [ "$SHA" != "$head_sha" ]; then
+            echo "::notice::SHA $SHA перекрыт более новым master ($head_sha) — вердикт не ждём"
+            echo "superseded=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "superseded=false" >> "$GITHUB_OUTPUT"
           fi
-          case "$ZO_SSH_KEY" in
-            *"BEGIN OPENSSH PRIVATE KEY"*) echo "key: OpenSSH" ;;
-            *"BEGIN RSA PRIVATE KEY"*) echo "key: PEM-RSA (legacy; convert to OpenSSH)" ;;
-            *"PuTTY-User-Key-File"*) echo "key: PuTTY-ppk (unsupported; convert to OpenSSH)" ;;
-            *) echo "key: unknown-format" ;;
-          esac
 
-      - name: Setup SSH key (fail-fast, format-checked)
-        env:
-          ZO_SSH_KEY: ${{ secrets.ZO_SSH_KEY }}
+      - name: Вердикт машины Zo (commit status deploy/zo)
+        if: steps.gate.outputs.superseded != 'true'
         run: |
-          if [ -z "$ZO_SSH_KEY" ]; then
-            echo "::error::ZO_SSH_KEY is empty/absent — set the deploy key (docs/upgrade-notes.md)"
-            exit 1
-          fi
-          KEY_FILE="$RUNNER_TEMP/deploy_key"
-          printf '%s\n' "$ZO_SSH_KEY" | tr -d '\r' > "$KEY_FILE"
-          chmod 600 "$KEY_FILE"
-          if ! ssh-keygen -y -f "$KEY_FILE" >/dev/null 2>"$RUNNER_TEMP/key_err"; then
-            echo "::error::SSH key not loadable ('error in libcrypto') — format/encoding issue; regenerate per docs/upgrade-notes.md (CRLF stripped automatically; check .ppk/PEM/whitespace)"
-            exit 1
-          fi
-          eval "$(ssh-agent -s)" >/dev/null
-          echo "SSH_AUTH_SOCK=${SSH_AUTH_SOCK}" >> "$GITHUB_ENV"
-          echo "SSH_AGENT_PID=${SSH_AGENT_PID}" >> "$GITHUB_ENV"
-          ssh-add "$KEY_FILE" >/dev/null 2>&1 || { echo "::error::ssh-add failed"; exit 1; }
+          deadline=$((SECONDS + 900))
+          while [ $SECONDS -lt $deadline ]; do
+            payload="$(gh api "/repos/$REPO/commits/$SHA/status" \
+              --jq '[.statuses[] | select(.context=="deploy/zo")][0] | "\(.state // "none")\t\(.description // "")"' 2>/dev/null || echo "none")"
+            state="${payload%%$'\t'*}"
+            desc="${payload#*$'\t'}"
+            echo "$(date -u +%H:%M:%SZ) deploy/zo=${state} ${desc}"
+            case "$state" in
+              success) echo "::notice::выкат на машину Zo подтверждён: ${desc}"; exit 0 ;;
+              failure|error) echo "::error::выкат не состоялся: ${desc}"; exit 1 ;;
+            esac
+            sleep 20
+          done
+          echo "::error::за 15 минут вердикт deploy/zo не появился — машина Zo выкат не подтвердила (журнал: /var/lib/roma-deploy-agent/deploy-agent.log)"
+          exit 1
 
-      - name: Deploy to Zo
+      - name: Public health probe
+        if: steps.gate.outputs.superseded != 'true'
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.ZO_USER }}@${{ secrets.ZO_HOST }} << 'EOF'
-            cd /home/workspace/roma-execution-bridge
-            git pull origin master
-            source venv/bin/activate 2>/dev/null || true
-            pip install -e ".[dev]" -q
-            supervisorctl restart roma-execution-bridge
-            echo "Deploy complete"
-          EOF
-
-      - name: Health check
-        run: |
-          sleep 5
-          curl -sf https://roma-execution-bridge-asurdev.zocomputer.io/health || echo "Health check failed"
+          curl -sf --max-time 15 https://roma-execution-bridge-asurdev.zocomputer.io/health | head -c 400
+          echo

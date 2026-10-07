@@ -75,14 +75,14 @@ def test_find_tenant_by_key_returns_plan_key_both_backends(monkeypatch):
         def fetchone(self):
             return self._row
 
-    sq_row = ("tenant-1", "Tenant One", "pro", "api-key-xxx")  # id, name, plan, api_key
+    sq_row = ("tenant-1", "Tenant One", "pro")  # id, name, plan
     monkeypatch.setattr(db, "_sqlite_conn", lambda: _FakeSqliteConn(sq_row))
 
-    sq_result = db._find_tenant_by_key_sqlite("api-key-hash")
+    sq_result = db._find_tenant_by_key_sqlite("api-key-raw")
     assert sq_result == {
         "tenant_id": "tenant-1",
         "name": "Tenant One",
         "plan": "pro",
-        "api_key": "api-key-xxx",
     }
     assert "tier" not in sq_result
+    assert "api_key" not in sq_result

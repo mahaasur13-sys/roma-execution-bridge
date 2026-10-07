@@ -8,9 +8,9 @@
 
 ## Шаг 1: Получить API-ключ
 
-Тестовый ключ: **`roma-demo-key-2026`**
+API-ключ выдаётся один раз при создании тенанта (`tenant-...`).
 
-Все доступные ключи — в `config/api_keys.json`. Каждый ключ привязан к своему tenant'у (tenant-demo, tenant-alpha, tenant-bravo).
+Ключи хранятся в PostgreSQL только хешем (`tenants.api_key_hash`, sha256). Открытый ключ в БД не сохраняется.
 
 ---
 
@@ -137,7 +137,7 @@ curl https://roma-execution-bridge-asurdev.zocomputer.io/metrics
 | Ошибка | Причина | Решение |
 |--------|---------|---------|
 | 401 Unauthorized | Нет заголовка `X-API-Key` | Добавьте `-H "X-API-Key: roma-demo-key-2026"` |
-| 401 Invalid API key | Неверный ключ | Проверьте ключ в `config/api_keys.json` |
+| 401 Invalid API key | Неверный ключ | Ключ не совпал с `tenants.api_key_hash` (в БД хранится только хеш) |
 | 402 Payment Required | Лимит тарифа исчерпан | Апгрейдните план через `/billing/create-checkout-session` |
 | 404 Job not found | Неверный `job_id` или чужой tenant | Задачи изолированы по tenant'ам |
 | 404 Demo not found | Неверное имя демо | `GET /demos` покажет список |

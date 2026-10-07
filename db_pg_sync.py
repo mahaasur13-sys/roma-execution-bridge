@@ -121,10 +121,9 @@ def seed_tenants(conn, api_keys: dict) -> None:
         digest = hashlib.sha256((key or "").encode("utf-8")).hexdigest()
         cur.execute(
             "INSERT INTO tenants (id, api_key, api_key_hash, name, plan, subscription_status) "
-            "VALUES (%s,%s,%s,%s,'free','inactive') ON CONFLICT (id) DO NOTHING",
+            "VALUES (%s,'',%s,%s,'free','inactive') ON CONFLICT (id) DO NOTHING",
             (
                 info.get("tenant_id", ""),
-                key,
                 digest,
                 info.get("name", info.get("tenant_id", "")),
             ),
@@ -197,9 +196,13 @@ def list_webhook_events(conn, limit: int = 20) -> list[dict]:
     return [dict(zip(cols, row)) for row in cur.fetchall()]
 
 
-def is_invoice_processed(conn, invoice_id: str) -> bool:
+def is_invoice_processed(conn, invoice_id: str, tenant_id: str = "") -> bool:
     cur = conn.cursor()
-    cur.execute("SELECT 1 FROM processed_invoices WHERE invoice_id = %s", (invoice_id,))
+    cur.execute(
+        "SELECT 1 FROM processed_invoices WHERE invoice_id = %s "
+        "AND (%s = '' OR tenant_id = %s)",
+        (invoice_id, tenant_id, tenant_id),
+    )
     return cur.fetchone() is not None
 
 

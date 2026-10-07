@@ -28,11 +28,15 @@ def _payload(
     plan="pro",
     operation="Payment",
     status="Completed",
+    amount=4900.00,
+    currency="RUB",
 ):
     body = {
         "OperationType": operation,
         "Status": status,
         "InvoiceId": invoice_id,
+        "Amount": amount,
+        "Currency": currency,
         "Data": {"plan": plan},
     }
     if account_id is not None:
@@ -58,7 +62,9 @@ def cp(monkeypatch):
     monkeypatch.setattr(
         main.db, "set_tenant_inactive", lambda *a, **k: calls["inactive"].append(a)
     )
-    monkeypatch.setattr(main.db, "is_invoice_processed", lambda invoice_id: False)
+    monkeypatch.setattr(
+        main.db, "is_invoice_processed", lambda invoice_id, tenant_id="": False
+    )
     return {"calls": calls, "fake": fake}
 
 
@@ -113,12 +119,16 @@ def test_repeat_invoice_no_second_credit(cp, monkeypatch):
     client = TestClient(main.app, raise_server_exceptions=False)
     payload = _payload(account_id="tenant-a", invoice_id="inv-repeat")
 
-    monkeypatch.setattr(main.db, "is_invoice_processed", lambda iid: False)
+    monkeypatch.setattr(
+        main.db, "is_invoice_processed", lambda iid, tenant_id="": False
+    )
     r1 = _post(client, payload)
     assert r1.status_code == 200
     assert len(cp["calls"]["sub"]) == 1
 
-    monkeypatch.setattr(main.db, "is_invoice_processed", lambda iid: True)
+    monkeypatch.setattr(
+        main.db, "is_invoice_processed", lambda iid, tenant_id="": True
+    )
     r2 = _post(client, payload)
     assert r2.status_code == 200
     assert len(cp["calls"]["sub"]) == 1  # still exactly one credit
