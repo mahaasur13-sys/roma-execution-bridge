@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -112,7 +114,12 @@ class SupportTicketService:
     ) -> None:
         self._chat = chat_service or ChatService()
         self._settings = settings or SupportSettings()
-        self._session_factory = session_factory or get_session_factory()
+        # Lazy: the default factory is built on the first DB operation, never at
+        # import time — importing the router/app without PG_DSN must neither open
+        # a connection nor create a file.
+        self._session_factory = session_factory
+        self._factory_lock = threading.Lock()
+        self._schema_lock = threading.Lock()
         self._tables_ready = False
         # Secondary collections remain in-memory (out of scope for P-1 БЛОКЕР-4):
         # participants / attachments / csat are auxiliary to the ticket record.
@@ -120,25 +127,157 @@ class SupportTicketService:
         self._attachments: dict[str, list[TicketAttachment]] = {}
         self._csat: dict[str, CsatRating] = {}
 
-    def _ensure_tables(self) -> None:
+    def _factory(self):
+        """Session factory for the resolved URL (built lazily, exactly once)."""
+        factory = self._session_factory
+        if factory is None:
+            with self._factory_lock:
+                if self._session_factory is None:
+                    self._session_factory = get_session_factory()
+                factory = self._session_factory
+        return factory
+
+    def _ensure_tables_sync(self) -> None:
+        """Worker-only schema init.
+
+        PostgreSQL schema is owned by migration 013, so nothing is created on
+        that path; SQLite (explicit test/local URL) still needs lazy DDL. The
+        lock + double check keep concurrent worker threads from racing DDL.
+        """
         if self._tables_ready:
             return
-        engine = self._session_factory.kw.get("bind")
-        if engine is not None:
-            from support_chat.db_models import Base
+        with self._schema_lock:
+            if self._tables_ready:
+                return
+            with self._factory()() as session:
+                bind = session.get_bind()
+                if bind.dialect.name == "sqlite":
+                    from support_chat.db_models import Base
 
-            Base.metadata.create_all(engine)
-        self._tables_ready = True
+                    Base.metadata.create_all(bind)
+            self._tables_ready = True
 
-    def _persist_ticket(self, ticket: SupportTicket) -> None:
-        with self._session_factory() as session:
+    def _insert_ticket_sync(self, ticket: SupportTicket) -> None:
+        self._ensure_tables_sync()
+        with self._factory()() as session:
             session.add(_ticket_to_model(ticket))
             session.commit()
+
+    def _add_message_sync(self, request: CreateMessageRequest) -> bool:
+        self._ensure_tables_sync()
+        tid = _coerce_uuid(request.ticket_id)
+        status_changed = False
+        with self._factory()() as session:
+            model = session.get(SupportTicketModel, tid)
+            if model is None:
+                raise ValueError(f"Ticket {request.ticket_id} not found")
+            if (
+                TicketStatus(model.status) == TicketStatus.WAITING_CUSTOMER
+                and request.sender_role == ParticipantRole.TENANT_USER
+            ):
+                model.status = TicketStatus.IN_PROGRESS.value
+                status_changed = True
+            model.updated_at = datetime.now(timezone.utc)
+            session.commit()
+        return status_changed
+
+    def _assign_agent_sync(self, ticket_id: str, agent_id: str) -> SupportTicket:
+        self._ensure_tables_sync()
+        tid = _coerce_uuid(ticket_id)
+        with self._factory()() as session:
+            model = session.get(SupportTicketModel, tid)
+            if model is None:
+                raise ValueError(f"Ticket {ticket_id} not found")
+            model.assigned_agent_id = agent_id
+            model.status = TicketStatus.IN_PROGRESS.value
+            model.updated_at = datetime.now(timezone.utc)
+            session.commit()
+            return _model_to_ticket(model)
+
+    def _get_ticket_sync(
+        self, ticket_id: str, tenant_id: str | None = None
+    ) -> SupportTicket | None:
+        self._ensure_tables_sync()
+        tid = _coerce_uuid(ticket_id)
+        if tid is None:
+            return None
+        with self._factory()() as session:
+            model = session.get(SupportTicketModel, tid)
+            if model is None:
+                return None
+            ticket = _model_to_ticket(model)
+        if tenant_id and ticket.tenant_id != tenant_id:
+            return None
+        return ticket
+
+    def _list_tickets_sync(
+        self,
+        tenant_id: str,
+        status: TicketStatus | None,
+        page: int,
+        page_size: int,
+    ) -> TicketListResponse:
+        self._ensure_tables_sync()
+        with self._factory()() as session:
+            q = session.query(SupportTicketModel).filter(
+                SupportTicketModel.tenant_id == tenant_id
+            )
+            if status is not None:
+                q = q.filter(SupportTicketModel.status == status.value)
+            total = q.count()
+            rows = (
+                q.order_by(SupportTicketModel.created_at.asc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+                .all()
+            )
+            tickets = [_model_to_ticket(m) for m in rows]
+        return TicketListResponse(
+            tickets=[t.model_dump(mode="json") for t in tickets],
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+
+    def _transition_sync(
+        self, ticket_id: str, new_status: TicketStatus
+    ) -> tuple[SupportTicket, str]:
+        self._ensure_tables_sync()
+        tid = _coerce_uuid(ticket_id)
+        now = datetime.now(timezone.utc)
+        with self._factory()() as session:
+            model = session.get(SupportTicketModel, tid)
+            if model is None:
+                raise ValueError(f"Ticket {ticket_id} not found")
+            current = TicketStatus(model.status)
+            allowed = VALID_STATUS_TRANSITIONS.get(current, [])
+            if new_status not in allowed:
+                raise ValueError(
+                    f"Cannot transition from {current.value} to {new_status.value}"
+                )
+            values: dict = {"status": new_status.value, "updated_at": now}
+            if new_status == TicketStatus.RESOLVED:
+                values["resolved_at"] = now
+            result = session.execute(
+                update(SupportTicketModel)
+                .where(
+                    SupportTicketModel.ticket_id == tid,
+                    SupportTicketModel.status == current.value,
+                )
+                .values(**values)
+            )
+            if result.rowcount == 0:
+                raise ValueError(
+                    f"Cannot transition from {current.value} to {new_status.value} "
+                    "(status changed concurrently)"
+                )
+            session.commit()
+            session.refresh(model)
+            return _model_to_ticket(model), current.value
 
     async def create_ticket(
         self, request: CreateTicketRequest, user_id: str
     ) -> CreateTicketResponse:
-        self._ensure_tables()
         ticket = SupportTicket(
             tenant_id=request.tenant_id,
             subject=request.subject,
@@ -150,7 +289,7 @@ class SupportTicketService:
             created_by=user_id,
         )
         tid = str(ticket.ticket_id)
-        self._persist_ticket(ticket)
+        await asyncio.to_thread(self._insert_ticket_sync, ticket)
 
         participant = ChatParticipant(
             ticket_id=ticket.ticket_id,
@@ -190,21 +329,7 @@ class SupportTicketService:
         )
 
     async def add_message(self, request: CreateMessageRequest) -> ChatMessage:
-        self._ensure_tables()
-        tid = _coerce_uuid(request.ticket_id)
-        status_changed = False
-        with self._session_factory() as session:
-            model = session.get(SupportTicketModel, tid)
-            if model is None:
-                raise ValueError(f"Ticket {request.ticket_id} not found")
-            if (
-                TicketStatus(model.status) == TicketStatus.WAITING_CUSTOMER
-                and request.sender_role == ParticipantRole.TENANT_USER
-            ):
-                model.status = TicketStatus.IN_PROGRESS.value
-                status_changed = True
-            model.updated_at = datetime.now(timezone.utc)
-            session.commit()
+        status_changed = await asyncio.to_thread(self._add_message_sync, request)
 
         if status_changed:
             await self._chat.add_system_message(
@@ -225,17 +350,9 @@ class SupportTicketService:
     async def assign_agent(
         self, ticket_id: str, request: AssignTicketRequest
     ) -> SupportTicket:
-        self._ensure_tables()
-        tid = _coerce_uuid(ticket_id)
-        with self._session_factory() as session:
-            model = session.get(SupportTicketModel, tid)
-            if model is None:
-                raise ValueError(f"Ticket {ticket_id} not found")
-            model.assigned_agent_id = request.agent_id
-            model.status = TicketStatus.IN_PROGRESS.value
-            model.updated_at = datetime.now(timezone.utc)
-            session.commit()
-            ticket = _model_to_ticket(model)
+        ticket = await asyncio.to_thread(
+            self._assign_agent_sync, ticket_id, request.agent_id
+        )
 
         participant = ChatParticipant(
             ticket_id=ticket.ticket_id,
@@ -252,55 +369,26 @@ class SupportTicketService:
         )
         return ticket
 
-    def get_ticket(
+    async def get_ticket(
         self, ticket_id: str, tenant_id: str | None = None
     ) -> SupportTicket | None:
-        self._ensure_tables()
-        tid = _coerce_uuid(ticket_id)
-        if tid is None:
-            return None
-        with self._session_factory() as session:
-            model = session.get(SupportTicketModel, tid)
-            if model is None:
-                return None
-            ticket = _model_to_ticket(model)
-        if tenant_id and ticket.tenant_id != tenant_id:
-            return None
-        return ticket
+        return await asyncio.to_thread(self._get_ticket_sync, ticket_id, tenant_id)
 
-    def list_tickets(
+    async def list_tickets(
         self,
         tenant_id: str,
         status: TicketStatus | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> TicketListResponse:
-        self._ensure_tables()
-        with self._session_factory() as session:
-            q = session.query(SupportTicketModel).filter(
-                SupportTicketModel.tenant_id == tenant_id
-            )
-            if status is not None:
-                q = q.filter(SupportTicketModel.status == status.value)
-            total = q.count()
-            rows = (
-                q.order_by(SupportTicketModel.created_at.asc())
-                .offset((page - 1) * page_size)
-                .limit(page_size)
-                .all()
-            )
-            tickets = [_model_to_ticket(m) for m in rows]
-        return TicketListResponse(
-            tickets=[t.model_dump(mode="json") for t in tickets],
-            total=total,
-            page=page,
-            page_size=page_size,
+        return await asyncio.to_thread(
+            self._list_tickets_sync, tenant_id, status, page, page_size
         )
 
-    def get_ticket_detail(
+    async def get_ticket_detail(
         self, ticket_id: str, user_role: str, tenant_id: str
     ) -> TicketDetailResponse | None:
-        ticket = self.get_ticket(ticket_id, tenant_id)
+        ticket = await self.get_ticket(ticket_id, tenant_id)
         if not ticket:
             return None
         messages = self._chat.get_visible_messages(ticket_id, user_role)
@@ -318,38 +406,9 @@ class SupportTicketService:
     async def transition_status(
         self, ticket_id: str, new_status: TicketStatus
     ) -> SupportTicket:
-        self._ensure_tables()
-        tid = _coerce_uuid(ticket_id)
-        now = datetime.now(timezone.utc)
-        with self._session_factory() as session:
-            model = session.get(SupportTicketModel, tid)
-            if model is None:
-                raise ValueError(f"Ticket {ticket_id} not found")
-            current = TicketStatus(model.status)
-            allowed = VALID_STATUS_TRANSITIONS.get(current, [])
-            if new_status not in allowed:
-                raise ValueError(
-                    f"Cannot transition from {current.value} to {new_status.value}"
-                )
-            values: dict = {"status": new_status.value, "updated_at": now}
-            if new_status == TicketStatus.RESOLVED:
-                values["resolved_at"] = now
-            result = session.execute(
-                update(SupportTicketModel)
-                .where(
-                    SupportTicketModel.ticket_id == tid,
-                    SupportTicketModel.status == current.value,
-                )
-                .values(**values)
-            )
-            if result.rowcount == 0:
-                raise ValueError(
-                    f"Cannot transition from {current.value} to {new_status.value} "
-                    "(status changed concurrently)"
-                )
-            session.commit()
-            session.refresh(model)
-            ticket = _model_to_ticket(model)
+        ticket, current = await asyncio.to_thread(
+            self._transition_sync, ticket_id, new_status
+        )
 
         await self._chat.add_system_message(
             ticket.ticket_id, f"Status → {new_status.value}"
@@ -357,7 +416,7 @@ class SupportTicketService:
         logger.info(
             "support_ticket_transition",
             ticket_id=ticket_id,
-            old_status=current.value,
+            old_status=current,
             new_status=new_status.value,
         )
         return ticket
@@ -365,7 +424,7 @@ class SupportTicketService:
     async def submit_csat(
         self, ticket_id: str, request: CsatSubmitRequest, user_id: str
     ) -> CsatRating:
-        ticket = self.get_ticket(ticket_id)
+        ticket = await self.get_ticket(ticket_id)
         if not ticket:
             raise ValueError(f"Ticket {ticket_id} not found")
         rating = CsatRating(

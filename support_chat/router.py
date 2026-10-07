@@ -69,7 +69,7 @@ async def list_tickets(
     page_size: int = 20,
 ):
     ticket_status = TicketStatus(status) if status else None
-    return _service.list_tickets(
+    return await _service.list_tickets(
         tenant_id, status=ticket_status, page=page, page_size=page_size
     )
 
@@ -80,7 +80,7 @@ async def get_ticket(
     tenant_id: str = Depends(_get_tenant_id),
     user_role: str = Depends(_get_user_role),
 ):
-    detail = _service.get_ticket_detail(ticket_id, user_role, tenant_id)
+    detail = await _service.get_ticket_detail(ticket_id, user_role, tenant_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Ticket not found")
     return detail

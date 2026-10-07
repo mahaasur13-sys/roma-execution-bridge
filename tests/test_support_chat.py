@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -19,7 +22,7 @@ from support_chat.models import (
 from support_chat.service import SupportTicketService
 from support_chat.chat_service import ChatService
 from support_chat.settings import SupportSettings
-from support_chat.db import get_session_factory
+from support_chat.db import SupportDatabaseUnavailable, get_session_factory
 
 
 @pytest.fixture
@@ -110,12 +113,12 @@ class TestTicketCreation:
         await service.create_ticket(req1, "user1")
         await service.create_ticket(req2, "user2")
 
-        t1_tickets = service.list_tickets("t1")
-        t2_tickets = service.list_tickets("t2")
+        t1_tickets = await service.list_tickets("t1")
+        t2_tickets = await service.list_tickets("t2")
         assert t1_tickets.total == 1
         assert t2_tickets.total == 1
         t1_ticket_id = t1_tickets.tickets[0]["ticket_id"]
-        assert service.get_ticket(t1_ticket_id, tenant_id="t2") is None
+        assert await service.get_ticket(t1_ticket_id, tenant_id="t2") is None
 
 
 class TestMessages:
@@ -257,7 +260,7 @@ class TestPersistence:
         # "restart": brand-new engine/session factory over the same DB file.
         sf2 = get_session_factory(db_url)
         service2 = SupportTicketService(session_factory=sf2)
-        ticket = service2.get_ticket(str(tid), tenant_id="t1")
+        ticket = await service2.get_ticket(str(tid), tenant_id="t1")
 
         assert ticket is not None
         assert ticket.ticket_id == tid
@@ -316,7 +319,7 @@ class TestPersistence:
             session.commit()
             assert result.rowcount == 0
 
-        assert service.get_ticket(tid).status == TicketStatus.WAITING_CUSTOMER
+        assert (await service.get_ticket(tid)).status == TicketStatus.WAITING_CUSTOMER
 
     @pytest.mark.asyncio
     async def test_16_utc_roundtrip(self, service) -> None:
@@ -325,9 +328,238 @@ class TestPersistence:
 
         req = CreateTicketRequest(tenant_id="t1", subject="UTC")
         ticket = await service.create_ticket(req, "user1")
-        got = service.get_ticket(str(ticket.ticket_id), tenant_id="t1")
+        got = await service.get_ticket(str(ticket.ticket_id), tenant_id="t1")
         assert got is not None
         assert got.created_at.tzinfo is not None
         assert got.created_at.utcoffset() == timedelta(0)
         assert got.updated_at.tzinfo is not None
         assert got.updated_at.utcoffset() == timedelta(0)
+
+
+class _RecordingFactory:
+    """Session-factory wrapper recording worker thread ids, opens and closes."""
+
+    def __init__(self, factory, on_call=None) -> None:
+        self._factory = factory
+        self._on_call = on_call
+        self.thread_ids: list[int] = []
+        self.opens = 0
+        self.closes = 0
+
+    def __call__(self):
+        self.thread_ids.append(threading.get_ident())
+        self.opens += 1
+        if self._on_call is not None:
+            self._on_call()
+        session = self._factory()
+        real_close = session.close
+
+        def _close() -> None:
+            self.closes += 1
+            real_close()
+
+        session.close = _close
+        return session
+
+
+class TestRuntimeBlockers:
+    """BLOCKER-1 (sync I/O on the loop) and BLOCKER-2 (silent SQLite fallback)."""
+
+    @pytest.mark.asyncio
+    async def test_17_db_io_runs_off_the_event_loop_thread(self, chat_service) -> None:
+        """Sync SQLAlchemy work must happen in a worker, never on the loop thread."""
+        loop_thread = threading.get_ident()
+        sf = _RecordingFactory(get_session_factory("sqlite:///:memory:"))
+        service = SupportTicketService(chat_service=chat_service, session_factory=sf)
+
+        await service.create_ticket(
+            CreateTicketRequest(tenant_id="t1", subject="offload"), "user1"
+        )
+
+        assert sf.thread_ids, "session factory was never used"
+        assert all(tid != loop_thread for tid in sf.thread_ids), sf.thread_ids
+
+    @pytest.mark.asyncio
+    async def test_18_loop_stays_responsive_while_db_call_is_parked(
+        self, chat_service
+    ) -> None:
+        """Deterministic responsiveness proof (no wall-clock-only assertion)."""
+        entered = threading.Event()
+        release = threading.Event()
+
+        def _park() -> None:
+            entered.set()
+            release.wait(5)
+
+        sf = _RecordingFactory(
+            get_session_factory("sqlite:///:memory:"), on_call=_park
+        )
+        service = SupportTicketService(chat_service=chat_service, session_factory=sf)
+        req = CreateTicketRequest(tenant_id="t1", subject="parked")
+
+        async def other_coroutine() -> str:
+            return "loop-alive"
+
+        task = asyncio.create_task(service.create_ticket(req, "user1"))
+        try:
+            for _ in range(10000):
+                if entered.is_set():
+                    break
+                await asyncio.sleep(0)
+            assert entered.is_set(), "worker never reached the DB helper"
+
+            # Loop is free: another coroutine completes while the DB call is parked.
+            assert await other_coroutine() == "loop-alive"
+            assert not task.done()
+        finally:
+            release.set()
+
+        created = await task
+        assert created.ticket_id is not None
+
+    @pytest.mark.asyncio
+    async def test_19_every_async_mutation_is_offloaded(self, chat_service) -> None:
+        """create / add_message / assign_agent / transition_status all offload."""
+        loop_thread = threading.get_ident()
+        sf = _RecordingFactory(get_session_factory("sqlite:///:memory:"))
+        service = SupportTicketService(chat_service=chat_service, session_factory=sf)
+
+        ticket = await service.create_ticket(
+            CreateTicketRequest(tenant_id="t1", subject="mutations"), "user1"
+        )
+        tid = str(ticket.ticket_id)
+
+        sf.thread_ids.clear()
+        await service.create_ticket(
+            CreateTicketRequest(tenant_id="t1", subject="second"), "user1"
+        )
+        assert sf.thread_ids and all(t != loop_thread for t in sf.thread_ids), "create"
+
+        sf.thread_ids.clear()
+        await service.add_message(
+            CreateMessageRequest(
+                ticket_id=tid,
+                body="hello",
+                sender_id="user1",
+                sender_role=ParticipantRole.TENANT_USER,
+            )
+        )
+        assert sf.thread_ids and all(t != loop_thread for t in sf.thread_ids), "add_message"
+
+        sf.thread_ids.clear()
+        await service.assign_agent(tid, AssignTicketRequest(agent_id="agent1"))
+        assert sf.thread_ids and all(t != loop_thread for t in sf.thread_ids), "assign_agent"
+
+        sf.thread_ids.clear()
+        await service.transition_status(tid, TicketStatus.WAITING_CUSTOMER)
+        assert sf.thread_ids and all(t != loop_thread for t in sf.thread_ids), "transition"
+
+    @pytest.mark.asyncio
+    async def test_20_session_is_opened_and_closed_inside_worker(self, chat_service) -> None:
+        """Every Session is created and closed in the worker thread."""
+        loop_thread = threading.get_ident()
+        sf = _RecordingFactory(get_session_factory("sqlite:///:memory:"))
+        service = SupportTicketService(chat_service=chat_service, session_factory=sf)
+
+        await service.create_ticket(
+            CreateTicketRequest(tenant_id="t1", subject="ownership"), "user1"
+        )
+
+        assert sf.opens == sf.closes >= 1
+        assert all(tid != loop_thread for tid in sf.thread_ids), sf.thread_ids
+
+    @pytest.mark.asyncio
+    async def test_21_worker_error_propagates_fail_closed(self, service) -> None:
+        """A failure raised inside the worker must reach the caller."""
+        with pytest.raises(ValueError, match="not found"):
+            await service.add_message(
+                CreateMessageRequest(
+                    ticket_id=str(uuid4()),
+                    body="orphan",
+                    sender_id="user1",
+                    sender_role=ParticipantRole.TENANT_USER,
+                )
+            )
+
+    @pytest.mark.asyncio
+    async def test_22_production_without_pg_or_injection_fails_closed(
+        self, chat_service, monkeypatch
+    ) -> None:
+        """Production + no PG_DSN + no injection → explicit refusal, no DB file."""
+        monkeypatch.delenv("PG_DSN", raising=False)
+        monkeypatch.delenv("ROMA_ENV", raising=False)
+        monkeypatch.setenv("ENV", "production")
+
+        db_file = Path("support_chat.db")
+        existed_before = db_file.exists()
+
+        service = SupportTicketService(chat_service=chat_service)
+        assert service._session_factory is None, "constructor must stay lazy"
+
+        with pytest.raises(SupportDatabaseUnavailable) as excinfo:
+            await service.create_ticket(
+                CreateTicketRequest(tenant_id="t1", subject="nope"), "user1"
+            )
+
+        message = str(excinfo.value)
+        assert "PG_DSN" in message
+        assert "postgresql" not in message.lower()
+        assert "sqlite" not in message.lower()
+        assert db_file.exists() is existed_before
+
+    @pytest.mark.asyncio
+    async def test_23_explicit_sqlite_injection_allowed_under_production(
+        self, chat_service, tmp_path, monkeypatch
+    ) -> None:
+        """Explicit test/local injection stays allowed even with the prod marker."""
+        monkeypatch.delenv("PG_DSN", raising=False)
+        monkeypatch.setenv("ENV", "production")
+
+        sf = get_session_factory(f"sqlite:///{tmp_path}/explicit.db")
+        service = SupportTicketService(chat_service=chat_service, session_factory=sf)
+
+        created = await service.create_ticket(
+            CreateTicketRequest(tenant_id="t1", subject="explicit"), "user1"
+        )
+        assert await service.get_ticket(str(created.ticket_id), tenant_id="t1") is not None
+
+    def test_24_construction_without_pg_never_touches_the_db(
+        self, monkeypatch
+    ) -> None:
+        """No DB resolution, no connection and no file until the first DB call."""
+        monkeypatch.delenv("PG_DSN", raising=False)
+        monkeypatch.setenv("ENV", "production")
+
+        db_file = Path("support_chat.db")
+        existed_before = db_file.exists()
+
+        service = SupportTicketService()
+
+        assert service._session_factory is None
+        assert db_file.exists() is existed_before
+
+    @pytest.mark.asyncio
+    async def test_25_concurrent_schema_init_runs_once(
+        self, chat_service, tmp_path, monkeypatch
+    ) -> None:
+        """Lock + double check: concurrent workers initialise SQLite DDL once."""
+        from support_chat.db_models import Base
+
+        calls: list[int] = []
+        real_create_all = Base.metadata.create_all
+
+        def _counting_create_all(bind, *args, **kwargs):
+            calls.append(1)
+            return real_create_all(bind, *args, **kwargs)
+
+        monkeypatch.setattr(Base.metadata, "create_all", _counting_create_all)
+
+        sf = get_session_factory(f"sqlite:///{tmp_path}/lock.db")
+        service = SupportTicketService(chat_service=chat_service, session_factory=sf)
+
+        await asyncio.gather(
+            asyncio.to_thread(service._ensure_tables_sync),
+            asyncio.to_thread(service._ensure_tables_sync),
+        )
+
+        assert len(calls) == 1
