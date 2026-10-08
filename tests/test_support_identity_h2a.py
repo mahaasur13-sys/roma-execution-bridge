@@ -13,6 +13,7 @@ network, no real credential, no app server. The contract under test:
 
 from __future__ import annotations
 
+import inspect
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -361,18 +362,79 @@ class TestBrowserGuards:
         assert info["credential"] not in resp.text
         assert cookie.split(";")[0].split("=", 1)[1] not in resp.text
 
-    def test_18_csrf_is_required_and_bound_to_the_session(self, h2a) -> None:
-        info = _provision(h2a["factory"], "agent-18", [TENANT_A])
-        login = _login(h2a["client"], info["credential"])
-        assert login.json()["csrf_token"]
-        # Same exchange: the CSRF value returned with a session matches that row.
-        principal, _, csrf = h2a["auth"]._login_sync(info["credential"])
+    def test_18_csrf_is_required_and_bound_to_the_session(self, h2a, monkeypatch) -> None:
+        info_a = _provision(h2a["factory"], "agent-18", [TENANT_A])
+        login_a = _login(h2a["client"], info_a["credential"])
+        assert login_a.status_code == 200, login_a.text
+        csrf_a = login_a.json()["csrf_token"]
+        assert csrf_a
 
-        assert h2a["auth"]._csrf_matches_sync(csrf, principal.session_id) is True
-        assert h2a["auth"]._csrf_matches_sync("wrong", principal.session_id) is False
-        assert h2a["auth"]._csrf_matches_sync(None, principal.session_id) is False
-        assert h2a["auth"]._csrf_matches_sync(csrf, "not-a-uuid") is False
-        assert h2a["auth"]._csrf_matches_sync(csrf, str(uuid.uuid4())) is False
+        # The CSRF token returned by the HTTP login must be bound to the session
+        # row of the very cookie that same HTTP response set — not to any other
+        # session, and not to a separately minted one.
+        cookie_a = h2a["client"].cookies.get(SESSION_COOKIE_NAME)
+        assert cookie_a
+        principal_a = h2a["auth"]._authenticate_session_sync(cookie_a)
+        assert h2a["auth"]._csrf_matches_sync(csrf_a, principal_a.session_id) is True
+
+        # A CSRF token from a *different* exchange never matches this session.
+        _, _, other_csrf = h2a["auth"]._login_sync(info_a["credential"])
+        assert h2a["auth"]._csrf_matches_sync(other_csrf, principal_a.session_id) is False
+
+        assert h2a["auth"]._csrf_matches_sync("wrong", principal_a.session_id) is False
+        assert h2a["auth"]._csrf_matches_sync(None, principal_a.session_id) is False
+        assert h2a["auth"]._csrf_matches_sync(csrf_a, "not-a-uuid") is False
+        assert h2a["auth"]._csrf_matches_sync(csrf_a, str(uuid.uuid4())) is False
+
+        # A second, independent browser session with its own cookie jar.
+        info_b = _provision(h2a["factory"], "agent-18-b", [TENANT_A])
+        client_b = TestClient(h2a["app"], base_url="https://testserver")
+        login_b = _login(client_b, info_b["credential"])
+        assert login_b.status_code == 200, login_b.text
+        cookie_b = client_b.cookies.get(SESSION_COOKIE_NAME)
+        assert cookie_b and cookie_b != cookie_a
+
+        # Privileged mutations must fail closed on every browser-guard error and
+        # must never reach the service layer.
+        monkeypatch.setattr(support_router, "_service", _ForbiddenService())
+
+        for name, path, payload in (
+            ("assign", f"/v1/support/tickets/{uuid.uuid4()}/assign", {}),
+            (
+                "transition",
+                f"/v1/support/tickets/{uuid.uuid4()}/transition?status=closed",
+                None,
+            ),
+        ):
+            cases = (
+                ("missing-csrf", h2a["client"], {"Origin": ORIGIN}, payload),
+                (
+                    "invalid-csrf",
+                    h2a["client"],
+                    {"Origin": ORIGIN, CSRF_HEADER_NAME: "wrong"},
+                    payload,
+                ),
+                (
+                    "bad-origin",
+                    h2a["client"],
+                    {"Origin": "https://evil.test", CSRF_HEADER_NAME: csrf_a},
+                    payload,
+                ),
+                (
+                    "cross-session-csrf",
+                    client_b,
+                    {"Origin": ORIGIN, CSRF_HEADER_NAME: csrf_a},
+                    payload,
+                ),
+            )
+            for label, client, headers, body in cases:
+                if body is None:
+                    resp = client.post(path, headers=headers)
+                else:
+                    resp = client.post(path, json=body, headers=headers)
+                assert resp.status_code == 403, (
+                    f"{name}/{label}: {resp.status_code} {resp.text}"
+                )
 
     def test_19_logout_needs_origin_and_csrf(self, h2a) -> None:
         info = _provision(h2a["factory"], "agent-19", [TENANT_A])
@@ -552,6 +614,13 @@ class TestRestLeastPrivilege:
 
         h2a["app"].dependency_overrides[router_module._optional_tenant_principal] = _fake_key
         monkeypatch.setattr(support_router, "_service", _ForbiddenService())
+
+        # CR-1: the wrapper is deliberately synchronous, so FastAPI runs the
+        # sync DB-backed canonical verifier in its dependency threadpool
+        # instead of blocking the event loop.
+        assert inspect.iscoroutinefunction(
+            router_module._optional_tenant_principal
+        ) is False
 
         assign = h2a["client"].post(
             f"/v1/support/tickets/{uuid.uuid4()}/assign",
