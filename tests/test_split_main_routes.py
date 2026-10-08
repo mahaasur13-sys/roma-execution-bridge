@@ -67,6 +67,8 @@ EXPECTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/v1/crypto/invoices/{invoice_id}"),
     ("GET", "/v1/decisions"),
     ("GET", "/v1/decisions/{decision_id}"),
+    ("GET", "/v1/support/agent/tickets"),
+    ("GET", "/v1/support/agent/tickets/{ticket_id}"),
     ("GET", "/v1/support/auth/session"),
     ("GET", "/v1/support/tickets"),
     ("GET", "/v1/support/tickets/{ticket_id}"),

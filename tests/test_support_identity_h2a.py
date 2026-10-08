@@ -13,6 +13,7 @@ network, no real credential, no app server. The contract under test:
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -981,3 +982,376 @@ class TestConcurrentCasConflicts:
             assert row.status == TicketStatus.IN_PROGRESS.value
             assert row.resolved_at is None
             assert row.tenant_id == TENANT_A
+
+
+TENANT_C = "tenant-c"
+
+
+def _key_principal(tenant_id: str) -> dict:
+    """A verified tenant principal, as ``deps.verify_api_key`` returns it."""
+    return {"tenant_id": tenant_id, "name": tenant_id, "plan": "pro", "api_key": RAW_KEY}
+
+
+class TestAgentMembershipScopedReads:
+    """H2a-C1: read-only agent list/detail scoped to explicit memberships.
+
+    The endpoints are side-effect-free GETs, so a support session alone is
+    enough — no Origin and no CSRF — while every other credential ordering rule
+    of the H2a boundary is preserved: no credential 401, both credential types
+    400, invalid session 401 with no tenant-key fallback, and a tenant API key
+    403 before any lookup.
+    """
+
+    # --- helpers ---------------------------------------------------------
+
+    @staticmethod
+    def _seed_ticket(
+        h2a,
+        tenant_id: str,
+        *,
+        subject: str = "help",
+        status: str = TicketStatus.OPEN.value,
+        created_at: datetime | None = None,
+        assigned_agent_id: str | None = None,
+        ticket_id: uuid.UUID | None = None,
+    ) -> str:
+        """Insert a ticket row directly — C1 tests the read path, not creation."""
+        tid = ticket_id or uuid.uuid4()
+        stamp = created_at or datetime.now(timezone.utc)
+        with h2a["factory"]() as session:
+            session.add(
+                SupportTicketModel(
+                    ticket_id=tid,
+                    tenant_id=tenant_id,
+                    subject=subject,
+                    body="",
+                    status=status,
+                    priority="medium",
+                    assigned_agent_id=assigned_agent_id,
+                    created_by=f"tenant:{tenant_id}",
+                    created_at=stamp,
+                    updated_at=stamp,
+                )
+            )
+            session.commit()
+        return str(tid)
+
+    @staticmethod
+    def _agent(h2a, subject: str, tenants):
+        """Provision an identity, log in on a fresh cookie jar, return the client."""
+        client = TestClient(h2a["app"], base_url="https://testserver")
+        info = _provision(h2a["factory"], subject, list(tenants))
+        resp = client.post(
+            "/v1/support/auth/login",
+            json={"credential": info["credential"]},
+            headers={"Origin": ORIGIN},
+        )
+        assert resp.status_code == 200, resp.text
+        return client
+
+    @staticmethod
+    def _ticket_rows(h2a) -> list[tuple]:
+        with h2a["factory"]() as session:
+            return [
+                (str(r.ticket_id), r.tenant_id, r.status, r.assigned_agent_id, r.subject)
+                for r in session.query(SupportTicketModel)
+                .order_by(SupportTicketModel.ticket_id.asc())
+                .all()
+            ]
+
+    @staticmethod
+    def _ids(body: dict) -> list[str]:
+        return [t["ticket_id"] for t in body["tickets"]]
+
+    # --- credential ordering ---------------------------------------------
+
+    def test_42_no_credential_is_401_before_any_service_call(
+        self, h2a, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(support_router, "_service", _ForbiddenService())
+        client = TestClient(h2a["app"], base_url="https://testserver")
+        resp = client.get("/v1/support/agent/tickets")
+        assert resp.status_code == 401
+        assert "X-API-Key" in resp.json()["detail"]
+
+    def test_43_valid_tenant_key_is_403_before_any_service_call(
+        self, h2a, monkeypatch
+    ) -> None:
+        """An API key identifies a tenant, never a support agent."""
+        monkeypatch.setattr(support_router, "_service", _ForbiddenService())
+        monkeypatch.setitem(
+            h2a["app"].dependency_overrides,
+            support_router._optional_tenant_principal,
+            lambda: _key_principal(TENANT_A),
+        )
+        client = TestClient(h2a["app"], base_url="https://testserver")
+        resp = client.get("/v1/support/agent/tickets")
+        assert resp.status_code == 403
+        assert RAW_KEY not in resp.text
+
+    def test_44_both_credential_types_are_400_before_any_service_call(
+        self, h2a, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(support_router, "_service", _ForbiddenService())
+        monkeypatch.setitem(
+            h2a["app"].dependency_overrides,
+            support_router._optional_tenant_principal,
+            lambda: _key_principal(TENANT_A),
+        )
+        client = TestClient(h2a["app"], base_url="https://testserver")
+        client.cookies.set(SESSION_COOKIE_NAME, "opaque-session-value", path="/")
+        resp = client.get("/v1/support/agent/tickets")
+        assert resp.status_code == 400
+        assert "not both" in resp.json()["detail"]
+
+    def test_45_invalid_session_is_401_and_never_falls_back(self, h2a, monkeypatch) -> None:
+        """A bad cookie is not silently downgraded to a tenant key."""
+        monkeypatch.setattr(support_router, "_service", _ForbiddenService())
+        client = TestClient(h2a["app"], base_url="https://testserver")
+        client.cookies.set(SESSION_COOKIE_NAME, "unknown-session", path="/")
+        resp = client.get("/v1/support/agent/tickets")
+        assert resp.status_code == 401
+        assert resp.json()["detail"] == "Invalid support session"
+
+    def test_46_reads_need_no_origin_and_no_csrf(self, h2a) -> None:
+        """GET-only endpoints skip the browser write guards."""
+        self._seed_ticket(h2a, TENANT_A)
+        client = self._agent(h2a, "agent-c1-46", [TENANT_A])
+        resp = client.get("/v1/support/agent/tickets")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["total"] == 1
+
+    def test_47_forged_scope_inputs_never_expand_membership(self, h2a) -> None:
+        """Headers and query values cannot widen or retarget the scope."""
+        mine = self._seed_ticket(h2a, TENANT_A, subject="mine")
+        self._seed_ticket(h2a, TENANT_B, subject="theirs")
+        client = self._agent(h2a, "agent-c1-47", [TENANT_A])
+        forged = {
+            "x-tenant-id": TENANT_B,
+            "x-user-id": "admin",
+            "x-user-role": "super_admin",
+        }
+        listing = client.get("/v1/support/agent/tickets", headers=forged)
+        assert listing.status_code == 200
+        assert self._ids(listing.json()) == [mine]
+        filtered = client.get(
+            "/v1/support/agent/tickets", params={"tenant_id": TENANT_B}, headers=forged
+        )
+        assert filtered.status_code == 404
+
+    # --- membership-scoped listing ---------------------------------------
+
+    def test_48_single_membership_lists_only_that_tenant(self, h2a) -> None:
+        mine = [self._seed_ticket(h2a, TENANT_A) for _ in range(2)]
+        self._seed_ticket(h2a, TENANT_B)
+        client = self._agent(h2a, "agent-c1-48", [TENANT_A])
+        body = client.get("/v1/support/agent/tickets").json()
+        assert body["total"] == 2
+        assert sorted(self._ids(body)) == sorted(mine)
+        assert {t["tenant_id"] for t in body["tickets"]} == {TENANT_A}
+
+    def test_49_multi_membership_covers_all_and_excludes_foreign(self, h2a) -> None:
+        a = self._seed_ticket(h2a, TENANT_A)
+        b = self._seed_ticket(h2a, TENANT_B)
+        self._seed_ticket(h2a, TENANT_C)
+        client = self._agent(h2a, "agent-c1-49", [TENANT_A, TENANT_B])
+        body = client.get("/v1/support/agent/tickets").json()
+        assert body["total"] == 2
+        assert sorted(self._ids(body)) == sorted([a, b])
+        assert {t["tenant_id"] for t in body["tickets"]} == {TENANT_A, TENANT_B}
+
+    def test_50_authorized_tenant_filter_narrows_the_scope(self, h2a) -> None:
+        self._seed_ticket(h2a, TENANT_A)
+        b = self._seed_ticket(h2a, TENANT_B)
+        client = self._agent(h2a, "agent-c1-50", [TENANT_A, TENANT_B])
+        body = client.get(
+            "/v1/support/agent/tickets", params={"tenant_id": TENANT_B}
+        ).json()
+        assert body["total"] == 1
+        assert self._ids(body) == [b]
+        assert body["tickets"][0]["tenant_id"] == TENANT_B
+
+    def test_51_out_of_scope_tenant_filter_is_404_before_any_service_call(
+        self, h2a, monkeypatch
+    ) -> None:
+        client = self._agent(h2a, "agent-c1-51", [TENANT_A])
+        monkeypatch.setattr(support_router, "_service", _ForbiddenService())
+        for bogus in (TENANT_B, TENANT_C, "tenant-does-not-exist"):
+            resp = client.get(
+                "/v1/support/agent/tickets", params={"tenant_id": bogus}
+            )
+            assert resp.status_code == 404, bogus
+
+    def test_52_empty_authorized_result_is_200_and_empty(self, h2a) -> None:
+        self._seed_ticket(h2a, TENANT_B)
+        client = self._agent(h2a, "agent-c1-52", [TENANT_A])
+        resp = client.get("/v1/support/agent/tickets")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["tickets"] == []
+        assert body["total"] == 0
+
+    def test_53_status_filter_and_invalid_status_contract(self, h2a) -> None:
+        opened = self._seed_ticket(h2a, TENANT_A, status=TicketStatus.OPEN.value)
+        self._seed_ticket(h2a, TENANT_A, status=TicketStatus.RESOLVED.value)
+        client = self._agent(h2a, "agent-c1-53", [TENANT_A])
+        filtered = client.get(
+            "/v1/support/agent/tickets", params={"status": TicketStatus.OPEN.value}
+        )
+        assert filtered.status_code == 200
+        assert self._ids(filtered.json()) == [opened]
+        assert filtered.json()["total"] == 1
+        bad = client.get("/v1/support/agent/tickets", params={"status": "not-a-status"})
+        assert bad.status_code == 422
+
+    def test_54_ordering_total_and_pagination(self, h2a) -> None:
+        base = datetime(2026, 10, 8, 12, 0, 0, tzinfo=timezone.utc)
+        newest = self._seed_ticket(h2a, TENANT_A, created_at=base + timedelta(hours=2))
+        middle = self._seed_ticket(h2a, TENANT_A, created_at=base + timedelta(hours=1))
+        oldest = self._seed_ticket(h2a, TENANT_A, created_at=base)
+        self._seed_ticket(h2a, TENANT_B, created_at=base)
+        client = self._agent(h2a, "agent-c1-54", [TENANT_A])
+        first = client.get(
+            "/v1/support/agent/tickets", params={"page": 1, "page_size": 2}
+        ).json()
+        second = client.get(
+            "/v1/support/agent/tickets", params={"page": 2, "page_size": 2}
+        ).json()
+        assert first["total"] == second["total"] == 3
+        assert (first["page"], first["page_size"]) == (1, 2)
+        assert self._ids(first) == [oldest, middle]
+        assert self._ids(second) == [newest]
+
+    def test_55_equal_created_at_breaks_ties_on_ticket_id(self, h2a) -> None:
+        stamp = datetime(2026, 10, 8, 12, 0, 0, tzinfo=timezone.utc)
+        low = uuid.UUID("00000000-0000-4000-8000-000000000001")
+        mid = uuid.UUID("00000000-0000-4000-8000-000000000002")
+        high = uuid.UUID("00000000-0000-4000-8000-000000000003")
+        # Inserted in reverse id order, so a stable tie-breaker is observable.
+        for tid in (high, mid, low):
+            self._seed_ticket(h2a, TENANT_A, created_at=stamp, ticket_id=tid)
+        client = self._agent(h2a, "agent-c1-55", [TENANT_A])
+        body = client.get("/v1/support/agent/tickets").json()
+        assert self._ids(body) == [str(low), str(mid), str(high)]
+
+    def test_56_invalid_page_and_page_size_are_rejected(self, h2a) -> None:
+        client = self._agent(h2a, "agent-c1-56", [TENANT_A])
+        for params in ({"page": 0}, {"page": -1}, {"page_size": 0}, {"page_size": 101}):
+            resp = client.get("/v1/support/agent/tickets", params=params)
+            assert resp.status_code == 422, params
+
+    def test_57_listing_never_mutates_anything(self, h2a) -> None:
+        tid = self._seed_ticket(h2a, TENANT_A)
+        asyncio.run(h2a["chat"].add_system_message(uuid.UUID(tid), "created"))
+        rows_before = self._ticket_rows(h2a)
+        messages_before = len(h2a["chat"].get_messages(tid))
+        client = self._agent(h2a, "agent-c1-57", [TENANT_A])
+        assert client.get("/v1/support/agent/tickets").status_code == 200
+        assert self._ticket_rows(h2a) == rows_before
+        assert len(h2a["chat"].get_messages(tid)) == messages_before
+
+    # --- membership-scoped detail ----------------------------------------
+
+    def test_58_detail_is_available_for_every_membership(self, h2a) -> None:
+        self._seed_ticket(h2a, TENANT_A)
+        foreign_membership = self._seed_ticket(h2a, TENANT_B, subject="b-only")
+        client = self._agent(h2a, "agent-c1-58", [TENANT_A, TENANT_B])
+        resp = client.get(f"/v1/support/agent/tickets/{foreign_membership}")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["ticket"]["tenant_id"] == TENANT_B
+
+    def test_59_missing_malformed_and_foreign_are_a_uniform_404(self, h2a) -> None:
+        foreign = self._seed_ticket(h2a, TENANT_C)
+        client = self._agent(h2a, "agent-c1-59", [TENANT_A])
+        details = set()
+        for ticket_id in (str(uuid.uuid4()), "not-a-uuid", foreign):
+            resp = client.get(f"/v1/support/agent/tickets/{ticket_id}")
+            assert resp.status_code == 404, ticket_id
+            details.add(resp.json()["detail"])
+        assert len(details) == 1
+
+    def test_60_read_does_not_require_assignment(self, h2a) -> None:
+        unassigned = self._seed_ticket(h2a, TENANT_A)
+        other_agent = self._seed_ticket(
+            h2a, TENANT_A, assigned_agent_id="support_agent:someone-else"
+        )
+        client = self._agent(h2a, "agent-c1-60", [TENANT_A])
+        for ticket_id in (unassigned, other_agent):
+            assert client.get(f"/v1/support/agent/tickets/{ticket_id}").status_code == 200
+
+    def test_61_visible_messages_are_shown_and_internal_notes_are_hidden(self, h2a) -> None:
+        tid = self._seed_ticket(h2a, TENANT_A)
+        ticket_uuid = uuid.UUID(tid)
+        asyncio.run(h2a["chat"].add_system_message(ticket_uuid, "Ticket created"))
+        asyncio.run(h2a["chat"].add_internal_note(ticket_uuid, "agent-x", "internal-only"))
+        client = self._agent(h2a, "agent-c1-61", [TENANT_A])
+        resp = client.get(f"/v1/support/agent/tickets/{tid}")
+        assert resp.status_code == 200, resp.text
+        bodies = [m["body"] for m in resp.json()["messages"]]
+        assert "Ticket created" in bodies
+        assert "internal-only" not in bodies
+        assert all(not m["is_internal"] for m in resp.json()["messages"])
+
+    def test_62_detail_read_never_mutates_anything(self, h2a) -> None:
+        tid = self._seed_ticket(h2a, TENANT_A)
+        asyncio.run(h2a["chat"].add_system_message(uuid.UUID(tid), "created"))
+        rows_before = self._ticket_rows(h2a)
+        messages_before = len(h2a["chat"].get_messages(tid))
+        client = self._agent(h2a, "agent-c1-62", [TENANT_A])
+        assert client.get(f"/v1/support/agent/tickets/{tid}").status_code == 200
+        assert self._ticket_rows(h2a) == rows_before
+        assert len(h2a["chat"].get_messages(tid)) == messages_before
+
+    # --- regressions ------------------------------------------------------
+
+    def test_63_tenant_routes_keep_the_canonical_key_and_tenant_scope(
+        self, h2a, monkeypatch
+    ) -> None:
+        mine = self._seed_ticket(h2a, TENANT_A)
+        foreign = self._seed_ticket(h2a, TENANT_B)
+        plain = TestClient(h2a["app"], base_url="https://testserver")
+        assert plain.get("/v1/support/tickets").status_code == 401
+        monkeypatch.setitem(
+            h2a["app"].dependency_overrides,
+            support_router.verify_api_key,
+            lambda: _key_principal(TENANT_A),
+        )
+        keyed = TestClient(h2a["app"], base_url="https://testserver")
+        listing = keyed.get("/v1/support/tickets")
+        assert listing.status_code == 200
+        assert self._ids(listing.json()) == [mine]
+        assert keyed.get(f"/v1/support/tickets/{foreign}").status_code == 404
+        assert keyed.get(f"/v1/support/tickets/{mine}").status_code == 200
+
+    def test_64_agent_reads_add_exactly_two_get_endpoints(self) -> None:
+        from fastapi.routing import APIRoute
+
+        surface = sorted(
+            (method, route.path)
+            for route in support_router.router.routes
+            if isinstance(route, APIRoute)
+            for method in route.methods
+        )
+        expected = sorted(
+            [
+                ("GET", "/v1/support/agent/tickets"),
+                ("GET", "/v1/support/agent/tickets/{ticket_id}"),
+                ("GET", "/v1/support/auth/session"),
+                ("GET", "/v1/support/tickets"),
+                ("GET", "/v1/support/tickets/{ticket_id}"),
+                ("POST", "/v1/support/auth/login"),
+                ("POST", "/v1/support/auth/logout"),
+                ("POST", "/v1/support/tickets"),
+                ("POST", "/v1/support/tickets/{ticket_id}/assign"),
+                ("POST", "/v1/support/tickets/{ticket_id}/csat"),
+                ("POST", "/v1/support/tickets/{ticket_id}/messages"),
+                ("POST", "/v1/support/tickets/{ticket_id}/transition"),
+            ]
+        )
+        assert surface == expected
+        agent_routes = [r for r in surface if r[1].startswith("/v1/support/agent/")]
+        assert agent_routes == [
+            ("GET", "/v1/support/agent/tickets"),
+            ("GET", "/v1/support/agent/tickets/{ticket_id}"),
+        ]
+        assert support_router.router.routes[-1].path == "/v1/support/ws/{ticket_id}"

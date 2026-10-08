@@ -27,6 +27,7 @@ from fastapi import (
     Depends,
     Header,
     HTTPException,
+    Query,
     Request,
     Response,
     WebSocket,
@@ -194,6 +195,40 @@ async def _support_agent(
     )
 
 
+async def _support_agent_read(
+    request: Request,
+    tenant_principal: dict | None = Depends(_optional_tenant_principal),
+) -> SupportPrincipal:
+    """Read-only H2a-C1 gate: a trusted support session, and nothing else.
+
+    Same credential ordering as :func:`_support_agent` — no credential 401,
+    both credential types 400, invalid session 401 (never a tenant-key
+    fallback), tenant API key 403 before any lookup — but without the browser
+    write guards: these endpoints are side-effect-free GETs, so no Origin and
+    no CSRF token is required.
+    """
+    raw_session = request.cookies.get(SESSION_COOKIE_NAME) or ""
+
+    if raw_session and tenant_principal is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Present either a support session or an API key, not both",
+        )
+    if raw_session:
+        try:
+            return await _auth.authenticate_session(raw_session)
+        except SupportAuthError as exc:
+            raise HTTPException(
+                status_code=401, detail="Invalid support session"
+            ) from exc
+    if tenant_principal is not None:
+        # A tenant key identifies a tenant, never a support agent.
+        raise HTTPException(status_code=403, detail=_PRIVILEGED_ROLE_REQUIRED)
+    raise HTTPException(
+        status_code=401, detail="Support session or X-API-Key required"
+    )
+
+
 @router.post("/tickets", response_model=CreateTicketResponse, status_code=201)
 async def create_ticket(
     request: CreateTicketRequest, tenant: TenantContext = Depends(_tenant_context)
@@ -220,6 +255,55 @@ async def list_tickets(
 @router.get("/tickets/{ticket_id}", response_model=TicketDetailResponse)
 async def get_ticket(ticket_id: str, tenant: TenantContext = Depends(_tenant_context)):
     detail = await _service.get_ticket_detail(ticket_id, tenant)
+    if not detail:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return detail
+
+
+@router.get("/agent/tickets", response_model=TicketListResponse)
+async def agent_list_tickets(
+    principal: SupportPrincipal = Depends(_support_agent_read),
+    tenant_id: str | None = None,
+    status: str | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
+    """H2a-C1: read the tickets of every explicit membership of the principal.
+
+    ``tenant_id`` may only *narrow* the scope to one already-authorized
+    membership; anything else is a non-enumerating 404 raised here, before any
+    service or database work. The status filter follows the existing
+    ``TicketStatus`` contract.
+    """
+    if tenant_id is not None and tenant_id not in principal.tenant_ids:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket_status: TicketStatus | None = None
+    if status is not None:
+        try:
+            ticket_status = TicketStatus(status)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Invalid ticket status") from exc
+    return await _service.agent_list_tickets(
+        principal.tenant_ids,
+        tenant_id=tenant_id,
+        status=ticket_status,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/agent/tickets/{ticket_id}", response_model=TicketDetailResponse)
+async def agent_get_ticket(
+    ticket_id: str,
+    principal: SupportPrincipal = Depends(_support_agent_read),
+):
+    """H2a-C1: membership-scoped detail, tenant-visible view only.
+
+    Missing, malformed, foreign and out-of-scope ticket ids are all a uniform
+    404. Reading does not require the ticket to be assigned to the caller, and
+    internal notes stay hidden.
+    """
+    detail = await _service.agent_get_ticket_detail(ticket_id, principal.tenant_ids)
     if not detail:
         raise HTTPException(status_code=404, detail="Ticket not found")
     return detail
