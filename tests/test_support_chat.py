@@ -22,7 +22,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from starlette.websockets import WebSocketDisconnect
@@ -803,7 +803,14 @@ class TestTenantAuthBoundary:
             TenantContext.from_principal({"tenant_id": "   "})
 
     def test_31_every_support_http_route_requires_canonical_api_key(self) -> None:
-        """No support HTTP route may exist without deps.verify_api_key attached."""
+        """Tenant-facing routes keep the canonical key; support-auth routes do not.
+
+        H1 invariant (unchanged for every tenant-facing route): the canonical
+        ``deps.verify_api_key`` is attached. H2a adds three support-auth endpoints
+        that must NOT depend on a tenant API key — they authenticate a dedicated
+        support session instead. Both halves are asserted, so the rule stays
+        enforceable in either direction.
+        """
         from fastapi.routing import APIRoute
 
         import support_chat.router as support_router
@@ -819,8 +826,35 @@ class TestTenantAuthBoundary:
             r for r in support_router.router.routes if isinstance(r, APIRoute)
         ]
         assert http_routes, "no HTTP routes found on the support router"
+
+        auth_paths = {
+            "/v1/support/auth/login",
+            "/v1/support/auth/logout",
+            "/v1/support/auth/session",
+        }
+        # The canonical check is reached either directly or through the H2a
+        # wrapper that calls it for a present key, so both forms satisfy the rule.
+        canonical = (
+            support_router.verify_api_key,
+            support_router._optional_tenant_principal,
+        )
+        session_only = {
+            "/v1/support/auth/logout": support_router._support_session_principal,
+            "/v1/support/auth/session": support_router._support_session_principal,
+            "/v1/support/auth/login": support_router._require_allowed_origin,
+        }
+        assert set(session_only) == auth_paths, sorted(auth_paths)
+
+        seen_auth: set[str] = set()
         for route in http_routes:
-            assert support_router.verify_api_key in _calls(route.dependant), route.path
+            calls = _calls(route.dependant)
+            if route.path in session_only:
+                seen_auth.add(route.path)
+                assert support_router.verify_api_key not in calls, route.path
+                assert session_only[route.path] in calls, route.path
+                continue
+            assert any(call in calls for call in canonical), route.path
+        assert seen_auth == auth_paths, sorted(auth_paths - seen_auth)
 
     def test_32_missing_api_key_is_rejected_before_any_service_call(
         self, monkeypatch
@@ -921,18 +955,39 @@ class TestTenantAuthBoundary:
 
         # A service that would explode if a privileged route reached it.
         client = _http_client(monkeypatch, _ForbiddenService(), principal=_principal("t1"))
+        tenant_key = {"X-API-Key": RAW_KEY}
+
+        # H2a reads the tenant key through its own dependency, so the canonical
+        # check is stubbed here exactly as ``verify_api_key`` would answer: a
+        # present key resolves to a tenant principal, an absent one is ``None``.
+        import support_chat.router as support_router
+
+        def _tenant_key_or_none(request: Request):
+            return _principal("t1") if request.headers.get("x-api-key") else None
+
+        client.app.dependency_overrides[
+            support_router._optional_tenant_principal
+        ] = _tenant_key_or_none
+
+        # No credential at all: still a 401 before any service call.
+        assert (
+            client.post(f"/v1/support/tickets/{tid}/assign", json={}).status_code
+            == 401
+        )
 
         assign = client.post(
-            f"/v1/support/tickets/{tid}/assign", json={"agent_id": "a1"}
+            f"/v1/support/tickets/{tid}/assign", json={}, headers=tenant_key
         )
         assert assign.status_code == 403
 
-        transition = client.post(f"/v1/support/tickets/{tid}/transition?status=closed")
+        transition = client.post(
+            f"/v1/support/tickets/{tid}/transition?status=closed", headers=tenant_key
+        )
         assert transition.status_code == 403
 
         # An unknown ticket answers identically: no existence/status disclosure.
         unknown = client.post(
-            f"/v1/support/tickets/{uuid4()}/assign", json={"agent_id": "a1"}
+            f"/v1/support/tickets/{uuid4()}/assign", json={}, headers=tenant_key
         )
         assert unknown.status_code == 403
 

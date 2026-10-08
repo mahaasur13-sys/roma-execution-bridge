@@ -543,7 +543,156 @@ class SupportTicketService:
     def add_attachment(self, attachment: TicketAttachment) -> TicketAttachment:
         tid = str(attachment.ticket_id)
         self._attachments.setdefault(tid, []).append(attachment)
-        return attachment
+        return attachment    # ── H2a: support-session (agent) paths ──────────────────────────────────
+    # These take an explicit *set* of tenant scopes from the trusted principal
+    # instead of one tenant id: an agent may hold several explicit memberships.
+    # The E-15 semantics are preserved verbatim (PK read, immediate scope check,
+    # status-conditional CAS, rowcount==0 → conflict); the only additions are the
+    # scope predicate and, for transitions, the assigned-actor predicate.
+
+    def _assign_self_sync(
+        self, ticket_id: str, actor_id: str, tenant_scopes: frozenset[str]
+    ) -> SupportTicket:
+        self._ensure_tables_sync()
+        tid = _coerce_uuid(ticket_id)
+        with self._factory()() as session:
+            # ``session.get`` stays the read path so the accepted E-15 stale-read
+            # seam keeps working; the tenant is enforced on the loaded row and on
+            # the CAS UPDATE below, so a foreign ticket is a not-found, not a write.
+            model = session.get(SupportTicketModel, tid)
+            if model is None or model.tenant_id not in tenant_scopes:
+                raise TicketNotFoundError(f"Ticket {ticket_id} not found")
+            tenant_id = model.tenant_id
+            current = TicketStatus(model.status)
+            allowed = VALID_STATUS_TRANSITIONS.get(current, [])
+            if current is not TicketStatus.IN_PROGRESS and (
+                TicketStatus.IN_PROGRESS not in allowed
+            ):
+                raise TicketStatusConflictError(
+                    f"Ticket {ticket_id} is {current.value}; "
+                    "assignment is not allowed from this status"
+                )
+            now = datetime.now(timezone.utc)
+            # Optimistic status predicate: the read status is re-checked in the
+            # UPDATE, so a concurrent transition cannot be overwritten. The actor
+            # is always the trusted principal — never a caller-supplied id.
+            result = session.execute(
+                update(SupportTicketModel)
+                .where(
+                    SupportTicketModel.ticket_id == tid,
+                    SupportTicketModel.tenant_id == tenant_id,
+                    SupportTicketModel.status == current.value,
+                )
+                .values(
+                    assigned_agent_id=actor_id,
+                    status=TicketStatus.IN_PROGRESS.value,
+                    updated_at=now,
+                )
+            )
+            if result.rowcount == 0:
+                raise TicketStatusConflictError(
+                    f"Ticket {ticket_id} status changed concurrently; "
+                    "assignment was not applied"
+                )
+            session.commit()
+            session.refresh(model)
+            return _model_to_ticket(model)
+
+    def _transition_assigned_sync(
+        self,
+        ticket_id: str,
+        new_status: TicketStatus,
+        actor_id: str,
+        tenant_scopes: frozenset[str],
+    ) -> tuple[SupportTicket, str]:
+        self._ensure_tables_sync()
+        tid = _coerce_uuid(ticket_id)
+        now = datetime.now(timezone.utc)
+        with self._factory()() as session:
+            model = session.get(SupportTicketModel, tid)
+            # Not-found, out-of-scope and assigned-to-someone-else are the same
+            # non-enumerating 404: the caller learns nothing about foreign rows.
+            if model is None or model.tenant_id not in tenant_scopes:
+                raise TicketNotFoundError(f"Ticket {ticket_id} not found")
+            if model.assigned_agent_id != actor_id:
+                raise TicketNotFoundError(f"Ticket {ticket_id} not found")
+            tenant_id = model.tenant_id
+            current = TicketStatus(model.status)
+            allowed = VALID_STATUS_TRANSITIONS.get(current, [])
+            if new_status not in allowed:
+                raise ValueError(
+                    f"Cannot transition from {current.value} to {new_status.value}"
+                )
+            values: dict = {"status": new_status.value, "updated_at": now}
+            if new_status == TicketStatus.RESOLVED:
+                values["resolved_at"] = now
+            result = session.execute(
+                update(SupportTicketModel)
+                .where(
+                    SupportTicketModel.ticket_id == tid,
+                    SupportTicketModel.tenant_id == tenant_id,
+                    SupportTicketModel.status == current.value,
+                    SupportTicketModel.assigned_agent_id == actor_id,
+                )
+                .values(**values)
+            )
+            if result.rowcount == 0:
+                raise ValueError(
+                    f"Cannot transition from {current.value} to {new_status.value} "
+                    "(status changed concurrently)"
+                )
+            session.commit()
+            session.refresh(model)
+            return _model_to_ticket(model), current.value
+
+    async def assign_agent_to_self(
+        self,
+        ticket_id: str,
+        actor_id: str,
+        tenant_scopes: frozenset[str],
+    ) -> SupportTicket:
+        """Self-claim: the assignee is always the trusted principal's actor id."""
+        ticket = await asyncio.to_thread(
+            self._assign_self_sync, ticket_id, actor_id, tenant_scopes
+        )
+        participant = ChatParticipant(
+            ticket_id=ticket.ticket_id,
+            user_id=actor_id,
+            role=ParticipantRole.SUPPORT_AGENT,
+            tenant_id=ticket.tenant_id,
+        )
+        self._participants.setdefault(ticket_id, []).append(participant)
+        await self._chat.add_system_message(
+            ticket.ticket_id, f"Agent {actor_id} assigned"
+        )
+        logger.info("support_agent_self_assigned", ticket_id=ticket_id)
+        return ticket
+
+    async def transition_status_as_assignee(
+        self,
+        ticket_id: str,
+        new_status: TicketStatus,
+        actor_id: str,
+        tenant_scopes: frozenset[str],
+    ) -> SupportTicket:
+        """Transition only a ticket currently assigned to this exact principal."""
+        ticket, current = await asyncio.to_thread(
+            self._transition_assigned_sync,
+            ticket_id,
+            new_status,
+            actor_id,
+            tenant_scopes,
+        )
+        await self._chat.add_system_message(
+            ticket.ticket_id, f"Status → {new_status.value}"
+        )
+        logger.info(
+            "support_ticket_transition",
+            ticket_id=ticket_id,
+            old_status=current,
+            new_status=new_status.value,
+        )
+        return ticket
 
     def add_participant(self, participant: ChatParticipant) -> ChatParticipant:
         tid = str(participant.ticket_id)
