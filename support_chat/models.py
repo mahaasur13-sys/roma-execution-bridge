@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class TicketStatus(StrEnum):
@@ -101,7 +101,15 @@ class CsatRating(BaseModel):
 
 
 class CreateTicketRequest(BaseModel):
-    tenant_id: str
+    """H1: the tenant is never caller-supplied.
+
+    ``tenant_id`` was removed from the contract and ``extra="forbid"`` makes an
+    attempt to send it a loud 422 instead of a silent override; the owning
+    tenant comes only from the verified API-key principal.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     subject: str
     body: str = ""
     priority: TicketPriority = TicketPriority.MEDIUM
@@ -122,12 +130,18 @@ class CreateTicketResponse(BaseModel):
 
 
 class CreateMessageRequest(BaseModel):
-    ticket_id: UUID
+    """H1: author, role, visibility and target are never caller-supplied.
+
+    ``sender_id``/``sender_role`` were removed (the tenant-level actor is derived
+    server-side), and so were ``ticket_id`` (the path parameter is authoritative),
+    ``message_type`` and ``is_internal``: a tenant-level key may not retarget the
+    ticket, forge a system message or open an internal note — those belong to an
+    H2 role-gated path. ``extra="forbid"`` turns every such attempt into a 422.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     body: str
-    sender_id: str
-    sender_role: ParticipantRole
-    message_type: MessageType = MessageType.TEXT
-    is_internal: bool = False
     attachment_ids: list[UUID] = Field(default_factory=list)
 
 
