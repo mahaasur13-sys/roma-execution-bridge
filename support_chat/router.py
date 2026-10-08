@@ -133,13 +133,21 @@ async def _tenant_context(principal: dict = Depends(verify_api_key)) -> TenantCo
         raise HTTPException(status_code=401, detail="Invalid API key") from exc
 
 
-async def _optional_tenant_principal(
+def _optional_tenant_principal(
     x_api_key: str | None = Header(None),
 ) -> dict | None:
     """Canonical tenant-key check, or ``None`` when no key is presented.
 
-    Kept as a dependency (not a direct call) so the canonical 401/403 behaviour
-    and any test override of ``verify_api_key`` keep applying unchanged.
+    Wrapper dependency used by the privileged ``_support_agent`` route gate. It
+    calls the canonical synchronous verifier ``deps.verify_api_key`` directly, so
+    the 401/403 behaviour is exactly the canonical one.
+
+    Tests that need to substitute the tenant-key check override *this* wrapper;
+    overriding ``verify_api_key`` does not propagate through FastAPI dependency
+    resolution and would not affect this call site.
+
+    The sync form is intentional: FastAPI runs synchronous dependencies in its
+    threadpool, so the DB-backed verifier cannot block the event loop.
     """
     if not x_api_key:
         return None
