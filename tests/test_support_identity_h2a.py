@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+from sqlalchemy import update
 from starlette.websockets import WebSocketDisconnect
 
 import support_chat.router as support_router
@@ -31,6 +32,7 @@ from support_chat.db_models import (
     SupportIdentityMembershipModel,
     SupportIdentityModel,
     SupportSessionModel,
+    SupportTicketModel,
 )
 from support_chat.identity import (
     CREDENTIAL_BYTES,
@@ -173,6 +175,16 @@ class TestCredentialAndSessionPersistence:
                 )
                 for secret in (raw, raw_session, raw_csrf):
                     assert secret not in blob, model.__tablename__
+
+        # ORM metadata must mirror migration 014's ON DELETE CASCADE clauses.
+        for model in (
+            SupportIdentityMembershipModel,
+            SupportCredentialModel,
+            SupportSessionModel,
+        ):
+            fk = next(iter(model.__table__.c.identity_id.foreign_keys))
+            assert fk.target_fullname == "support_identities.identity_id"
+            assert fk.ondelete == "CASCADE", model.__tablename__
 
     def test_04_token_generation_is_cryptographically_secure(self, monkeypatch) -> None:
         calls: list[int] = []
@@ -776,3 +788,127 @@ class TestNoSecretLeakage:
             assert secret not in principal.actor_id
         assert principal.auth_method == "support_session"
         assert principal.issuer and principal.audience
+
+
+class TestConcurrentCasConflicts:
+    """The real CAS UPDATE must lose deterministically when the row moved (H2A-01).
+
+    No fake ``rowcount`` and no production seam: the competing write happens on
+    the service's own connection with ``synchronize_session=False``, so the row
+    the service loaded stays stale and its real UPDATE matches zero rows.
+    """
+
+    @staticmethod
+    def _hooked_service(factory, hook):
+        class _HookedSession:
+            def __init__(self, inner) -> None:
+                self._inner = inner
+
+            def get(self, entity, ident, **kwargs):
+                obj = self._inner.get(entity, ident, **kwargs)
+                if entity is SupportTicketModel and obj is not None:
+                    hook(self._inner, obj)
+                return obj
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+            def __enter__(self):
+                self._inner.__enter__()
+                return self
+
+            def __exit__(self, *exc):
+                return self._inner.__exit__(*exc)
+
+        class _HookedFactory:
+            def __call__(self):
+                return _HookedSession(factory())
+
+        return SupportTicketService(
+            chat_service=ChatService(), session_factory=_HookedFactory()
+        )
+
+    @staticmethod
+    def _compete(session, tid, values) -> None:
+        """Commit a competing write on the service's own connection.
+
+        ``synchronize_session=False`` leaves the already-loaded row stale, and the
+        commit makes the change durable — otherwise the service's own rollback on
+        conflict would silently undo it and the real UPDATE would match again.
+        """
+        session.execute(
+            update(SupportTicketModel)
+            .where(SupportTicketModel.ticket_id == tid)
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        )
+        session.commit()
+
+    @pytest.mark.asyncio
+    async def test_40_assignment_cas_loses_and_writes_nothing(self, h2a) -> None:
+        scopes = frozenset({TENANT_A})
+        actor = "support_agent:agent-40"
+        ticket = await h2a["service"].create_ticket(
+            CreateTicketRequest(subject="cas-assign"), _ctx(TENANT_A)
+        )
+        tid = ticket.ticket_id
+
+        fired: list[str] = []
+
+        def hook(session, model) -> None:
+            if fired:
+                return
+            fired.append("competing-write")
+            self._compete(session, tid, {"status": TicketStatus.CLOSED.value})
+
+        messages_before = len(h2a["chat"].get_messages(str(tid)))
+        hooked = self._hooked_service(h2a["factory"], hook)
+        with pytest.raises(TicketStatusConflictError) as excinfo:
+            await hooked.assign_agent_to_self(str(tid), actor, scopes)
+        assert "concurrently" in str(excinfo.value)
+        assert fired == ["competing-write"]
+
+        with h2a["factory"]() as session:
+            row = session.get(SupportTicketModel, tid)
+            assert row.status == TicketStatus.CLOSED.value
+            assert row.assigned_agent_id is None
+            assert row.tenant_id == TENANT_A
+
+        # The losing self-claim must not reach the participant/chat side effects.
+        assert str(tid) not in hooked._participants
+        assert len(h2a["chat"].get_messages(str(tid))) == messages_before
+
+    @pytest.mark.asyncio
+    async def test_41_transition_cas_loses_and_keeps_new_assignee(self, h2a) -> None:
+        scopes = frozenset({TENANT_A})
+        owner = "support_agent:agent-41"
+        other = "support_agent:agent-41b"
+        ticket = await h2a["service"].create_ticket(
+            CreateTicketRequest(subject="cas-transition"), _ctx(TENANT_A)
+        )
+        tid = ticket.ticket_id
+        await h2a["service"].assign_agent_to_self(str(tid), owner, scopes)
+
+        fired: list[str] = []
+
+        def hook(session, model) -> None:
+            if fired:
+                return
+            fired.append("competing-write")
+            self._compete(session, tid, {"assigned_agent_id": other})
+
+        hooked = self._hooked_service(h2a["factory"], hook)
+        with pytest.raises(ValueError) as excinfo:
+            await hooked.transition_status_as_assignee(
+                str(tid), TicketStatus.RESOLVED, owner, scopes
+            )
+        assert not isinstance(excinfo.value, TicketNotFoundError)
+        assert "concurrently" in str(excinfo.value)
+        assert fired == ["competing-write"]
+
+        with h2a["factory"]() as session:
+            row = session.get(SupportTicketModel, tid)
+            assert row.assigned_agent_id == other
+            assert row.status == TicketStatus.IN_PROGRESS.value
+            assert row.resolved_at is None
+            assert row.tenant_id == TENANT_A

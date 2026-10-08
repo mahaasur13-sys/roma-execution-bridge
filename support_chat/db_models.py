@@ -194,7 +194,7 @@ class SupportIdentityMembershipModel(Base):
     )
     identity_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("support_identities.identity_id"),
+        ForeignKey("support_identities.identity_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -218,7 +218,7 @@ class SupportCredentialModel(Base):
     )
     identity_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("support_identities.identity_id"),
+        ForeignKey("support_identities.identity_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -249,7 +249,7 @@ class SupportSessionModel(Base):
     )
     identity_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("support_identities.identity_id"),
+        ForeignKey("support_identities.identity_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
