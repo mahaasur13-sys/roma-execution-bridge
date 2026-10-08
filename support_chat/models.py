@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 
 class TicketStatus(StrEnum):
@@ -161,7 +161,43 @@ class TicketDetailResponse(BaseModel):
 
 
 class AssignTicketRequest(BaseModel):
+    """Internal service-level assignment seam (E-15 tests).
+
+    Not accepted by any HTTP route since H2a: the assign route takes
+    ``AssignSelfRequest`` and derives the agent from the support session, so a
+    caller can never choose the assignee.
+    """
+
     agent_id: str
+
+
+class AssignSelfRequest(BaseModel):
+    """H2a assign body: empty by contract.
+
+    ``extra="forbid"`` turns a caller-supplied ``agent_id`` (or any other field)
+    into a 422 instead of a silent ignore — the assignee is always the
+    authenticated principal.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SupportLoginRequest(BaseModel):
+    """Offline-provisioned support credential, exchanged for a session."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    credential: SecretStr
+
+
+class SupportSessionResponse(BaseModel):
+    """Login response: CSRF token only — the session itself is a cookie."""
+
+    actor_id: str
+    roles: list[str]
+    tenant_ids: list[str]
+    csrf_token: str
+    expires_at: datetime
 
 
 class CsatSubmitRequest(BaseModel):

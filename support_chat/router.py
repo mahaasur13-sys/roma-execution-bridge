@@ -2,25 +2,58 @@
 
 H1 tenant/auth boundary:
 
-  * every HTTP route depends on the canonical ``deps.verify_api_key`` and reduces
-    the verified principal to a sanitised ``TenantContext`` (raw key dropped);
+  * tenant-facing routes (create/list/get/message/csat) depend on the canonical
+    ``deps.verify_api_key`` and reduce the verified principal to a sanitised
+    ``TenantContext`` (raw key dropped);
   * the tenant is never taken from a header or a body field;
-  * ``assign``/``transition`` are fail-closed 403 until H2 supplies a trusted
-    role — the gate runs as a dependency, i.e. before any lookup or mutation;
   * the WebSocket is refused before ``accept()`` (close 4401).
+
+H2a trusted-agent boundary:
+
+  * ``assign``/``transition`` authenticate a dedicated support *session* — a
+    hash-only credential exchanged for a one-hour opaque session cookie — and
+    never accept a caller-supplied agent id, role or tenant;
+  * a tenant API key on those routes stays a fail-closed 403, before any lookup;
+  * the session cookie is Secure/HttpOnly/SameSite=Strict and every state-changing
+    session call needs an allowlisted Origin plus a CSRF token;
+  * the WebSocket stays unconditional 4401 until H2b.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    Header,
+    HTTPException,
+    Request,
+    Response,
+    WebSocket,
+)
 
 from deps import verify_api_key
+from support_chat.identity import (
+    CSRF_HEADER_NAME,
+    SESSION_COOKIE_NAME,
+    SESSION_COOKIE_PATH,
+    SESSION_TTL_SECONDS,
+    SupportAuthError,
+    SupportAuthService,
+    SupportBrowserGuardError,
+    SupportCredentialError,
+    SupportPrincipal,
+    SupportSessionError,
+    origin_allowed,
+)
 from support_chat.models import (
-    AssignTicketRequest,
+    AssignSelfRequest,
     CreateMessageRequest,
     CreateTicketRequest,
     CreateTicketResponse,
     CsatSubmitRequest,
+    SupportLoginRequest,
+    SupportSessionResponse,
     TicketListResponse,
     TicketDetailResponse,
     TicketStatus,
@@ -38,13 +71,58 @@ router = APIRouter(prefix="/v1/support", tags=["support_chat"])
 _settings = SupportSettings()
 _chat_svc = ChatService(settings=_settings)
 _service = SupportTicketService(chat_service=_chat_svc, settings=_settings)
+_auth = SupportAuthService()
 
-# H1: an API key identifies a tenant, not a support role, so privileged
-# operations stay closed until H2 derives a trusted role from a verified principal.
+# H1: an API key identifies a tenant, not a support role, so a tenant key on a
+# privileged route stays closed. H2a keeps that rule; the privileged routes now
+# accept a dedicated support *session* instead.
 _PRIVILEGED_ROLE_REQUIRED = (
-    "This operation requires a trusted support role, which is not yet derived "
-    "from an API key"
+    "This operation requires a trusted support role; an API key identifies a "
+    "tenant, not a support agent"
 )
+
+
+def _set_session_cookie(response: Response, raw_session: str) -> None:
+    """Secure/HttpOnly/Strict cookie scoped to the support API only."""
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=raw_session,
+        max_age=SESSION_TTL_SECONDS,
+        path=SESSION_COOKIE_PATH,
+        secure=True,
+        httponly=True,
+        samesite="strict",
+    )
+
+
+def _clear_session_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=SESSION_COOKIE_NAME,
+        path=SESSION_COOKIE_PATH,
+        secure=True,
+        httponly=True,
+        samesite="strict",
+    )
+
+
+def _require_allowed_origin(request: Request) -> None:
+    """Fail-closed Origin allowlist for cookie-authenticated browser calls."""
+    origin = (request.headers.get("origin") or "").strip()
+    if not origin or not origin_allowed(origin):
+        raise HTTPException(status_code=403, detail="Origin not allowed")
+
+
+async def _require_csrf(request: Request, principal: SupportPrincipal) -> None:
+    """State-changing session calls must echo the session's CSRF token."""
+    presented = request.headers.get(CSRF_HEADER_NAME) or ""
+    if not presented:
+        raise HTTPException(status_code=403, detail="Missing CSRF token")
+    try:
+        matches = await _auth.csrf_matches(presented, principal.session_id)
+    except SupportSessionError as exc:
+        raise HTTPException(status_code=401, detail="Invalid support session") from exc
+    if not matches:
+        raise HTTPException(status_code=403, detail="Invalid CSRF token")
 
 
 async def _tenant_context(principal: dict = Depends(verify_api_key)) -> TenantContext:
@@ -55,14 +133,57 @@ async def _tenant_context(principal: dict = Depends(verify_api_key)) -> TenantCo
         raise HTTPException(status_code=401, detail="Invalid API key") from exc
 
 
-async def _require_trusted_role(
-    tenant: TenantContext = Depends(_tenant_context),
-) -> TenantContext:
-    """H1 fail-closed gate: refuse privileged operations before any lookup.
+async def _optional_tenant_principal(
+    x_api_key: str | None = Header(None),
+) -> dict | None:
+    """Canonical tenant-key check, or ``None`` when no key is presented.
 
-    Runs after the canonical key check, so a missing/invalid key is still a 401.
+    Kept as a dependency (not a direct call) so the canonical 401/403 behaviour
+    and any test override of ``verify_api_key`` keep applying unchanged.
     """
-    raise HTTPException(status_code=403, detail=_PRIVILEGED_ROLE_REQUIRED)
+    if not x_api_key:
+        return None
+    return verify_api_key(x_api_key)
+
+
+async def _support_agent(
+    request: Request,
+    tenant_principal: dict | None = Depends(_optional_tenant_principal),
+) -> SupportPrincipal:
+    """H2a gate for privileged routes: a trusted support session, or nothing.
+
+    Ordering is deliberate and preserves the H1 contract:
+
+      * no credential at all            -> 401
+      * both credential types presented -> 400, before any lookup
+      * invalid/expired/revoked session -> 401
+      * tenant API key                  -> canonical 401/403, then fail-closed 403
+      * valid support session           -> Origin + CSRF, then the principal
+    """
+    raw_session = request.cookies.get(SESSION_COOKIE_NAME) or ""
+
+    if raw_session and tenant_principal is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Present either a support session or an API key, not both",
+        )
+    if raw_session:
+        try:
+            principal = await _auth.authenticate_session(raw_session)
+        except SupportAuthError as exc:
+            raise HTTPException(
+                status_code=401, detail="Invalid support session"
+            ) from exc
+        _require_allowed_origin(request)
+        await _require_csrf(request, principal)
+        return principal
+    if tenant_principal is not None:
+        # The canonical key check already ran (401 missing/invalid, 403 unverified);
+        # a tenant key still never grants a support role — refuse before any lookup.
+        raise HTTPException(status_code=403, detail=_PRIVILEGED_ROLE_REQUIRED)
+    raise HTTPException(
+        status_code=401, detail="Support session or X-API-Key required"
+    )
 
 
 @router.post("/tickets", response_model=CreateTicketResponse, status_code=201)
@@ -111,13 +232,19 @@ async def add_message(
 @router.post("/tickets/{ticket_id}/assign")
 async def assign_agent(
     ticket_id: str,
-    request: AssignTicketRequest,
-    tenant: TenantContext = Depends(_require_trusted_role),
+    request: AssignSelfRequest | None = Body(default=None),
+    principal: SupportPrincipal = Depends(_support_agent),
 ):
-    # Unreachable in H1 (the gate above always refuses); kept intact so H2 only
-    # has to replace the gate and the tenant-scoped E-15 contract is unchanged.
+    """H2a self-claim: the agent is always the authenticated principal.
+
+    The route takes no body (``{}`` is tolerated) and rejects any extra field,
+    so a caller cannot choose the assignee. The ticket must fall inside the
+    principal's explicit tenant scope and the E-15 status/CAS contract holds.
+    """
     try:
-        return await _service.assign_agent(ticket_id, request, tenant)
+        return await _service.assign_agent_to_self(
+            ticket_id, principal.actor_id, principal.tenant_ids
+        )
     except TicketNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except TicketStatusConflictError as exc:
@@ -130,11 +257,16 @@ async def assign_agent(
 async def transition_status(
     ticket_id: str,
     status: str,
-    tenant: TenantContext = Depends(_require_trusted_role),
+    principal: SupportPrincipal = Depends(_support_agent),
 ):
+    """H2a: only the agent the ticket is currently assigned to may transition it."""
     try:
         new_status = TicketStatus(status)
-        return await _service.transition_status(ticket_id, new_status, tenant)
+        return await _service.transition_status_as_assignee(
+            ticket_id, new_status, principal.actor_id, principal.tenant_ids
+        )
+    except TicketNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -149,6 +281,79 @@ async def submit_csat(
         return await _service.submit_csat(ticket_id, request, tenant)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/auth/login", response_model=SupportSessionResponse)
+async def support_login(
+    request: Request,
+    response: Response,
+    payload: SupportLoginRequest,
+    _origin_ok: None = Depends(_require_allowed_origin),
+):
+    """Exchange an owner-provisioned credential for a one-hour support session.
+
+    The raw credential is verified by hash, never stored, echoed or logged; only
+    the CSRF token is returned in the body, the session itself travels in a
+    Secure/HttpOnly cookie.
+    """
+    try:
+        principal, raw_session, csrf_token = await _auth.login(payload.credential)
+    except SupportCredentialError as exc:
+        raise HTTPException(status_code=401, detail="Invalid support credential") from exc
+    except SupportBrowserGuardError as exc:
+        raise HTTPException(status_code=403, detail="Origin not allowed") from exc
+    except SupportAuthError as exc:
+        raise HTTPException(status_code=401, detail="Invalid support credential") from exc
+    _set_session_cookie(response, raw_session)
+    return SupportSessionResponse(
+        actor_id=principal.actor_id,
+        roles=sorted(principal.roles),
+        tenant_ids=sorted(principal.tenant_ids),
+        csrf_token=csrf_token,
+        expires_at=principal.expires_at,
+    )
+
+
+async def _support_session_principal(request: Request) -> SupportPrincipal:
+    """Support-session-only dependency (no tenant API key on these routes)."""
+    raw_session = request.cookies.get(SESSION_COOKIE_NAME) or ""
+    if not raw_session:
+        raise HTTPException(status_code=401, detail="Support session required")
+    try:
+        return await _auth.authenticate_session(raw_session)
+    except SupportAuthError as exc:
+        raise HTTPException(status_code=401, detail="Invalid support session") from exc
+
+
+@router.post("/auth/logout", status_code=204)
+async def support_logout(
+    request: Request,
+    response: Response,
+    principal: SupportPrincipal = Depends(_support_session_principal),
+) -> Response:
+    """Revoke the current support session and clear the cookie."""
+    raw_session = request.cookies.get(SESSION_COOKIE_NAME) or ""
+    _require_allowed_origin(request)
+    await _require_csrf(request, principal)
+    await _auth.logout(raw_session)
+    _clear_session_cookie(response)
+    response.status_code = 204
+    return response
+
+
+@router.get("/auth/session")
+async def support_session(
+    principal: SupportPrincipal = Depends(_support_session_principal),
+) -> dict:
+    """Describe the current support session (no tokens, no credentials)."""
+    return {
+        "actor_id": principal.actor_id,
+        "roles": sorted(principal.roles),
+        "tenant_ids": sorted(principal.tenant_ids),
+        "auth_method": principal.auth_method,
+        "issued_at": principal.issued_at,
+        "expires_at": principal.expires_at,
+    }
 
 
 @router.websocket("/ws/{ticket_id}")
