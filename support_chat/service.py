@@ -316,6 +316,80 @@ class SupportTicketService:
             page_size=page_size,
         )
 
+    def _list_tickets_for_scopes_sync(
+        self,
+        tenant_ids: frozenset[str],
+        tenant_filter: str | None,
+        status: TicketStatus | None,
+        page: int,
+        page_size: int,
+    ) -> TicketListResponse:
+        """H2a-C1: list the tickets of an explicit set of membership scopes.
+
+        The scope is the caller's immutable membership set — the optional filter
+        may only narrow it, and an empty scope fails closed. The predicate is
+        built purely from those scopes, so a filter can never widen access.
+        """
+        self._ensure_tables_sync()
+        scopes = tuple(sorted(tenant_ids))
+        if tenant_filter is not None:
+            if tenant_filter not in tenant_ids:
+                return TicketListResponse(tickets=[], total=0, page=page, page_size=page_size)
+            scopes = (tenant_filter,)
+        if not scopes:
+            return TicketListResponse(tickets=[], total=0, page=page, page_size=page_size)
+        with self._factory()() as session:
+            q = session.query(SupportTicketModel).filter(
+                SupportTicketModel.tenant_id.in_(scopes)
+            )
+            if status is not None:
+                q = q.filter(SupportTicketModel.status == status.value)
+            total = q.count()
+            rows = (
+                q.order_by(
+                    SupportTicketModel.created_at.asc(),
+                    SupportTicketModel.ticket_id.asc(),
+                )
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+                .all()
+            )
+            tickets = [_model_to_ticket(m) for m in rows]
+        return TicketListResponse(
+            tickets=[t.model_dump(mode="json") for t in tickets],
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+
+    def _get_ticket_for_scopes_sync(
+        self, ticket_id: str, tenant_ids: frozenset[str]
+    ) -> SupportTicket | None:
+        """H2a-C1: fetch a ticket only inside the caller's membership scopes.
+
+        Malformed, unknown and out-of-scope ids are indistinguishable here: all
+        of them return ``None``, which the route maps to a uniform 404.
+        """
+        self._ensure_tables_sync()
+        tid = _coerce_uuid(ticket_id)
+        if tid is None:
+            return None
+        scopes = tuple(sorted(tenant_ids))
+        if not scopes:
+            return None
+        with self._factory()() as session:
+            model = (
+                session.query(SupportTicketModel)
+                .filter(
+                    SupportTicketModel.ticket_id == tid,
+                    SupportTicketModel.tenant_id.in_(scopes),
+                )
+                .one_or_none()
+            )
+            if model is None:
+                return None
+            return _model_to_ticket(model)
+
     def _transition_sync(
         self, ticket_id: str, new_status: TicketStatus, tenant_id: str
     ) -> tuple[SupportTicket, str]:
@@ -488,6 +562,52 @@ class SupportTicketService:
             return None
         # H1: a tenant key carries no trusted role, so visibility is always the
         # tenant-user view — internal notes and internal-note messages stay hidden.
+        messages = self._chat.get_visible_messages(
+            ticket_id, ParticipantRole.TENANT_USER.value
+        )
+        participants = self._participants.get(ticket_id, [])
+        attachments = self._attachments.get(ticket_id, [])
+        csat = self._csat.get(ticket_id)
+        return TicketDetailResponse(
+            ticket=ticket.model_dump(mode="json"),
+            messages=[m.model_dump(mode="json") for m in messages],
+            participants=[p.model_dump(mode="json") for p in participants],
+            attachments=[a.model_dump(mode="json") for a in attachments],
+            csat=csat.model_dump(mode="json") if csat else None,
+        )
+
+    async def agent_list_tickets(
+        self,
+        tenant_ids: frozenset[str],
+        tenant_id: str | None = None,
+        status: TicketStatus | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> TicketListResponse:
+        """H2a-C1: membership-scoped read for a trusted support agent."""
+        return await asyncio.to_thread(
+            self._list_tickets_for_scopes_sync,
+            tenant_ids,
+            tenant_id,
+            status,
+            page,
+            page_size,
+        )
+
+    async def agent_get_ticket_detail(
+        self, ticket_id: str, tenant_ids: frozenset[str]
+    ) -> TicketDetailResponse | None:
+        """H2a-C1: membership-scoped detail for a trusted support agent.
+
+        Visibility is deliberately the *tenant-user* view even though the caller
+        is an agent: C1 is read-only, so internal notes and internal-note
+        messages stay hidden until a role-gated H2b path exists.
+        """
+        ticket = await asyncio.to_thread(
+            self._get_ticket_for_scopes_sync, ticket_id, tenant_ids
+        )
+        if not ticket:
+            return None
         messages = self._chat.get_visible_messages(
             ticket_id, ParticipantRole.TENANT_USER.value
         )
