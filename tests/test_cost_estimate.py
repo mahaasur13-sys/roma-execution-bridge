@@ -29,3 +29,10 @@ def test_estimate_cluster_cost_below_one_raises():
         estimate_cluster_cost({"nodes": 0, "expected_gpu_seconds": 100})
     with pytest.raises(ValueError):
         estimate_cluster_cost({"nodes": 1, "expected_gpu_seconds": 0})
+
+
+def test_estimate_cluster_cost_non_finite_raises():
+    with pytest.raises(ValueError):
+        estimate_cluster_cost({"nodes": float("nan"), "expected_gpu_seconds": 100})
+    with pytest.raises(ValueError):
+        estimate_cluster_cost({"nodes": 2, "expected_gpu_seconds": float("inf")})
