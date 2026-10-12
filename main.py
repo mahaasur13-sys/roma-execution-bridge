@@ -36,7 +36,7 @@ from deps import (
 import plan_source
 
 # DecisionOS — Week 1 foundation
-from cost.gate import EnterpriseDecisionGate
+from cost.gate import EnterpriseDecisionGate, estimate_cluster_cost, estimate_cost
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from prometheus_client import (
@@ -105,20 +105,22 @@ def _check_spend_cap(tenant_id: str, estimated_cost: float, plan_name: str = "fr
     if plan is None:
         return False, refusal
     cap = plan["spend_cap_usd"]
-    if cap <= 0:
-        return (
-            True,
-            "Free plan: no spend-cap. Upgrade to Start ($5 cap) for GPU access.",
-        )
-    balance = (
-        billing_ledger.get_tenant_balance(tenant_id)
-        if hasattr(billing_ledger, "get_tenant_balance")
-        else (
-            billing_ledger.get_balance(tenant_id)
-            if hasattr(billing_ledger, "get_balance")
-            else 0.0
-        )
-    )
+    if cap < 0:
+        # enterprise/unlimited: spend-cap explicitly disabled.
+        return True, ""
+    if cap == 0:
+        # RaaS-04: cap=0 must NOT admit paid work (fail-closed). No free-tier is
+        # invented here; a zero cap means paid execution is not allowed.
+        return False, "Spend-cap is zero: paid work not allowed"
+    # RaaS-04: an unknown balance (PG down / in-memory fallback) must fail
+    # closed — it must NOT be read as 0.0 and pass admission. A real zero
+    # balance is only trusted when the ledger is durable (persistent).
+    if not getattr(billing_ledger, "is_persistent", True):
+        return False, "Billing balance unavailable (non-persistent), retry later"
+    try:
+        balance = billing_ledger.get_tenant_balance(tenant_id)
+    except PGUnavailableError:
+        return False, "Billing balance unavailable, retry later"
     projected = balance + estimated_cost
     track_spend_cap(tenant_id, plan_name, balance, cap)
     if projected > cap:
@@ -1145,6 +1147,16 @@ async def metrics():
 async def submit_atom_cluster(payload: dict, key_info: dict = Depends(verify_api_key)):
     tenant_id = key_info["tenant_id"]
     cluster_spec = payload.get("cluster_spec", {})
+    # RaaS-04: cluster cost estimate — nodes + expected_gpu_seconds required.
+    try:
+        estimated_cost = estimate_cluster_cost(cluster_spec)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    # RaaS-04: spend-cap guard (fail-closed) before creating the job.
+    plan_name = (db.get_tenant(tenant_id) or {}).get("plan", "free")
+    allowed, reason = _check_spend_cap(tenant_id, estimated_cost, plan_name)
+    if not allowed:
+        raise HTTPException(status_code=402, detail=reason)
     cluster_name = cluster_spec.get("name", "default")
     job_id = str(uuid.uuid4())
     job = {
@@ -1245,6 +1257,13 @@ async def submit_job(payload: RomaTaskInput, key_info: dict) -> RomaTaskResponse
     global queue_depth
     tenant_id = key_info["tenant_id"]
     allowed, reason = _check_limits(tenant_id)
+    if not allowed:
+        raise HTTPException(status_code=402, detail=reason)
+    # RaaS-04: spend-cap guard (fail-closed) before creating the job.
+    plan_name = (db.get_tenant(tenant_id) or {}).get("plan", "free")
+    allowed, reason = _check_spend_cap(
+        tenant_id, estimate_cost({"gpu_required": payload.gpu_required}), plan_name
+    )
     if not allowed:
         raise HTTPException(status_code=402, detail=reason)
     try:

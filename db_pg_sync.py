@@ -967,9 +967,20 @@ def record_usage_event(
     import json
 
     cur = conn.cursor()
-    cur.execute(
+    base_sql = (
         "INSERT INTO usage_events (tenant_id, event_type, value, cost_usd, job_id, metadata, billed) "
-        "VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+        "VALUES (%s,%s,%s,%s,%s,%s,%s)"
+    )
+    if job_id and job_id not in ("manual", "auto"):
+        # RaaS-01 / migration 016: idempotent write for a REAL job_id.
+        # Repeated write is a no-op (does not update cost_usd/billed).
+        base_sql += (
+            " ON CONFLICT (tenant_id, job_id, event_type)"
+            " WHERE job_id IS NOT NULL AND job_id NOT IN ('manual', 'auto', '')"
+            " DO NOTHING"
+        )
+    cur.execute(
+        base_sql + " RETURNING id",
         (
             tenant_id,
             event_type,
@@ -980,6 +991,7 @@ def record_usage_event(
             billed,
         ),
     )
-    eid = cur.fetchone()[0]
+    row = cur.fetchone()
+    eid = row[0] if row else None  # ON CONFLICT DO NOTHING → no row
     conn.commit()
     return eid

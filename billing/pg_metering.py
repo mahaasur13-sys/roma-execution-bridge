@@ -50,8 +50,11 @@ class PGMeteringEngine:
     def _pg_execute(
         self, operation: str, query: str, params: tuple = None, fetch: bool = False
     ) -> list | None:
-        if not self._pg.enabled or not self._pg.is_connected:
+        if not self._pg.enabled:
             raise PGUnavailableError("PG not configured or unavailable")
+        # NB: do NOT pre-check is_connected — the pool is created lazily by
+        # get_connection(); pre-checking it made the first record() raise before
+        # ever attempting a connection (RaaS-01 durable-write path).
         try:
             with self._pg.get_connection(operation) as conn:
                 cur = conn.cursor()
@@ -93,10 +96,20 @@ class PGMeteringEngine:
         )
 
         try:
+            _usage_insert_sql = """INSERT INTO usage_events (tenant_id, event_type, value, cost_usd, job_id, metadata, billed)
+                   VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s)"""
+            if job_id and job_id not in ("manual", "auto"):
+                # RaaS-01 / migration 016: idempotent write for a REAL job_id.
+                # A repeated write is a no-op — it does NOT update cost_usd or
+                # billed of the already-lying row.
+                _usage_insert_sql += (
+                    " ON CONFLICT (tenant_id, job_id, event_type)"
+                    " WHERE job_id IS NOT NULL AND job_id NOT IN ('manual', 'auto', '')"
+                    " DO NOTHING"
+                )
             self._pg_execute(
                 "usage_insert",
-                """INSERT INTO usage_events (tenant_id, event_type, value, cost_usd, job_id, metadata, billed)
-                   VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s)""",
+                _usage_insert_sql,
                 (
                     tenant,
                     event_type,
@@ -126,24 +139,20 @@ class PGMeteringEngine:
                 ),
             )
             return ev
-        except PGUnavailableError:
-            pass
-
-        # In-memory fallback
-        self.events.append(ev)
-        t = self.tenant_totals.setdefault(
-            tenant, {"gpu_s": 0, "cpu_s": 0, "gb_s": 0, "cost": 0.0, "jobs": 0}
-        )
-        if event_type == "gpu_usage":
-            t["gpu_s"] += gpu_seconds
-        if event_type == "cpu_usage":
-            t["cpu_s"] += cpu_seconds
-        if event_type == "storage_usage":
-            t["gb_s"] += gb_seconds
-        if event_type == "job_completed":
-            t["jobs"] += 1
-        t["cost"] += ev.cost_usd
-        return ev
+        except PGUnavailableError as exc:
+            # RaaS-01: a failed durable write must not be silently swallowed, and
+            # the in-memory fallback must not report false success for paid work.
+            # Make the failure visible and correlated by tenant/job so upstream
+            # (execution_worker) can fail closed on PGUnavailableError.
+            logger.error(
+                "MeteringEngine.record NOT persisted (fail-closed): "
+                "tenant=%s job=%s event=%s error=%s",
+                tenant,
+                job_id,
+                event_type,
+                exc,
+            )
+            raise
 
     def snapshot(self, tenant: str = None) -> Dict:
         try:
