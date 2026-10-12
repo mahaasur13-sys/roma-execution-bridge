@@ -93,6 +93,15 @@ def submit_job_through_gate(
     # (Week 1: only subscription_policy)
     policy_name = "subscription_status"
 
+    # 6b. Spend-cap guard (RaaS-04): fail-closed before creating the job.
+    #      Lazy import to avoid a module-level main→decision_store cycle.
+    from main import _check_spend_cap
+
+    allowed, reason = _check_spend_cap(tenant_id, estimated_cost, plan_name)
+    if not allowed:
+        _deny(tenant_id, request_id, reason, job_count, estimated_cost)
+        raise HTTPException(status_code=402, detail=reason)
+
     # 7. Allow
     from cost.gate import GateResult
 
@@ -120,9 +129,11 @@ def submit_job_through_gate(
     )
     on_job_created(tenant_id, job_id, decision_id, "job_submit")
 
-    # 10. Record usage
-    usage_id = str(uuid.uuid4())
-    db.insert_usage_event(usage_id, tenant_id, job_id, 0, estimated_cost)
+    # NOTE (RaaS-01): submit-time cost is an ESTIMATE, not actual metering.
+    # It is already persisted via insert_decision_record(estimated_cost=...).
+    # Do NOT write it into usage_events — that table is a journal of real
+    # metering with billed TRUE/FALSE/NULL; an estimate here would pollute
+    # SUM(cost_usd) and look like a charge.
 
     return {
         "decision_id": decision_id,
@@ -224,8 +235,14 @@ def _get_plan_limit(plan_name: str) -> int:
 
 
 def _estimate_cost(payload: dict) -> float:
-    """Minimal cost estimate for Week 1 — 0.01 per job."""
-    return 0.01
+    """Cost estimate from the single source (cost.gate.estimate_cost).
+
+    Do NOT keep a second number here — admission and the decision record both use
+    cost.gate.estimate_cost(payload).
+    """
+    from cost.gate import estimate_cost
+
+    return estimate_cost(payload)
 
 
 def _deny(

@@ -1623,6 +1623,14 @@ def _get_tenant_usage_db_sqlite(tenant_id):
 
 
 def insert_usage_event(event_id, tenant_id, job_id, gpu_seconds, cost):
+    """unused submit-estimate path, do not write usage_events.
+
+    Deprecated (RaaS-01): the submit-time cost is an ESTIMATE, not real metering,
+    and is already persisted via ``insert_decision_record``. No caller writes it
+    into ``usage_events`` anymore. The column set (id/gpu_seconds/cost) does NOT
+    match the canonical usage_events schema (event_type/value/cost_usd/metadata/
+    billed). Left unused; do not rewire onto the metering contract.
+    """
     if _pg_enabled():
         return _run_async(
             _insert_usage_event_pg(event_id, tenant_id, job_id, gpu_seconds, cost)

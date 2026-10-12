@@ -37,7 +37,7 @@ def _load_watchdog():
     return mod
 
 
-def _run_cycles(wd, tmp_path, *, recent_minutes: tuple[int, ...]) -> dict:
+def _run_cycles(wd, tmp_path, monkeypatch, *, recent_minutes: tuple[int, ...]) -> dict:
     state_path = tmp_path / "state.json"
     now = datetime.datetime.now(datetime.timezone.utc)
     recent = [
@@ -78,7 +78,7 @@ def _run_cycles(wd, tmp_path, *, recent_minutes: tuple[int, ...]) -> dict:
         if cycles["n"] >= 2:
             raise SystemExit(0)
 
-    wd.time.sleep = fake_sleep
+    monkeypatch.setattr(wd.time, "sleep", fake_sleep)
 
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -98,7 +98,7 @@ def _run_cycles(wd, tmp_path, *, recent_minutes: tuple[int, ...]) -> dict:
     }
 
 
-def test_restart_budget_gate(tmp_path) -> None:
+def test_restart_budget_gate(tmp_path, monkeypatch) -> None:
     """Бюджет исчерпан → кластер НЕ поднимается; бюджет свободен → поднимается.
 
     Обе половины в одном тесте намеренно: без второй (positive control) первая
@@ -108,7 +108,7 @@ def test_restart_budget_gate(tmp_path) -> None:
 
     exhausted_dir = tmp_path / "exhausted"
     exhausted_dir.mkdir()
-    out = _run_cycles(wd, exhausted_dir, recent_minutes=(1, 5, 10, 20, 30))
+    out = _run_cycles(wd, exhausted_dir, monkeypatch, recent_minutes=(1, 5, 10, 20, 30))
     exceeded = [e for e in out["events"] if e.get("event") == "pg_down_budget_exceeded"]
     assert exceeded, f"нет события pg_down_budget_exceeded: {out['events']}"
     assert exceeded[0].get("action") == "none"
@@ -119,7 +119,7 @@ def test_restart_budget_gate(tmp_path) -> None:
 
     available_dir = tmp_path / "available"
     available_dir.mkdir()
-    ok = _run_cycles(wd, available_dir, recent_minutes=(90,))
+    ok = _run_cycles(wd, available_dir, monkeypatch, recent_minutes=(90,))
     assert ok["calls"] == [
         "start_cluster"
     ], f"ожидался подъём кластера, вызовы={ok['calls']}"

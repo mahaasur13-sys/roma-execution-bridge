@@ -25,7 +25,25 @@ from __future__ import annotations
 import json
 import os
 import sys
+import types
 from pathlib import Path
+
+# Minimal pydantic_settings stub so tests that import main/crypto_payments run in
+# an environment without the declared dependency. No-op when the real module is
+# installed (CI). Kept here (not in each test file) to unblock existing tests.
+if "pydantic_settings" not in sys.modules:
+    try:
+        import pydantic_settings  # noqa: F401
+    except ImportError:
+        _pydantic_settings_stub = types.ModuleType("pydantic_settings")
+
+        class _BaseSettings:
+            def __init__(self, **kw):
+                for k, v in kw.items():
+                    setattr(self, k, v)
+
+        _pydantic_settings_stub.BaseSettings = _BaseSettings
+        sys.modules["pydantic_settings"] = _pydantic_settings_stub
 
 import pytest
 
