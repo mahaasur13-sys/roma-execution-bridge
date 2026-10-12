@@ -23,8 +23,6 @@ if "pydantic_settings" not in sys.modules:
     _fake.BaseSettings = _BaseSettings
     sys.modules["pydantic_settings"] = _fake
 
-import pytest
-
 from billing.pg_ledger import PGUnavailableError
 import main
 
