@@ -24,8 +24,10 @@ def test_migration_numeric_prefixes_are_unique():
     names = sorted(p.name for p in MIGRATIONS_DIR.glob("*.sql"))
     assert names, "no migration files found"
 
-    prefixes = [re.match(r"^(\d+)", n).group(1) for n in names]
-    # No duplicate numeric prefix (the two-005 collision is resolved).
+    prefixes = [re.match(r"^(\d+[a-z]*)", n).group(1) for n in names]
+    # No duplicate numeric prefix (the two-005 collision is resolved). A letter
+    # suffix (e.g. 015a) is allowed: it keeps a unique, ordered slot that sorts
+    # between 015 and 016 in the runner's lexicographic order.
     assert len(prefixes) == len(set(prefixes)), f"duplicate prefix in: {names}"
     # Lexicographic order == application order (no gaps that break sorting).
     assert prefixes == sorted(prefixes), f"not ordered: {names}"
