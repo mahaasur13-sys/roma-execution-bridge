@@ -2,8 +2,10 @@
 
 The 015a preflight must run BEFORE 016 creates the unique index. The order check
 proves the order of THIS run on a clean disposable database (not stale ledger
-records): the runner is executed against a throwaway container, and the fresh
-`schema_migrations` is read ordered by `applied_at` then `filename`.
+records, not timestamp-derived order): the runner is executed against a throwaway
+container and the order is taken from its `applied {name}` stdout lines in the
+order they were printed. `schema_migrations` is asserted only as a fact that the
+files were recorded.
 """
 
 from __future__ import annotations
@@ -42,6 +44,15 @@ def _assert_applied_order(names: list[str]) -> None:
     assert positions == sorted(positions), (
         f"applied-порядок нарушен: ожидается 015 → 015a → 016, получено {names}"
     )
+
+
+def _applied_names_from_stdout(stdout: str) -> list[str]:
+    """Names of migrations applied in THIS run, in the order the runner printed them."""
+    return [
+        line.split(" ", 1)[1].strip()
+        for line in stdout.splitlines()
+        if line.startswith("applied ")
+    ]
 
 
 def _require_ambient_pg(dsn: str) -> None:
@@ -137,26 +148,34 @@ def test_migration_applied_order_015_015a_016():
     try:
         env = dict(os.environ, PG_DSN=own_dsn)
         env.pop("DATABASE_URL", None)
-        subprocess.run(
+        result = subprocess.run(
             [sys.executable, str(REPO_ROOT / "scripts" / "run_migrations.py")],
             check=True,
             capture_output=True,
+            text=True,
             env=env,
         )
 
+        # Order is taken from the runner's `applied {name}` stdout lines — the
+        # order of THIS run's execution, not a timestamp-derived order.
+        applied = _applied_names_from_stdout(result.stdout)
+        _assert_applied_order(applied)
+
+        # schema_migrations is only a fact of application (recorded), not an
+        # ordering source.
         import psycopg2
 
         conn = psycopg2.connect(own_dsn)
         try:
             cur = conn.cursor()
-            cur.execute(
-                "SELECT filename FROM schema_migrations "
-                "ORDER BY applied_at, filename"
-            )
-            names = [row[0] for row in cur.fetchall()]
+            cur.execute("SELECT filename FROM schema_migrations")
+            recorded = {row[0] for row in cur.fetchall()}
         finally:
             conn.close()
 
-        _assert_applied_order(names)
+        for expected in ORDERED:
+            assert expected in recorded, (
+                f"{expected} не записана в schema_migrations"
+            )
     finally:
         _stop_container(name)
