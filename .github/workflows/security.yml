@@ -79,7 +79,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # fetch-depth: 0 — baseline-коммит обязан присутствовать в локальной
+      # истории, иначе semgrep не сможет отдиффовать рабочее дерево.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -90,5 +94,66 @@ jobs:
       # --metrics=off: без телеметрии (никакой отправки метрик на semgrep.dev).
       # Набор p/ci тянется из реестра semgrep — это единственное сетевое чтение
       # правил, сами правила в репозитории не дублируются.
-      - name: semgrep — p/ci (fail on ERROR)
-        run: semgrep scan --config=p/ci --error --metrics=off
+      #
+      # --baseline-commit: ворота оценивают ТОЛЬКО дельту этого изменения, а не
+      # весь накопленный baseline репозитория. Существующие находки не исчезают
+      # из отчёта — они перестают блокировать этот PR; отдельный слой
+      # (bandit medium+ / repo-wide) продолжает работать по всему дереву.
+      - name: semgrep — p/ci (fail on ERROR, delta-only)
+        env:
+          # PR: база PR. push: предыдущий head. Оба доступны при fetch-depth: 0.
+          BASELINE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASELINE_SHA" ] || ! git cat-file -e "${BASELINE_SHA}^{commit}" 2>/dev/null; then
+            echo "baseline commit недоступен (пустой SHA или новый ref) — полный скан"
+            semgrep scan --config=p/ci --error --metrics=off
+          else
+            echo "baseline commit: $BASELINE_SHA"
+            semgrep scan --config=p/ci --error --metrics=off \
+              --baseline-commit="$BASELINE_SHA"
+          fi
+
+  # DEVSECOPS-PHASE1 (Trivy): контейнерное сканирование как отдельный эшелон.
+  # До этого слоя не было: образы собирались и подписывались, но содержимое
+  # (OS-пакеты и библиотеки) не проверялось. Ворота твёрдые — CRITICAL валит job.
+  #
+  # G-TRIVY-PR-GATE: слой живёт здесь, а не в cosign.yml, потому что ворота
+  # обязаны видеть pull_request, а cosign.yml на PR запускать нельзя: его job
+  # `signing` пушит в GHCR теги `:latest` и `build-<sha>` и подписывает их —
+  # образ из ветки опубликовался бы как `:latest`, а на форк-PR GITHUB_TOKEN
+  # read-only и push упал бы (джоба красная не из-за находки, а из-за прав).
+  # Здесь образ собирается локально в раннере и сканируется из локального
+  # стора Docker: ни реестра, ни пуша, ни секретов — поэтому слой работает и
+  # на форк-PR. Dockerfile'ы и контексты сборки — те же три, что собирает
+  # cosign.yml; сами Dockerfile'ы не меняются.
+  trivy:
+    runs-on: ubuntu-latest
+    # Три docker build + скан: 15 минут (бюджет сканирующей джобы в cosign.yml)
+    # мало для образа gpu-worker, поэтому бюджет поднят здесь, а не срезан
+    # через исключение образов.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # G-TOOL-PIN: версия инструмента фиксирована (аудит воспроизводится,
+      # а не зависит от даты прогона) — тот же принцип, что у ruff/bandit.
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@v0.2.3
+        with:
+          version: v0.58.1
+
+      # Локальные теги, а не реестровые: сборка идёт из рабочего дерева этого
+      # PR (или этого push), то есть сканируется именно то, что предлагается
+      # смёржить, а не последний опубликованный образ.
+      - name: Build the three images locally (no push)
+        run: |
+          docker build -t roma-scan-gpu-worker -f Dockerfile.gpu-worker .
+          docker build -t roma-scan-stripe-webhook -f deploy/stripe-webhook/Dockerfile deploy/stripe-webhook/
+          docker build -t roma-scan-operator -f config/crd/Dockerfile.operator .
+
+      - name: Trivy image scan — CRITICAL (fails the job)
+        run: |
+          for IMG in roma-scan-gpu-worker roma-scan-stripe-webhook roma-scan-operator; do
+            echo "=== Trivy $IMG ==="
+            trivy image --exit-code 1 --severity CRITICAL --no-progress "$IMG"
+          done
