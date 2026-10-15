@@ -46,35 +46,108 @@ class PGUnavailableError(Exception):
 
 
 class _PgConnection:
-    """Class-based context manager: acquires conn, commits, returns to pool."""
+    """Class-based context manager: acquires conn, commits, returns to pool.
 
-    __slots__ = ("_mgr", "_conn", "_returned")
+    Transaction contract:
 
-    def __init__(self, mgr, conn):
+    * normal body exit — ``commit()`` is attempted. A failed commit is never
+      swallowed: the connection is discarded (unknown outcome) and the error
+      propagates to the caller.
+    * body raised — no commit is issued; a best-effort rollback keeps the
+      connection consistent and the primary exception reaches the caller
+      unchanged.
+    * cleanup failures are logged and never mask the primary exception.
+    * the pool slot is released exactly once on every path.
+    """
+
+    __slots__ = ("_mgr", "_conn", "_returned", "_pool")
+
+    def __init__(self, mgr, conn, pool=None):
         self._mgr = mgr
         self._conn = conn
         self._returned = False
+        # The pool that actually lent this connection is resolved once, at
+        # borrow time, and never re-read from the manager: a concurrent
+        # ``_create_pool()`` may install a different pool while the connection
+        # is checked out, and the borrow must go back to its lender.
+        self._pool = pool if pool is not None else getattr(mgr, "_pool", None)
 
     def __enter__(self):
         return self._conn
 
-    def __exit__(self, *a):
-        if self._conn and not self._returned:
+    def _release(self, close: bool = False) -> None:
+        """Return the connection to the lending pool exactly once. Never raises.
+
+        The lender is the pool captured when the connection was borrowed
+        (``self._pool``), not whatever ``mgr._pool`` points at now. If the lender
+        is gone or refuses the connection, the connection is closed rather than
+        handed to a foreign pool.
+
+        The active-connections gauge is decremented in the same step that
+        releases the pool slot, so the decrement cannot run more often than the
+        matching increment in ``get_connection()``.
+        """
+        if self._returned:
+            return
+        self._returned = True
+        try:
+            if self._conn is None:
+                return
+            pool = self._pool
             try:
-                self._conn.commit()
+                if pool is None:
+                    raise RuntimeError("PG pool is gone")
+                pool.putconn(self._conn, close=close)
             except Exception:
-                pass
-            try:
-                self._mgr._pool.putconn(self._conn)
-                self._returned = True
-            except Exception:
+                logger.warning(
+                    "PG putconn failed (close=%s); closing connection",
+                    close,
+                    exc_info=True,
+                )
                 try:
-                    self._mgr._pool.putconn(self._conn, close=True)
-                    self._returned = True
+                    self._conn.close()
                 except Exception:
-                    pass
-        if _pg_conn_active:
-            _pg_conn_active.labels(pool="billing").dec()
+                    logger.warning("PG connection close failed", exc_info=True)
+        finally:
+            if _pg_conn_active:
+                _pg_conn_active.labels(pool="billing").dec()
+
+    def _finish(self, exc_type) -> None:
+        """Complete the transaction; a commit failure is re-raised.
+
+        Every path ends in exactly one ``_release()`` call (or in none at all
+        when the wrapper was already released) — the only statement that can
+        raise here is the ``commit()`` below, and it runs *after* the release,
+        so the gauge decrement always happens before the error escapes.
+        """
+        if self._conn is None or self._returned:
+            return
+        if exc_type is not None:
+            # The body raised: never commit, never suppress the primary error.
+            try:
+                self._conn.rollback()
+            except Exception:
+                # The connection state is not trustworthy — discard it and
+                # keep the original exception as the one the caller sees.
+                logger.warning(
+                    "PG rollback failed while unwinding an exception", exc_info=True
+                )
+                self._release(close=True)
+                return
+            self._release()
+            return
+        try:
+            self._conn.commit()
+        except Exception:
+            # Unknown commit outcome: do not report success and do not hand
+            # this connection back to the pool as healthy.
+            logger.error("PG commit failed; discarding connection", exc_info=True)
+            self._release(close=True)
+            raise
+        self._release()
+
+    def __exit__(self, exc_type, exc, tb):
+        self._finish(exc_type)
         return False
 
 
@@ -153,15 +226,46 @@ class PGConnectionManager:
         for attempt in range(PG_RECONNECT_ATTEMPTS + 1):
             if not self._ensure_pool():
                 break
+            # Capture the lending pool: a concurrent _create_pool() may swap
+            # self._pool, and the borrowed connection must go back to the pool
+            # that handed it out.
+            pool = self._pool
+            conn = None
             try:
-                conn = self._pool.getconn()
+                conn = pool.getconn()
                 cur = conn.cursor()
-                cur.execute("SELECT 1")
+                try:
+                    cur.execute("SELECT 1")
+                except Exception:
+                    # The probe failed: release the cursor before the connection
+                    # is discarded, without masking the probe error.
+                    try:
+                        cur.close()
+                    except Exception:
+                        logger.warning("PG ping cursor close failed", exc_info=True)
+                    raise
                 cur.close()
                 if _pg_conn_active:
                     _pg_conn_active.labels(pool="billing").inc()
-                return _PgConnection(self, conn)
+                return _PgConnection(self, conn, pool)
             except Exception as e:
+                if conn is not None:
+                    # A failed ping must not leak the pool slot: close the
+                    # borrowed connection instead of returning it as healthy.
+                    try:
+                        pool.putconn(conn, close=True)
+                    except Exception:
+                        logger.warning(
+                            "PG putconn(close=True) failed after failed ping",
+                            exc_info=True,
+                        )
+                        try:
+                            conn.close()
+                        except Exception:
+                            logger.warning(
+                                "PG connection close failed after failed ping",
+                                exc_info=True,
+                            )
                 last_error = e
                 self._error_count += 1
                 if _pg_errors_total:
