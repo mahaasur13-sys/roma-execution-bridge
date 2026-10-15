@@ -70,3 +70,25 @@ jobs:
           curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz \
             | tar -xz -C /usr/local/bin gitleaks
           gitleaks detect --source . --no-banner --config .gitleaks.toml --redact --exit-code 1
+
+  # DEVSECOPS-PHASE1 (Semgrep): дополнительный SAST-слой (taint/dataflow).
+  # bandit выше остаётся владельцем профиля money-path (medium+) и ничем не
+  # заменяется — это отдельная джоба, а не замена. Ворота: --error (падение
+  # только на находках уровня ERROR).
+  sast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install semgrep
+        # G-TOOL-PIN-PENDING: диапазон вместо точного пина — точная версия
+        # ставится после первого зелёного прогона на master.
+        run: pip install "semgrep>=1.95,<2"
+      # --metrics=off: без телеметрии (никакой отправки метрик на semgrep.dev).
+      # Набор p/ci тянется из реестра semgrep — это единственное сетевое чтение
+      # правил, сами правила в репозитории не дублируются.
+      - name: semgrep — p/ci (fail on ERROR)
+        run: semgrep scan --config=p/ci --error --metrics=off

@@ -124,6 +124,36 @@ jobs:
           grep -c "kind: PodDisruptionBudget" /tmp/roma-template.yaml
           echo "PDB count OK"
 
+  # G-IAC-SCAN: helm-validate проверяет рендер и lint чарта, но не безопасность
+  # манифестов (root/privileged/hostPath/plaintext-secret). Checkov — второй,
+  # независимый слой по IaC: deploy/ (kustomize, raw manifests, overlays, CRD,
+  # мониторинг) и charts/. Манифесты не меняются: ворота показывают текущий долг,
+  # а не переписывают его молча.
+  iac-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # G-TOOL-PIN-PENDING: диапазон вместо точного пина, потому что точная
+      # версия не подтверждена офлайн; после первого зелёного прогона на master
+      # диапазон заменяется точным пином (тот же приём, что с ruff 0.15.20).
+      - name: Install Checkov
+        run: pip install "checkov~=3.2.0"
+      # Секреты намеренно не включены в --framework: их владелец — gitleaks
+      # (secret-scan/security.yml). Дублировать владение одним классом находок
+      # двумя джобами — это не усиление, а размывание ответственности.
+      - name: Checkov — deploy/ (fail on HIGH/CRITICAL)
+        run: >
+          checkov -d deploy/ --framework kubernetes,helm
+          --hard-fail-on HIGH,CRITICAL --compact --quiet
+      - name: Checkov — charts/ (fail on HIGH/CRITICAL)
+        run: >
+          checkov -d charts/ --framework kubernetes,helm
+          --hard-fail-on HIGH,CRITICAL --compact --quiet
+
   secret-scan:
     runs-on: ubuntu-latest
     steps:

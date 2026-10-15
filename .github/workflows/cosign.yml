@@ -145,6 +145,60 @@ jobs:
             echo "Rekor entry for $IMG — published at https://search.sigstore.dev"
           done
 
+  # DEVSECOPS-PHASE1 (Trivy): контейнерное сканирование как отдельный эшелон.
+  # До этого слоя не было: образы собирались и подписывались, но содержимое
+  # (OS-пакеты и библиотеки) не проверялось. Ворота твёрдые — CRITICAL валит
+  # job. Сканируются ровно те три образа, которые этот же workflow собрал и
+  # запушил; на workflow_dispatch — только те, что реально собирались (иначе
+  # trivy искал бы несуществующий тег). Dockerfile'ы не меняются.
+  trivy:
+    needs: signing
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      # G-TOOL-PIN: версия инструмента фиксирована (аудит воспроизводится,
+      # а не зависит от даты прогона) — тот же принцип, что у ruff/bandit.
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@v0.2.3
+        with:
+          version: v0.58.1
+
+      # Приватный GHCR: без входа trivy получил бы 401 на манифесте образа.
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive short SHA
+        run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+      - name: Get tag suffix
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]] && [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "TAG_SUFFIX=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          else
+            echo "TAG_SUFFIX=build-${SHORT_SHA}" >> $GITHUB_ENV
+          fi
+
+      - name: Trivy image scan — CRITICAL (fails the job)
+        env:
+          REQUESTED_IMAGES: ${{ github.event.inputs.images }}
+        run: |
+          IMAGES="${REQUESTED_IMAGES:-gpu-worker,stripe-webhook,operator}"
+          IFS=',' read -ra LIST <<< "$IMAGES"
+          for IMG in "${LIST[@]}"; do
+            echo "=== Trivy $IMG ==="
+            trivy image --exit-code 1 --severity CRITICAL --no-progress \
+              "ghcr.io/${GITHUB_REPOSITORY}/${IMG}:${TAG_SUFFIX}"
+          done
+
   attest:
     needs: signing
     runs-on: ubuntu-latest
