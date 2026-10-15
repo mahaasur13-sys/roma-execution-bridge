@@ -140,7 +140,7 @@ jobs:
       - name: Install Trivy
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
-          version: v0.58.1
+          version: v0.76.0
 
       # Локальные теги, а не реестровые: сборка идёт из рабочего дерева этого
       # PR (или этого push), то есть сканируется именно то, что предлагается
