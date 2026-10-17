@@ -15,7 +15,6 @@ import sys
 import types
 from pathlib import Path
 
-import pytest
 from starlette.testclient import TestClient
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
