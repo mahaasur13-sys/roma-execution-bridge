@@ -6,7 +6,7 @@ import logging
 
 import db_adapter as db
 from cost.gate import EnterpriseDecisionGate
-from policy_engine import evaluate_policies
+from plugins.builtin.jev_policy import shadow_policy
 from audit_events import write_audit_event
 
 logger = logging.getLogger("roma.decisions")
@@ -35,7 +35,7 @@ async def create_decision(payload: dict, x_api_key: str = Header(None)):
     pay = payload.get("payload", {})
 
     # Policy check
-    pol = evaluate_policies(
+    pol = shadow_policy(
         tenant_id,
         "decision.create",
         {
@@ -151,7 +151,7 @@ async def evaluate_decision(payload: dict, x_api_key: str = Header(None)):
     tenant_id = _tenant_from_key(x_api_key)
     pay = payload.get("payload", {})
     request_type = payload.get("request_type", "job_submit")
-    pol = evaluate_policies(
+    pol = shadow_policy(
         tenant_id, "decision.evaluate", {"request_type": request_type}
     )
     if pol["result"] != "allowed":

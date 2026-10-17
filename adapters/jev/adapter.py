@@ -1,4 +1,4 @@
-"""Решение адаптера: state -> один вызов system_one -> execute / confirm / abort / skip.
+"""Решение адаптера: state -> один вызов Decisions API -> execute / confirm / abort / skip.
 
 Адаптер ничего не возвращает в ROMA: ядро его не зовёт. Он либо запускается
 отдельным процессом (см. `adapters/jev/run.py`), либо не запускается вовсе.
@@ -67,7 +67,7 @@ def _verdict(decision: str, reason: str, evidence: dict[str, Any], latency_ms: f
 
 
 class JevAdapter:
-    """Sidecar-обёртка вокруг одного вызова `system_one`."""
+    """Sidecar-обёртка вокруг одного вызова Decisions API."""
 
     def __init__(self, client: JevClient | None = None, model: str | None = None) -> None:
         self._client = client if client is not None else JevClient()
