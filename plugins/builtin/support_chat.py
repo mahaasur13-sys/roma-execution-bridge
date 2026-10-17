@@ -89,6 +89,21 @@ class SupportChatPlugin:
 
     @staticmethod
     def _detect_intent(message: str) -> str:
+        intent = SupportChatPlugin._heuristic_intent(message)
+        from plugins.builtin.jev_triage import cascade_enabled, cascade_once, shadow_triage
+
+        # R5 cascade (after shadow data): Jev routes when confident, else heuristic.
+        if cascade_enabled():
+            jev_intent = cascade_once(message)
+            if jev_intent is not None:
+                return jev_intent
+            return intent
+        # R5 shadow (off by default): Jev observes in shadow, routing stays on the heuristic.
+        shadow_triage(message, intent)
+        return intent
+
+    @staticmethod
+    def _heuristic_intent(message: str) -> str:
         m = message.lower()
         if "submit" in m or "run" in m or "train" in m:
             return "job_submit"

@@ -8,7 +8,7 @@ target=`.`) обязан остаться на каноне `.ci/run-completenes
     .venv/bin/python -m pytest adapters/jev/checks/jev_checks.py -q
 
 Сеть: наружу не уходит ни один запрос — транспорт подменяется `_transport()`,
-`typesafe_sdk` подменяется стабом через `sys.modules`. Живой ключ не нужен.
+Живой ключ не нужен.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import logging
 import sys
-import types
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +33,7 @@ FAKE_KEY = "unit-test-placeholder-key"
 
 
 def _env(**overrides: str) -> dict[str, str]:
-    base = {"JEV_ENABLED": "1", "TYPESAFE_API_KEY": FAKE_KEY}
+    base = {"JEV_ENABLED": "1", "OPENROUTER_API_KEY": FAKE_KEY}
     base.update(overrides)
     return base
 
@@ -60,7 +59,7 @@ def _state(**overrides: Any) -> dict[str, Any]:
 
 def _payload(gate: float, choice: str, run_probability: float, risk: int, confidence: float) -> dict[str, Any]:
     return {
-        "model": "jev-1.13.0",
+        "model": "typesafe/jev-1.13",
         "answers": {
             "gate": {"type": "noul", "noul": gate},
             "next": {
@@ -118,7 +117,7 @@ def test_flag_off_is_noop_without_network() -> None:
 
 def test_missing_key_is_noop_without_network() -> None:
     recorder = _Recorder(result=_payload(0.99, "run", 0.99, 1, 0.99))
-    env = {"JEV_ENABLED": "1", "TYPESAFE_API_KEY": ""}
+    env = {"JEV_ENABLED": "1", "OPENROUTER_API_KEY": ""}
     verdict = _adapter(recorder, env=env).decide(_state())
     assert verdict["decision"] == "skip"
     assert verdict["reason"] == "disabled"
@@ -147,7 +146,7 @@ def test_rate_limited_exhausts_one_retry_then_skips() -> None:
 def test_transport_receives_official_endpoint_and_env_key() -> None:
     recorder = _Recorder(result=_payload(0.95, "run", 0.9, 2, 0.9))
     _adapter(recorder).decide(_state())
-    assert recorder.urls == ["https://api.typesafe.ai/v1/systemone"]
+    assert recorder.urls == ["https://openrouter.ai/api/alpha/decisions"]
     assert recorder.keys == [FAKE_KEY]
 
 
@@ -185,7 +184,7 @@ def test_valid_choice_executes_with_single_call() -> None:
     assert verdict["reason"] == "gate_and_choice"
     assert len(recorder.calls) == 1
     assert sorted(recorder.calls[0]["questions"]) == ["gate", "next", "risk"]
-    assert recorder.calls[0]["model"] == "jev-1.13.0"
+    assert recorder.calls[0]["model"] == "typesafe/jev-1.13"
     assert verdict["evidence"]["gate_noul"] == 0.91
 
 
@@ -271,7 +270,7 @@ def test_secrets_never_reach_transport() -> None:
         nested={"authorization": "Bearer do_not_send", "dsn": "postgresql://u:p@h/db"},
         note="Bearer do_not_send",
     )
-    verdict = _adapter(recorder, env=_env(TYPESAFE_API_KEY="sk_live_do_not_send")).decide(state)
+    verdict = _adapter(recorder, env=_env(OPENROUTER_API_KEY="sk_live_do_not_send")).decide(state)
     assert verdict["decision"] == "execute"
 
     body = json.dumps(recorder.calls[0], ensure_ascii=False)
@@ -298,57 +297,6 @@ def test_state_fits_is_enforced_on_serialized_bytes() -> None:
     verdict = _adapter(recorder).decide(_state())
     assert verdict["decision"] == "execute"
     assert state_bytes(recorder.calls[0]["state"]) <= 24 * 1024
-
-
-# -- путь официального SDK --------------------------------------------------
-
-
-def _install_sdk_stub(payload: dict[str, Any]) -> dict[str, Any]:
-    seen: dict[str, Any] = {}
-
-    class _Answer:
-        def __init__(self, data: dict[str, Any]) -> None:
-            self.type = data.get("type")
-            self.choice = data.get("choice")
-            self.noul = data.get("noul")
-            self.score = data.get("score")
-            self.probabilities = data.get("probabilities")
-            self.confidence = data.get("confidence")
-
-    class _Response:
-        def __init__(self, answers: dict[str, Any]) -> None:
-            self.model = "jev-1.13.0"
-            self.answers = {key: _Answer(value) for key, value in answers.items()}
-
-    class _StubClient:
-        def __init__(self, api_key: str | None = None, **kwargs: Any) -> None:
-            seen["api_key"] = api_key
-
-        def system_one(self, state: Any = None, questions: Any = None, model: Any = None) -> Any:
-            seen["state"] = state
-            seen["questions"] = questions
-            seen["model"] = model
-            return _Response(payload["answers"])
-
-    module = types.ModuleType("typesafe_sdk")
-    module.TypeSafeClient = _StubClient  # type: ignore[attr-defined]
-    sys.modules["typesafe_sdk"] = module
-    return seen
-
-
-def test_sdk_path_is_preferred_when_installed() -> None:
-    seen = _install_sdk_stub(_payload(0.93, "run", 0.9, 1, 0.9))
-    try:
-        client = JevClient(env=_env())
-        verdict = JevAdapter(client=client).decide(_state())
-    finally:
-        sys.modules.pop("typesafe_sdk", None)
-
-    assert seen["api_key"] == FAKE_KEY
-    assert seen["model"] == "jev-1.13.0"
-    assert sorted(seen["questions"]) == ["gate", "next", "risk"]
-    assert verdict["decision"] == "execute"
-    assert verdict["model"] == "jev-1.13.0"
 
 
 # -- инвариант «любой сбой адаптера -> skip» и код возврата CLI -------------
@@ -380,25 +328,6 @@ def test_failure_raised_outside_transport_is_skip_internal_error() -> None:
     assert FAKE_KEY not in json.dumps(verdict, ensure_ascii=False)
 
 
-def test_sdk_constructor_failure_is_skip_not_exception() -> None:
-    """SDK есть, но падает на конструкторе — наружу всё равно skip, ключ не течёт."""
-
-    class _BrokenClient:
-        def __init__(self, api_key: str | None = None, **kwargs: Any) -> None:
-            raise RuntimeError(f"sdk init failed for {api_key}")
-
-    module = types.ModuleType("typesafe_sdk")
-    module.TypeSafeClient = _BrokenClient  # type: ignore[attr-defined]
-    sys.modules["typesafe_sdk"] = module
-    try:
-        verdict = JevAdapter(client=JevClient(env=_env())).decide(_state())
-    finally:
-        sys.modules.pop("typesafe_sdk", None)
-
-    assert verdict["decision"] == "skip"
-    assert FAKE_KEY not in json.dumps(verdict, ensure_ascii=False)
-
-
 def test_key_echoed_without_bearer_word_is_masked() -> None:
     """Провайдер вернул ключ в теле без слова Bearer — в detail его быть не должно."""
     from adapters.jev.client import JevBadResponse
@@ -420,8 +349,8 @@ def test_cli_exit_code_is_not_zero_on_skip(tmp_path: Path) -> None:
     state_file.write_text(json.dumps(_state()), encoding="utf-8")
     env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO_ROOT)}
     for name, extra in (
-        ("flag_off", {"JEV_ENABLED": "0", "TYPESAFE_API_KEY": ""}),
-        ("flag_on_no_key", {"JEV_ENABLED": "1", "TYPESAFE_API_KEY": ""}),
+        ("flag_off", {"JEV_ENABLED": "0", "OPENROUTER_API_KEY": ""}),
+        ("flag_on_no_key", {"JEV_ENABLED": "1", "OPENROUTER_API_KEY": ""}),
     ):
         proc = subprocess.run(
             [sys.executable, "-m", "adapters.jev.run", "--state-file", str(state_file)],
@@ -449,7 +378,7 @@ def test_cli_forbidden_domain_wins_over_disabled_and_costs_no_network(tmp_path: 
         capture_output=True,
         text=True,
         cwd=str(REPO_ROOT),
-        env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO_ROOT), "JEV_ENABLED": "0", "TYPESAFE_API_KEY": ""},
+        env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO_ROOT), "JEV_ENABLED": "0", "OPENROUTER_API_KEY": ""},
         timeout=60,
     )
     verdict = json.loads(proc.stdout)
@@ -589,7 +518,7 @@ class _AdapterSpy:
             "decision": "execute",
             "reason": "gate_and_choice",
             "evidence": {"risk_score": 2.0},
-            "model": "jev-1.13.0",
+            "model": "typesafe/jev-1.13",
             "latency_ms": 1.0,
         }
         _AdapterSpy.instances.append(self)
@@ -611,7 +540,7 @@ def _run_cli(monkeypatch: Any, tmp_path: Path, out: Path, decision: str = "execu
 
     monkeypatch.setattr(jev_run, "JevAdapter", _factory)
     monkeypatch.setenv("JEV_ENABLED", "1")
-    monkeypatch.setenv("TYPESAFE_API_KEY", FAKE_KEY)
+    monkeypatch.setenv("OPENROUTER_API_KEY", FAKE_KEY)
     state_file = tmp_path / "state.json"
     state_file.write_text(json.dumps(_state()), encoding="utf-8")
     return jev_run.main(["--state-file", str(state_file), "--out", str(out)])
@@ -687,7 +616,7 @@ def test_out_real_write_failure_leaves_no_partial_and_no_temp(tmp_path: Path) ->
         capture_output=True,
         text=True,
         cwd=str(REPO_ROOT),
-        env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO_ROOT), "JEV_ENABLED": "0", "TYPESAFE_API_KEY": ""},
+        env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO_ROOT), "JEV_ENABLED": "0", "OPENROUTER_API_KEY": ""},
         timeout=60,
     )
     assert proc.returncode == 5

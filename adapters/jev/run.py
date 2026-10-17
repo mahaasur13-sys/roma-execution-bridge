@@ -4,7 +4,6 @@
 
     python -m adapters.jev.run --state-file state.json
     python -m adapters.jev.run --state-file state.json --out decision.json
-    python -m adapters.jev.run --state-file state.json --model jev-latest   # ручной smoke
 
 Коды выхода: `0` — есть решение (`execute`/`confirm`/`abort`); `4` — `skip`
 (вердикт получен, решения нет: вызывающему нельзя принять это за согласие);
@@ -24,7 +23,7 @@ from pathlib import Path
 
 from adapters.jev.adapter import JevAdapter
 from adapters.jev.client import JevClient, mask
-from adapters.jev.contract import DEFAULT_MODEL, SMOKE_MODEL
+from adapters.jev.contract import DEFAULT_MODEL
 
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -77,7 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model",
         default=DEFAULT_MODEL,
-        help=f"модель провайдера; {SMOKE_MODEL} — только ручной smoke, не регулярный путь",
+        help="модель провайдера (пин typesafe/jev-1.13); jev-latest запрещён",
     )
     parser.add_argument("--timeout", type=float, default=None, help="таймаут одного вызова, секунды")
     return parser
@@ -86,8 +85,6 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parse_args(parser, argv)
-    if args.model == SMOKE_MODEL:
-        print(f"[jev] ручной smoke на {SMOKE_MODEL}: не для регулярных прогонов", file=sys.stderr)
     path = Path(args.state_file)
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))

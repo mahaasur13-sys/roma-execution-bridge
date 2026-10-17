@@ -10,21 +10,19 @@ decision-gate, ни биллинг, ни раннеры. Полный контр
   заменяются на `<redacted>`;
 * state со неизвестными полями не отправляется «как есть»: работает allowlist;
 * state сверх лимита не отправляется вовсе (skip, а не «усечём и отправим»);
-* три вопроса уходят ОДНИМ вызовом system_one;
+* три вопроса уходят ОДНИМ вызовом Decisions API;
 * домены payment / billing / deploy / delete / quota адаптеру запрещены;
 * пороги — политика кода, не модели.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from typing import Any
 
-ENDPOINT = "https://api.typesafe.ai/v1/systemone"
-DEFAULT_MODEL = "jev-1.13.0"
-SMOKE_MODEL = "jev-latest"
+# Ре-экспорт для sidecar (adapter.py/run.py): имена перенесены в core.jev_client.
+from core.jev_client import DEFAULT_MODEL, ENDPOINT, LIMITS, normalize_answers, tenant_ref  # noqa: F401
 
 STATE_MAX_BYTES = 24 * 1024
 STATE_MAX_KEYS = 40
@@ -71,21 +69,6 @@ THRESHOLDS: dict[str, float] = {
     "risk_confirm": 3.5,
     "confidence_floor": 0.50,
 }
-
-LIMITS: dict[str, float] = {
-    "timeout_s": 8.0,
-    "retries": 1,
-    "retry_backoff_s": 0.5,
-    "max_calls_per_run": 1,
-    "latency_budget_s": 12.0,
-}
-
-
-def tenant_ref(tenant_id: str) -> str:
-    """Ссылка на тенанта вместо идентификатора: `t_` + 12 hex-символов sha256."""
-    digest = hashlib.sha256(str(tenant_id).encode("utf-8")).hexdigest()[:12]
-    return f"t_{digest}"
-
 
 def redact(value: Any) -> tuple[Any, list[str]]:
     """Снимает имена-секреты и значения-секреты. Возвращает (чистое, [пути])."""
@@ -193,42 +176,3 @@ def questions(ids: tuple[str, ...] = QUESTION_IDS) -> dict[str, dict[str, Any]]:
     if missing:
         raise ValueError(f"неизвестные вопросы: {missing}")
     return {item: catalog[item] for item in ids}
-
-
-def _as_mapping(answer: Any) -> dict[str, Any]:
-    if isinstance(answer, dict):
-        return dict(answer)
-    out: dict[str, Any] = {}
-    for name in ("type", "choice", "noul", "score", "probabilities", "confidence", "legend", "options", "criteria"):
-        if hasattr(answer, name):
-            out[name] = getattr(answer, name)
-    return out
-
-
-def normalize_answers(payload: Any) -> dict[str, dict[str, Any]]:
-    """Приводит ответ провайдера к одному виду для HTTP-пути и для SDK-пути."""
-    if not isinstance(payload, dict):
-        return {}
-    raw = payload.get("answers")
-    if not isinstance(raw, dict):
-        return {}
-    normalized: dict[str, dict[str, Any]] = {}
-    for question_id, answer in raw.items():
-        data = _as_mapping(answer)
-        kind = data.get("type")
-        if kind not in ("choice", "noul", "score"):
-            if "choice" in data:
-                kind = "choice"
-            elif "noul" in data:
-                kind = "noul"
-            elif "score" in data:
-                kind = "score"
-        value = data.get(kind) if isinstance(kind, str) else None
-        probabilities = data.get("probabilities")
-        normalized[str(question_id)] = {
-            "type": kind,
-            "value": value,
-            "probabilities": probabilities if isinstance(probabilities, dict) else {},
-            "confidence": data.get("confidence"),
-        }
-    return normalized

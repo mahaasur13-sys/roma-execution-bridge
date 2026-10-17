@@ -1,4 +1,4 @@
-"""Sidecar-адаптер Jev (TypeSafe System One) — эпоха G-JEV-BRIDGE, spike.
+"""Sidecar-адаптер Jev (OpenRouter Decisions API) — эпоха G-JEV-BRIDGE, spike.
 
 Ядро ROMA этот пакет НЕ импортирует: ни планировщик, ни шедулер, ни
 decision-gate, ни биллинг, ни Stripe/CloudPayments, ни раннеры задач.
@@ -6,7 +6,7 @@ decision-gate, ни биллинг, ни Stripe/CloudPayments, ни раннер
 снаружи). Контракт: `docs/spikes/G-JEV-BRIDGE.md`.
 
 Что делает: превращает state задачи в один вызов
-`POST https://api.typesafe.ai/v1/systemone` и возвращает
+`POST https://openrouter.ai/api/alpha/decisions` и возвращает
 `execute` / `confirm` / `abort` / `skip`.
 
 Чего не делает: не пишет план, не генерирует текст, не решает оплату, деплой,

@@ -2,6 +2,12 @@
 
 **Статус: `spike-done`.** Адаптер существует и запускается отдельно; **ядро ROMA его не импортирует и не зовёт**, поэтому статус `integrated` не ставится.
 
+> [!warning] SUPERSEDED (2026-10-16)
+> Миграция на OpenRouter: провайдер/endpoint/модель/ключ в этом документе изменены.
+> Актуально: endpoint `POST https://openrouter.ai/api/alpha/decisions`, модель
+> `typesafe/jev-1.13`, ключ `OPENROUTER_API_KEY`; SDK-путь (`typesafe-sdk`) удалён.
+> Документ сохранён как исторический spike-контракт.
+
 | | |
 | --- | --- |
 | Эпоха | G-JEV-BRIDGE (spike), 2026-10-01 |

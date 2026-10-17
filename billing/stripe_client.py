@@ -64,7 +64,7 @@ class StripeBillingClient:
 
     def verify_webhook_signature(self, payload: bytes, sig: str) -> bool:
         if not self._config.webhook_secret:
-            return True
+            return False  # fail-closed: без webhook-секрета подпись верифицировать нельзя
         expected = hmac.new(
             self._config.webhook_secret.encode(), payload, hashlib.sha256
         ).hexdigest()

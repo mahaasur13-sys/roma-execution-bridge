@@ -18,6 +18,7 @@ from deps import verify_api_key, limiter
 from models.app import RomaTaskInput, RomaTaskResponse
 from models.decision import DecisionRequest
 from audit.event_store import on_job_created
+from cost.jev_shadow import shadow_evaluate
 
 logger = logging.getLogger("roma")
 router = APIRouter(tags=["jobs-public"])
@@ -106,7 +107,7 @@ async def submit_task(
         idempotency_key=idempotency_key,
     )
 
-    decision = gate.evaluate(tenant_id=tenant_id, payload=payload.model_dump())
+    decision = shadow_evaluate(gate, tenant_id=tenant_id, payload=payload.model_dump())
     if decision.result.value != "allowed":
         logger.warning(
             "decision.denied tenant=%s reason=%s", tenant_id, decision.reason
