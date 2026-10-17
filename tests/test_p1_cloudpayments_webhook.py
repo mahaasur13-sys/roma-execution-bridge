@@ -139,7 +139,7 @@ def test_webhook_secret_unset_fail_closed(cp, monkeypatch):
     monkeypatch.setattr(cp["fake"], "verify_webhook", lambda body, sig: True)
     client = TestClient(main.app, raise_server_exceptions=False)
     resp = _post(client, _payload(account_id="tenant-a", invoice_id="inv-nosecret"))
-    assert resp.status_code == 500
+    assert resp.status_code == 503
     assert cp["calls"]["sub"] == []
 
 
@@ -192,3 +192,22 @@ def test_create_order_missing_account_id_is_typeerror():
     )
     with pytest.raises(TypeError):
         client.create_order(amount=100, currency="RUB", description="d")
+
+
+def test_not_configured_returns_503(monkeypatch):
+    monkeypatch.setattr(main, "CLOUDPAYMENTS_ENABLED", False)
+    monkeypatch.setattr(main, "cloudpayments_client", None)
+    client = TestClient(main.app, raise_server_exceptions=False)
+    resp = _post(client, _payload(account_id="tenant-a"))
+    assert resp.status_code == 503
+
+
+def test_missing_signature_returns_400(cp):
+    cp["fake"].verify_webhook = lambda body, sig: bool(sig)
+    client = TestClient(main.app, raise_server_exceptions=False)
+    resp = client.post(
+        "/webhooks/cloudpayments",
+        content=json.dumps(_payload(account_id="tenant-a", invoice_id="inv-nosig")),
+    )
+    assert resp.status_code == 400
+    assert cp["calls"]["sub"] == []

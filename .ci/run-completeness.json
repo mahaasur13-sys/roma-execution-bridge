@@ -7,13 +7,27 @@
     "failures": 0,
     "errors": 0,
     "skipped": 8,
-    "measured_on": "2026-10-15",
+    "measured_on": "2026-10-17",
     "run_scope": "repo-wide (target=., pytest -q -p no:cacheprovider -p no:warnings)",
     "admission_skips": 8,
-    "env_skips_expected": 40,
-    "skip_classes": "admission=8 (живой GPU-воркер + 5 плейсхолдеров submit-роутера + R6-live на DSH-хосте + 015a container-scoped destructive) · env-skip=40 (PG-зависимые при отсутствии PG_DSN, включая test_usage_event_idempotency, test_migration_015a_preflight, test_migration_order и 11 pg-marked из test_migration_010a_legacy_reconcile)"
+    "env_skips_expected": 39,
+    "skip_classes": "admission=8 (живой GPU-воркер + 5 плейсхолдеров submit-роутера + R6-live на DSH-хосте + 015a container-scoped destructive) · env-skip=39 (PG-зависимые при отсутствии PG_DSN, включая test_usage_event_idempotency, test_migration_015a_preflight, test_migration_order и 11 pg-marked из test_migration_010a_legacy_reconcile)"
   },
   "history": [
+    {
+      "date": "2026-10-17-pr133-replay-protection",
+      "collected": 711,
+      "passed": 703,
+      "skipped": 8,
+      "change": "+1 test_old_timestamp_returns_400 (replay protection, CodeRabbit); collected 710 → 711, passed 702 → 703; admission 8 и env-skip не менялись."
+    },
+    {
+      "date": "2026-10-17-pr133-webhook-fail-closed",
+      "collected": 710,
+      "passed": 702,
+      "skipped": 8,
+      "change": "PR #133 (fix/webhook-fail-closed): Stripe webhook fail-closed — нет секрета → 503, подпись отсутствует/неверна → 400; дедуп по event.id (Redis SET NX, TTL 7 дней, дубль → 200 без обработки); заголовок подписи исправлен на Stripe-Signature (параметр x_stripe_signature читал x-stripe-signature — подпись реально не проверялась). CloudPayments /webhooks/cloudpayments: не настроен → 503 (было тихое {'code':0} и 500). Набор: −9 tests/test_stripe_subscription_plan.py (мёртвый StripeWebhookHandler), +8 tests/test_stripe_webhook_fail_closed.py, +2 проверки в test_p1_cloudpayments_webhook.py (+правка 500→503), −2 теста из test_revenue_share.py. collected 711 → 710; passed 703 → 702; admission 8 не менялись; env_skips_expected 40 → 39 (−1 pg-marked из удалённого файла). CI-факт: 710 collected / 702 passed / 8 admission-skip / env-skip 0."
+    },
     {
       "date": "2026-10-15-010a-audit-events-legacy-reconcile",
       "collected": 711,
@@ -457,7 +471,7 @@
       "env": "node",
       "passed": 703,
       "admission_skips": 8,
-      "env_skips_max": 40,
+      "env_skips_max": 39,
       "named_admissions": [
         {
           "test": "tests/test_gpu_integration_smoke.py::test_live_gpu_worker_health",

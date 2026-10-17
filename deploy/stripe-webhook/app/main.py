@@ -1,7 +1,6 @@
 """Stripe Webhook Microservice — FastAPI app."""
 
 from fastapi import FastAPI, Request, HTTPException, Header
-from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel
 from typing import Optional
@@ -12,6 +11,7 @@ import json
 import logging
 import os
 import redis.asyncio as aioredis
+import time
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("stripe-webhook")
@@ -19,13 +19,6 @@ logger = logging.getLogger("stripe-webhook")
 app = FastAPI(title="ROMA Stripe Webhook", version="1.0.0")
 
 Instrumentator().instrument(app).expose(app)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 STRIPE_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -50,9 +43,12 @@ async def startup():
 
 def _verify(payload: bytes, sig: str, secret: str) -> bool:
     if not sig or not secret:
-        return True
+        return False
     try:
         parts = dict(p.split("=") for p in sig.split(","))
+        t = int(parts["t"])
+        if abs(time.time() - t) > 300:
+            return False
         signed = f"{parts['t']}.{payload.decode()}"
         actual = hmac.new(secret.encode(), signed.encode(), hashlib.sha256).hexdigest()
         return hmac.compare_digest(actual, parts.get("v1", ""))
@@ -68,9 +64,6 @@ async def _enqueue_event(event: dict) -> None:
 
 async def _sync_tenant(tenant_id: str, event_type: str) -> None:
     try:
-        async with asyncio.timeout(10):
-            async with asyncio.Lock():
-                pass
         url = f"{ROMA_API_URL}/tenants/{tenant_id}/sync"
         async with asyncio.timeout(15):
             async with __import__("httpx").AsyncClient() as client:
@@ -92,11 +85,13 @@ class WebhookResponse(BaseModel):
 @app.post("/webhook/stripe", response_model=WebhookResponse)
 async def stripe_webhook(
     request: Request,
-    x_stripe_signature: Optional[str] = Header(None),
+    x_stripe_signature: Optional[str] = Header(None, alias="Stripe-Signature"),
 ):
     body = await request.body()
 
-    if STRIPE_SECRET and not _verify(body, x_stripe_signature or "", STRIPE_SECRET):
+    if not STRIPE_SECRET:
+        raise HTTPException(503, "webhook not configured")
+    if not _verify(body, x_stripe_signature or "", STRIPE_SECRET):
         raise HTTPException(400, "Invalid signature")
 
     try:
@@ -106,6 +101,11 @@ async def stripe_webhook(
 
     eid = event.get("id", "")
     etype = event.get("type", "")
+
+    if _redis and eid:
+        key = f"stripe:event:{eid}"
+        if not await _redis.set(key, "1", nx=True, ex=7 * 86400):
+            return WebhookResponse(received=True, event_id=eid, processed=False)
 
     await _enqueue_event(event)
 

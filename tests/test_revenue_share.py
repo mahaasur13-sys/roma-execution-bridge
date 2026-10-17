@@ -1,4 +1,4 @@
-"""Tests for RevenueShareCalculator + Stripe Webhook."""
+"""Tests for RevenueShareCalculator."""
 
 import sys
 
@@ -46,25 +46,7 @@ def test_idempotency():
     print("PASS: idempotency")
 
 
-def test_response_model():
-    from saas.webhooks.stripe_webhook import Response
-
-    r = Response(received=True, event_id="evt_1", processed=True)
-    assert r.received and r.processed and r.error is None
-    print("PASS: response_model")
-
-
-def test_signature_skip_on_empty():
-    from saas.webhooks.stripe_webhook import _verify
-
-    assert _verify(b"payload", "sig", "")
-    assert _verify(b"payload", "", "secret")
-    print("PASS: signature_skip_on_empty")
-
-
 if __name__ == "__main__":
     test_tiered_rates()
     test_idempotency()
-    test_response_model()
-    test_signature_skip_on_empty()
     print("\n✅ All revenue-share tests passed")
