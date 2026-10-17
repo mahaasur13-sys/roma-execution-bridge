@@ -88,12 +88,12 @@ async def cloudpayments_webhook(request: Request):
     )
 
     if not main.CLOUDPAYMENTS_ENABLED or main.cloudpayments_client is None:
-        return {"code": 0}
+        raise HTTPException(status_code=503, detail="webhook not configured")
 
     # Fail closed: the webhook secret is mandatory and is NOT the API secret.
     if not (main.cloudpayments_client.config.webhook_secret or "").strip():
         logger.error("cloudpayments_webhook: webhook secret not configured")
-        raise HTTPException(status_code=500, detail="webhook secret not configured")
+        raise HTTPException(status_code=503, detail="webhook not configured")
 
     if not main.cloudpayments_client.verify_webhook(raw_body, signature):
         raise HTTPException(status_code=400, detail="Invalid signature")
