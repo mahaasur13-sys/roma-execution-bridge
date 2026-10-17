@@ -42,6 +42,7 @@
       "compiler",
       "consistency",
       "control_plane",
+      "core",
       "cost",
       "crypto_payments",
       "dashboard",
@@ -182,6 +183,12 @@
       "date": "2026-10-06",
       "scope": "product-only, exclude += adapters/",
       "reason": "parked Jev sidecar spike (9 файлов, a41de71a) не product-only; снимает COVERAGE GATE FAILED unscoped adapters/__init__.py"
+    },
+    {
+      "date": "2026-10-17",
+      "scope": "product-only",
+      "change": "в область измерения явно введён новый продуктовый пакет core/ (jev_client, jev_observer, jev_shadow_log): импортируется routers/submit.py и router_decisions.py через cost.jev_shadow / plugins.builtin.jev_policy",
+      "reason": "PR #132 Jev shadow R1/R3/R5: гейт упал 'unscoped: core/__init__.py (+5)'; молчаливого включения нет — запись обязательна"
     }
   ],
   "measured_on": {
