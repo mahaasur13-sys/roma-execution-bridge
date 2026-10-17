@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import redis.asyncio as aioredis
+import time
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("stripe-webhook")
@@ -45,6 +46,9 @@ def _verify(payload: bytes, sig: str, secret: str) -> bool:
         return False
     try:
         parts = dict(p.split("=") for p in sig.split(","))
+        t = int(parts["t"])
+        if abs(time.time() - t) > 300:
+            return False
         signed = f"{parts['t']}.{payload.decode()}"
         actual = hmac.new(secret.encode(), signed.encode(), hashlib.sha256).hexdigest()
         return hmac.compare_digest(actual, parts.get("v1", ""))

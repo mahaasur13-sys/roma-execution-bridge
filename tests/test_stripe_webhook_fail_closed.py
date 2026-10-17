@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import importlib.util
 import sys
+import time
 import types
 from pathlib import Path
 
@@ -41,7 +42,9 @@ _spec.loader.exec_module(mod)
 SECRET = "whsec_test"
 
 
-def _stripe_sig(secret: str, payload: bytes, t: str = "1234567890") -> str:
+def _stripe_sig(secret: str, payload: bytes, t: int = None) -> str:
+    if t is None:
+        t = int(time.time())
     signed = f"{t}.{payload.decode()}".encode()
     v1 = hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
     return f"t={t},v1={v1}"
@@ -136,3 +139,16 @@ def test_duplicate_event_processed_once(monkeypatch):
     assert r2.status_code == 200
     assert r2.json()["processed"] is False
     assert fake.enqueued == 1
+
+
+def test_old_timestamp_returns_400(monkeypatch):
+    monkeypatch.setattr(mod, "STRIPE_SECRET", SECRET)
+    monkeypatch.setattr(mod, "_redis", None)
+    client = TestClient(mod.app, raise_server_exceptions=False)
+    body = b'{"id":"evt_old"}'
+    sig = _stripe_sig(SECRET, body, t=int(time.time()) - 600)
+    resp = client.post(
+        "/webhook/stripe", content=body,
+        headers={"Stripe-Signature": sig},
+    )
+    assert resp.status_code == 400
