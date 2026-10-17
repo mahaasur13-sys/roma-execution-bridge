@@ -86,7 +86,7 @@ def main(argv: list[str]) -> int:
         recs = groups[point]
         classes: Counter[str] = Counter()
         for rec in recs:
-            cls = _classify(point, str(rec.get("choice", "")), str(rec.get("verdict", "")))
+            cls = _classify(point, str(rec.get("choice") or ""), str(rec.get("verdict") or ""))
             if cls is not None:
                 classes[cls] += 1
 
