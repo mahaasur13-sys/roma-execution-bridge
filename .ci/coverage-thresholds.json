@@ -103,7 +103,8 @@
       "test_*.py",
       "**/*_test.py",
       "deploy/ops/",
-      "adapters/"
+      "adapters/",
+      "deploy/stripe-webhook/"
     ],
     "note": "exclude: tests/ — тесты не измеряют сами себя; deploy/ops/ — операционные артефакты (сторожа, релей, барьеры): версионируются для воспроизводимости (N6), но не продукт. Остальной deploy/ остаётся в области измерения.",
     "exclude_reason": {
@@ -189,6 +190,11 @@
       "scope": "product-only",
       "change": "в область измерения явно введён новый продуктовый пакет core/ (jev_client, jev_observer, jev_shadow_log): импортируется routers/submit.py и router_decisions.py через cost.jev_shadow / plugins.builtin.jev_policy",
       "reason": "PR #132 Jev shadow R1/R3/R5: гейт упал 'unscoped: core/__init__.py (+5)'; молчаливого включения нет — запись обязательна"
+    },
+    {
+      "date": "2026-10-17",
+      "scope": "product-only, exclude += deploy/stripe-webhook/",
+      "reason": "PR #133: отдельный k8s-микросервис stripe-webhook (свой образ, не часть продукта ROMA); стал виден gate после появления tests/test_stripe_webhook_fail_closed.py"
     }
   ],
   "measured_on": {
