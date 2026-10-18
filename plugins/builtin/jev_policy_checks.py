@@ -19,7 +19,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import plugins.builtin.jev_policy as shadow  # noqa: E402
-from adapters.jev.client import JevError  # noqa: E402
+from adapters.jev.client import JevError, JevTimeout  # noqa: E402
 
 import pytest  # noqa: E402
 
@@ -200,6 +200,86 @@ def test_cascade_run_keeps_allow_when_not_confident(monkeypatch):
     result = asyncio.run(shadow.cascade_run(_FakePlugin("allow"), "t1", {}, {"plan": "free"}))
     assert str(result.action) == "allow"
 
+# ── cascade_run: fail-closed + escalate-only (любая ошибка Jev → baseline) ─
+
+
+def _run_cascade(monkeypatch, *, action="allow", client=None, escalate=None):
+    """cascade_run с включённым флагом; baseline = детерминированный результат."""
+    monkeypatch.setenv(shadow._CASCADE_ENV_FLAG, "1")
+    if escalate is not None:
+        monkeypatch.setattr(shadow, "_escalate_for_review", escalate)
+    return asyncio.run(
+        shadow.cascade_run(_FakePlugin(action), "t1", {}, {"plan": "free"}, client=client)
+    )
+
+
+def test_cascade_run_flag_off_never_calls_jev(monkeypatch):
+    monkeypatch.delenv(shadow._CASCADE_ENV_FLAG, raising=False)
+    client = _FakeClient(payload=_choice_payload("violation", 0.99, 0.99))
+    result = asyncio.run(
+        shadow.cascade_run(_FakePlugin("allow"), "t1", {}, {"plan": "free"}, client=client)
+    )
+    assert str(result.action) == "allow"
+    assert client.calls == []  # при выключенном каскаде Jev не вызывается
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        JevError("network"),
+        JevTimeout("slow"),
+        JevError("pin", reason="model_pin"),
+        JevError("pin response", reason="model_pin_response"),
+        RuntimeError("kaboom"),
+    ],
+)
+def test_cascade_run_fail_closed_on_any_error(monkeypatch, error):
+    result = _run_cascade(monkeypatch, client=_FakeClient(error=error))
+    assert str(result.action) == "allow"  # baseline; исключение не выходит наружу
+
+
+def test_cascade_run_fail_closed_on_model_pin_from_ctor(monkeypatch):
+    """JevClient() падает на пине модели — вердикт остаётся детерминированным."""
+    import core.jev_client as jev_client
+
+    class _PinnedClient:
+        def __init__(self, *args, **kwargs):
+            raise JevError("model pin", reason="model_pin")
+
+    monkeypatch.setattr(jev_client, "JevClient", _PinnedClient)
+    result = _run_cascade(monkeypatch, client=None)
+    assert str(result.action) == "allow"
+
+
+def test_cascade_run_fail_closed_when_normalize_answers_raises(monkeypatch):
+    import core.jev_client as jev_client
+
+    def _boom(payload):
+        raise RuntimeError("bad payload")
+
+    monkeypatch.setattr(jev_client, "normalize_answers", _boom)
+    result = _run_cascade(monkeypatch, client=_FakeClient(payload={"answers": {}}))
+    assert str(result.action) == "allow"
+
+
+def test_cascade_run_fail_closed_when_escalate_raises(monkeypatch):
+    """Исключение внутри _escalate_for_review не доходит до запроса."""
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("policy_engine unavailable")
+
+    result = _run_cascade(
+        monkeypatch,
+        client=_FakeClient(payload=_choice_payload("violation", 0.99, 0.99)),
+        escalate=_boom,
+    )
+    assert str(result.action) == "allow"
+
+
+def test_cascade_run_escalate_only_never_downgrades_deny(monkeypatch):
+    client = _FakeClient(payload=_choice_payload("violation", 0.99, 0.99))
+    result = _run_cascade(monkeypatch, action="deny", client=client)
+    assert str(result.action) == "deny"
 
 # ── shadow_policy: non-dict / None evaluate_policies result ───────────────
 

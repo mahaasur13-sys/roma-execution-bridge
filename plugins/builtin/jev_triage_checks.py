@@ -16,7 +16,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import plugins.builtin.jev_triage as shadow  # noqa: E402
-from adapters.jev.client import JevError  # noqa: E402
+from adapters.jev.client import JevError, JevTimeout  # noqa: E402
 
 import pytest  # noqa: E402
 
@@ -185,6 +185,102 @@ def test_detect_intent_cascade_falls_back_to_heuristic(monkeypatch):
     monkeypatch.setenv(shadow._CASCADE_ENV_FLAG, "1")
     monkeypatch.delenv(shadow._ENV_FLAG, raising=False)
     monkeypatch.setattr(shadow, "cascade_once", lambda message, client=None, timeout=None: None)
+    from plugins.builtin.support_chat import SupportChatPlugin
+
+    assert SupportChatPlugin._detect_intent("my invoice") == "billing"
+
+# ── cascade_once / _detect_intent: fail-closed (R5) ──────────────────────
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        JevError("network"),
+        JevTimeout("slow"),
+        JevError("pin", reason="model_pin"),
+        JevError("pin response", reason="model_pin_response"),
+        RuntimeError("kaboom"),
+    ],
+)
+def test_cascade_once_fail_closed_on_any_error(monkeypatch, error):
+    assert shadow.cascade_once("invoice", client=_FakeClient(error=error)) is None
+
+
+def test_cascade_once_fail_closed_on_model_pin_from_ctor(monkeypatch):
+    """JevClient() падает на пине модели — маршрут остаётся на эвристике."""
+    import core.jev_client as jev_client
+
+    class _PinnedClient:
+        def __init__(self, *args, **kwargs):
+            raise JevError("model pin", reason="model_pin")
+
+    monkeypatch.setattr(jev_client, "JevClient", _PinnedClient)
+    assert shadow.cascade_once("invoice") is None
+
+
+def test_cascade_once_fail_closed_when_normalize_answers_raises(monkeypatch):
+    import core.jev_client as jev_client
+
+    def _boom(payload):
+        raise RuntimeError("bad payload")
+
+    monkeypatch.setattr(jev_client, "normalize_answers", _boom)
+    assert shadow.cascade_once("invoice", client=_FakeClient(payload={"answers": {}})) is None
+
+
+def test_detect_intent_flag_off_never_calls_jev(monkeypatch):
+    monkeypatch.delenv(shadow._CASCADE_ENV_FLAG, raising=False)
+    calls: list = []
+    monkeypatch.setattr(
+        shadow, "cascade_once", lambda message, client=None, timeout=None: calls.append(1)
+    )
+    from plugins.builtin.support_chat import SupportChatPlugin
+
+    assert SupportChatPlugin._detect_intent("my invoice") == "billing"
+    assert calls == []
+
+
+def test_detect_intent_accepts_known_category(monkeypatch):
+    monkeypatch.setenv(shadow._CASCADE_ENV_FLAG, "1")
+    monkeypatch.setattr(
+        shadow, "cascade_once", lambda message, client=None, timeout=None: "job_status"
+    )
+    from plugins.builtin.support_chat import SupportChatPlugin
+
+    assert SupportChatPlugin._detect_intent("my invoice") == "job_status"
+
+
+def test_detect_intent_rejects_category_outside_intent_categories(monkeypatch):
+    monkeypatch.setenv(shadow._CASCADE_ENV_FLAG, "1")
+    monkeypatch.setattr(
+        shadow, "cascade_once", lambda message, client=None, timeout=None: "not_a_category"
+    )
+    from plugins.builtin.support_chat import SupportChatPlugin
+
+    assert SupportChatPlugin._detect_intent("my invoice") == "billing"
+
+
+def test_detect_intent_fail_closed_when_cascade_raises(monkeypatch):
+    monkeypatch.setenv(shadow._CASCADE_ENV_FLAG, "1")
+
+    def _boom(message, client=None, timeout=None):
+        raise JevError("network")
+
+    monkeypatch.setattr(shadow, "cascade_once", _boom)
+    from plugins.builtin.support_chat import SupportChatPlugin
+
+    assert SupportChatPlugin._detect_intent("my invoice") == "billing"
+
+# ── shadow-only путь: сбой shadow_triage не ломает _detect_intent ────────
+
+
+def test_detect_intent_fail_closed_when_shadow_raises(monkeypatch):
+    monkeypatch.delenv(shadow._CASCADE_ENV_FLAG, raising=False)
+
+    def _boom(message, intent, client=None):
+        raise RuntimeError("shadow down")
+
+    monkeypatch.setattr(shadow, "shadow_triage", _boom)
     from plugins.builtin.support_chat import SupportChatPlugin
 
     assert SupportChatPlugin._detect_intent("my invoice") == "billing"

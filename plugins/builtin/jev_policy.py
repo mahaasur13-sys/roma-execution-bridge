@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from core.jev_cascade import safe_cascade
 from core.jev_observer import submit_observation
 
 logger = logging.getLogger("roma.plugin.jev_policy")
@@ -128,16 +129,20 @@ def build_state(tenant_ref: str, tenant: dict[str, Any], payload: dict[str, Any]
 
 
 def _ask(state: dict[str, Any], *, client: Any = None, timeout: float | None = None) -> tuple[str, float | None, dict[str, float]] | None:
-    """One Jev call + parse. Returns (choice, confidence, probabilities) or None (fail-closed)."""
-    from core.jev_client import JevClient, JevError, normalize_answers
+    """One Jev call + parse. Returns (choice, confidence, probabilities) or None (fail-closed).
 
-    if client is not None:
-        c = client
-    elif timeout is not None:
-        c = JevClient(timeout=timeout)
-    else:
-        c = JevClient()
+    Импорт клиента, конструктор (в т.ч. пин модели), запрос и разбор ответа — внутри try:
+    любая ошибка Jev → ``None``, детерминированный вердикт сохраняется.
+    """
     try:
+        from core.jev_client import JevClient, JevError, normalize_answers
+
+        if client is not None:
+            c = client
+        elif timeout is not None:
+            c = JevClient(timeout=timeout)
+        else:
+            c = JevClient()
         payload = c.evaluate(state, {"policy": QUESTION})
     except JevError as exc:
         logger.warning("jev policy failed (verdict kept): %s", exc)
@@ -146,22 +151,26 @@ def _ask(state: dict[str, Any], *, client: Any = None, timeout: float | None = N
         logger.warning("jev policy unexpected error (verdict kept): %r", exc)
         return None
 
-    answer = normalize_answers(payload).get("policy")
-    if not answer or answer.get("type") != "choice" or answer.get("value") is None:
-        logger.warning("jev policy: no valid 'policy' answer")
-        return None
-
-    probs = answer.get("probabilities") or {}
-    probabilities = {str(k): float(v) for k, v in probs.items()}
-    choice = str(answer["value"])
-    confidence = answer.get("confidence")
-    if confidence is None:
-        confidence = probabilities.get(choice, 0.0)
     try:
-        confidence = float(confidence)
-    except (TypeError, ValueError):
-        confidence = None
-    return choice, confidence, probabilities
+        answer = normalize_answers(payload).get("policy")
+        if not answer or answer.get("type") != "choice" or answer.get("value") is None:
+            logger.warning("jev policy: no valid 'policy' answer")
+            return None
+
+        probs = answer.get("probabilities") or {}
+        probabilities = {str(k): float(v) for k, v in probs.items()}
+        choice = str(answer["value"])
+        confidence = answer.get("confidence")
+        if confidence is None:
+            confidence = probabilities.get(choice, 0.0)
+        try:
+            confidence = float(confidence)
+        except (TypeError, ValueError):
+            confidence = None
+        return choice, confidence, probabilities
+    except Exception as exc:  # noqa: BLE001 — неожиданный ответ не ломает hot path
+        logger.warning("jev policy parse failed (verdict kept): %r", exc)
+        return None
 
 
 def observe_once(state: dict[str, Any], verdict: str, *, client: Any = None) -> ShadowObservation | None:
@@ -290,9 +299,9 @@ async def cascade_run(
     except Exception as exc:  # noqa: BLE001
         logger.warning("jev policy cascade: state build failed (deterministic kept): %r", exc)
         return result
-    choice = cascade_once(state, client=client)
+    choice = safe_cascade(None, cascade_once, state, client=client, label="policy.cascade_once")
     if choice in ("violation", "escalate") and str(getattr(result, "action", "")) == "allow":
-        return _escalate_for_review(result, choice)
+        return safe_cascade(result, _escalate_for_review, result, choice, label="policy.escalate_for_review")
     return result
 
 

@@ -96,16 +96,20 @@ def build_state(message: str) -> dict[str, Any]:
 
 
 def _ask(message: str, *, client: Any = None, timeout: float | None = None) -> tuple[str, float | None, dict[str, float]] | None:
-    """One Jev call + parse. Returns (choice, confidence, probabilities) or None (fail-closed)."""
-    from core.jev_client import JevClient, JevError, normalize_answers
+    """One Jev call + parse. Returns (choice, confidence, probabilities) or None (fail-closed).
 
-    if client is not None:
-        c = client
-    elif timeout is not None:
-        c = JevClient(timeout=timeout)
-    else:
-        c = JevClient()
+    Import, конструктор клиента (включая пин модели) и разбор ответа — внутри try:
+    любая ошибка → ``None``.
+    """
     try:
+        from core.jev_client import JevClient, JevError, normalize_answers
+
+        if client is not None:
+            c = client
+        elif timeout is not None:
+            c = JevClient(timeout=timeout)
+        else:
+            c = JevClient()
         payload = c.evaluate(build_state(message), {"triage": QUESTION})
     except JevError as exc:
         logger.warning("jev triage failed (heuristic kept): %s", exc)
@@ -114,22 +118,26 @@ def _ask(message: str, *, client: Any = None, timeout: float | None = None) -> t
         logger.warning("jev triage unexpected error (heuristic kept): %r", exc)
         return None
 
-    answer = normalize_answers(payload).get("triage")
-    if not answer or answer.get("type") != "choice" or answer.get("value") is None:
-        logger.warning("jev triage: no valid 'triage' answer")
-        return None
-
-    probs = answer.get("probabilities") or {}
-    probabilities = {str(k): float(v) for k, v in probs.items()}
-    choice = str(answer["value"])
-    confidence = answer.get("confidence")
-    if confidence is None:
-        confidence = probabilities.get(choice, 0.0)
     try:
-        confidence = float(confidence)
-    except (TypeError, ValueError):
-        confidence = None
-    return choice, confidence, probabilities
+        answer = normalize_answers(payload).get("triage")
+        if not answer or answer.get("type") != "choice" or answer.get("value") is None:
+            logger.warning("jev triage: no valid 'triage' answer")
+            return None
+
+        probs = answer.get("probabilities") or {}
+        probabilities = {str(k): float(v) for k, v in probs.items()}
+        choice = str(answer["value"])
+        confidence = answer.get("confidence")
+        if confidence is None:
+            confidence = probabilities.get(choice, 0.0)
+        try:
+            confidence = float(confidence)
+        except (TypeError, ValueError):
+            confidence = None
+        return choice, confidence, probabilities
+    except Exception as exc:  # noqa: BLE001 — неожиданный ответ → None
+        logger.warning("jev triage parse failed (heuristic kept): %r", exc)
+        return None
 
 
 def observe_once(message: str, heuristic_intent: str, *, client: Any = None) -> ShadowObservation | None:
@@ -167,7 +175,10 @@ def cascade_once(message: str, *, client: Any = None, timeout: float | None = _C
     """One synchronous Jev decision for routing.
 
     Returns the category only when ``confidence >= _CASCADE_CONFIDENCE``; otherwise
-    ``None`` (caller falls back to the heuristic). Fail-closed: any error → ``None``.
+    ``None`` (caller falls back to the heuristic). Fail-closed: any error → ``None``
+    (сеть, таймаут, ``JevError`` с ``reason="model_pin"`` / ``"model_pin_response"``,
+    неожиданный ответ, исключение в конструкторе клиента) — вызывающий сохраняет
+    исходный intent.
     """
     parsed = _ask(message, client=client, timeout=timeout)
     if parsed is None:

@@ -6,6 +6,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from core.jev_cascade import safe_cascade
+
 logger = logging.getLogger("roma.plugin.support_chat")
 
 TICKET_STATUSES = ("open", "in_progress", "resolved", "closed")
@@ -89,17 +91,32 @@ class SupportChatPlugin:
 
     @staticmethod
     def _detect_intent(message: str) -> str:
-        intent = SupportChatPlugin._heuristic_intent(message)
-        from plugins.builtin.jev_triage import cascade_enabled, cascade_once, shadow_triage
+        """Heuristic intent; Jev cascade may only confirm a known category (fail-closed).
 
-        # R5 cascade (after shadow data): Jev routes when confident, else heuristic.
-        if cascade_enabled():
-            jev_intent = cascade_once(message)
-            if jev_intent is not None:
-                return jev_intent
+        Любая ошибка Jev (сеть, таймаут, ``JevError`` с ``reason="model_pin"`` /
+        ``"model_pin_response"``, неожиданный ответ) или метка вне ``INTENT_CATEGORIES``
+        → исходный intent; исключение наружу не выходит.
+        """
+        intent = SupportChatPlugin._heuristic_intent(message)
+        try:
+            from plugins.builtin.jev_triage import (
+                INTENT_CATEGORIES,
+                cascade_enabled,
+                cascade_once,
+                shadow_triage,
+            )
+
+            # R5 cascade (after shadow data): Jev routes when confident, else heuristic.
+            if cascade_enabled():
+                jev_intent = safe_cascade(None, cascade_once, message, label="triage.cascade_once")
+                if jev_intent in INTENT_CATEGORIES:
+                    return jev_intent
+                return intent
+        except Exception as exc:  # noqa: BLE001 — routing must never break on Jev
+            logger.warning("jev triage cascade unavailable (heuristic kept): %r", exc)
             return intent
         # R5 shadow (off by default): Jev observes in shadow, routing stays on the heuristic.
-        shadow_triage(message, intent)
+        safe_cascade(None, shadow_triage, message, intent, label="triage.shadow")
         return intent
 
     @staticmethod
