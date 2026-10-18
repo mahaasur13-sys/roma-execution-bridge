@@ -18,6 +18,8 @@ if str(REPO_ROOT) not in sys.path:
 
 import core.jev_observer as observer  # noqa: E402
 
+from prometheus_client import REGISTRY  # noqa: E402
+
 
 def test_submit_drops_when_queue_full(monkeypatch):
     monkeypatch.setattr(observer._slots, "acquire", lambda blocking=False: False)
@@ -95,3 +97,68 @@ def test_submit_succeeds_when_slot_available(monkeypatch):
     assert observer.submit_observation(print, 1, 2) is True
     assert len(submitted) == 1
     assert submitted[0][1] == (1, 2)
+
+
+# ── Метрика дропов (дефолтный registry, сравнение дельт) ────────────────
+
+
+def _sample(name: str, **labels: str) -> float:
+    return REGISTRY.get_sample_value(name, labels) or 0.0
+
+
+class _Delta:
+    """Дельта метрики до/после блока: значения живут в общем registry между тестами."""
+
+    def __init__(self, name: str, **labels: str) -> None:
+        self._name = name
+        self._labels = labels
+
+    def __enter__(self) -> "_Delta":
+        self._before = _sample(self._name, **self._labels)
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        self._after = _sample(self._name, **self._labels)
+        return False
+
+    @property
+    def value(self) -> float:
+        return self._after - self._before
+
+
+def test_queue_full_increments_dropped_metric(monkeypatch):
+    monkeypatch.setattr(observer._slots, "acquire", lambda blocking=False: False)
+    with _Delta("roma_jev_shadow_dropped_total", point="R1") as d:
+        assert observer.submit_observation(print, 1, point="R1") is False
+    assert d.value == 1.0
+
+
+def test_submit_error_increments_dropped_metric(monkeypatch):
+    monkeypatch.setattr(observer._slots, "acquire", lambda blocking=False: True)
+    monkeypatch.setattr(observer._slots, "release", lambda: None)
+
+    class _FakeExecutor:
+        def submit(self, fn, *args):
+            raise RuntimeError("cannot schedule new futures after shutdown")
+
+    monkeypatch.setattr(observer, "_get_executor", lambda: _FakeExecutor())
+    with _Delta("roma_jev_shadow_dropped_total", point="R5") as d:
+        assert observer.submit_observation(print, 1, point="R5") is False
+    assert d.value == 1.0
+
+
+def test_unknown_point_collapses_to_other(monkeypatch):
+    monkeypatch.setattr(observer._slots, "acquire", lambda blocking=False: False)
+    with _Delta("roma_jev_shadow_dropped_total", point="other") as d:
+        assert observer.submit_observation(print, 1, point="R99") is False
+    assert d.value == 1.0
+
+
+def test_drop_metric_failure_does_not_raise(monkeypatch):
+    monkeypatch.setattr(observer._slots, "acquire", lambda blocking=False: False)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("registry down")
+
+    monkeypatch.setattr(observer, "track_jev_shadow", _boom)
+    assert observer.submit_observation(print, 1, point="R1") is False

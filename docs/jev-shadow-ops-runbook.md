@@ -5,15 +5,20 @@ Cascade-флаги — **не включать**.
 
 ## 0. Ключевой факт о проводке (читать первым)
 
-Только **R5 реально подключена** к продакшен-шву
-(`plugins/builtin/support_chat.py::_detect_intent` зовёт `shadow_triage`).
+Проверено 2026-10-18 на `master` f48276a:
 
-**R1** (`cost/jev_shadow.py::shadow_evaluate`) и **R3**
-(`plugins/builtin/jev_policy.py::shadow_run`) — построены и покрыты тестами, но
-**ещё не вызываются** на местах `gate.evaluate()` / `policy_engine.run()`.
+- **R1 подключён**: `cost/jev_shadow.py::shadow_evaluate` вызывается из
+  `routers/submit.py:110` (публичный `POST /v1/jobs`). `JEV_GATE_SHADOW=1` даёт данные.
+- **R5 привязан к несмонтированному плагину**: `shadow_triage` зовётся только из
+  `plugins/builtin/support_chat.py::_detect_intent`, а плагин `support-chat` в приложении
+  не смонтирован (в живом `/openapi.json` нет `/v1/plugins*`, `PluginManager` вне `plugins/`
+  не вызывается). Реальный чат `POST /v1/support/*` (`support_chat/router.py`) идёт мимо
+  плагина и категорию сообщения не определяет. **В проде R5 неактивен: `JEV_TRIAGE_SHADOW=1`
+  сам по себе данных не даст.**
+- **R3 не подключён**: `plugins/builtin/jev_policy.py::shadow_run` покрыт тестами, но вызов
+  остаётся unwired (`cascade_run` — escalate-only, не подключён).
 
-Следствие: пока R1/R3 не подключить (отдельный PR, 1–2 строки на вызов),
-флаги `JEV_GATE_SHADOW` / `JEV_POLICY_SHADOW` сами по себе данных **не дадут**.
+Следствие: сейчас в shadow-лог пишет только R1.
 
 ## 1. Переменные окружения
 
@@ -29,8 +34,8 @@ Cascade-флаги — **не включать**.
 
 | Переменная | Точка | Проводка |
 |------------|-------|----------|
-| `JEV_TRIAGE_SHADOW=1` | R5 | ✅ подключена |
-| `JEV_GATE_SHADOW=1` | R1 | ⚠️ нужна проводка (§0) |
+| `JEV_TRIAGE_SHADOW=1` | R5 | ⚠️ в проде неактивна: плагин не смонтирован (§0) |
+| `JEV_GATE_SHADOW=1` | R1 | ✅ подключена (`routers/submit.py:110`) |
 | `JEV_POLICY_SHADOW=1` | R3 | ⚠️ нужна проводка (§0) |
 
 **НЕ ставить:** `JEV_POLICY_CASCADE`, `JEV_TRIAGE_CASCADE` (cascade запрещён на этом этапе),
@@ -63,7 +68,30 @@ except JevError as e:
 2. Сравнить детерминированные исходы (R5: строки intent; R1/R3: verdict) — должны совпасть 1:1.
 3. Ошибка/таймаут Jev в shadow не меняет вердикт (fail-closed → просто нет записи в логе).
 
-## 4. Rollback
+## 4. Метрики
+
+`monitoring/metrics.py` (дефолтный registry, отдаётся на `GET /metrics`):
+
+| Метрика | Лейблы | Смысл |
+|---------|--------|-------|
+| `roma_jev_shadow_observations_total` | `point`, `outcome` (`ok`/`fallback`) | наблюдение записано / ушло в fallback |
+| `roma_jev_shadow_fallback_total` | `point`, `reason` (`jev_error`/`timeout`/`rate_limited`/`no_answer`/`state_capture`) | почему вердикт остался детерминированным |
+| `roma_jev_shadow_agreement_total` | `point`, `agree` (`yes`/`no`) | класс Jev совпал с детерминированным вердиктом (R1: `normal` ↔ `allowed`) |
+| `roma_jev_shadow_dropped_total` | `point` | наблюдение выброшено bounded-очередью `core/jev_observer.py` (переполнение или сбой submit) |
+| `roma_jev_shadow_latency_seconds` | `point` | латентность одного вызова Jev (buckets 0.05…8 с) |
+
+Пишет `track_jev_shadow(point, outcome=…, reason=…, agree=…, dropped=…, latency_s=…)`.
+Лейблы — только из фиксированных множеств, неизвестное значение схлопывается в `other`:
+ни `tenant_id`, ни текста сообщения в метриках нет. Сбой телеметрии вердикт не меняет.
+
+Что считать: доля fallback = `fallback_total / observations_total`; доля несовпадений =
+`agreement_total{agree="no"} / (agree="yes" + agree="no")`; дропы = `dropped_total`
+(рост = Jev медленнее бюджета очереди, наблюдения теряются).
+
+JSONL (`JEV_SHADOW_LOG`) пишется и на fallback: `schema=1`, `outcome`, `reason`, `latency_ms`
+плюс прежние поля (`choice`, `prob_anomaly`, `zone`, `verdict`, `observed_at`).
+
+## 5. Rollback
 
 Выключение = снять флаги (по умолчанию они и так off):
 - `unset JEV_GATE_SHADOW JEV_POLICY_SHADOW JEV_TRIAGE_SHADOW`
