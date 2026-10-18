@@ -85,6 +85,7 @@ jobs:
           core/jev_observer_checks.py
           core/jev_shadow_log_checks.py
           cost/jev_shadow_checks.py
+          core/jev_cascade_checks.py
         env:
           JEV_ENABLED: "0"
 
