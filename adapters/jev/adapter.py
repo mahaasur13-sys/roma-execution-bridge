@@ -38,6 +38,7 @@ from adapters.jev.contract import (
     questions,
     state_fits,
 )
+from core.jev_client import check_model_pin
 
 DECISIONS = ("execute", "confirm", "abort", "skip")
 
@@ -72,6 +73,7 @@ class JevAdapter:
     def __init__(self, client: JevClient | None = None, model: str | None = None) -> None:
         self._client = client if client is not None else JevClient()
         if model:
+            check_model_pin(model)
             self._client.model = model
 
     def decide(

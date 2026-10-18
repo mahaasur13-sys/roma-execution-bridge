@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 from adapters.jev.adapter import JevAdapter
-from adapters.jev.client import JevClient, mask
+from adapters.jev.client import JevClient, JevError, mask
 from adapters.jev.contract import DEFAULT_MODEL
 
 EXIT_OK = 0
@@ -92,7 +92,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[jev] state не прочитан: {exc}", file=sys.stderr)
         return EXIT_STATE_UNREADABLE
 
-    client = JevClient(model=args.model, timeout=args.timeout) if args.timeout else JevClient(model=args.model)
+    try:
+        client = JevClient(model=args.model, timeout=args.timeout) if args.timeout else JevClient(model=args.model)
+    except JevError as exc:
+        if exc.reason != "model_pin":
+            raise
+        print(f"[jev] модель не разрешена: {args.model}", file=sys.stderr)
+        return EXIT_USAGE
     verdict = JevAdapter(client=client).decide(raw, domain=args.domain or None)
     text = json.dumps(verdict, ensure_ascii=False, indent=2, sort_keys=True)
     if args.out:
