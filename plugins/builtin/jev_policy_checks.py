@@ -12,7 +12,7 @@ import asyncio
 import hashlib
 import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -199,3 +199,56 @@ def test_cascade_run_keeps_allow_when_not_confident(monkeypatch):
     monkeypatch.setattr(shadow, "cascade_once", lambda state, client=None, timeout=None: None)
     result = asyncio.run(shadow.cascade_run(_FakePlugin("allow"), "t1", {}, {"plan": "free"}))
     assert str(result.action) == "allow"
+
+
+# ── shadow_policy: non-dict / None evaluate_policies result ───────────────
+
+
+def _patch_policy_engine(monkeypatch, evaluate_policies):
+    """Подменить policy_engine.evaluate_policies на герметичный fake (без db/tier_profiles)."""
+    fake = ModuleType("policy_engine")
+    fake.evaluate_policies = evaluate_policies
+    monkeypatch.setitem(sys.modules, "policy_engine", fake)
+
+
+def test_shadow_policy_enabled_keeps_verdict(monkeypatch):
+    monkeypatch.setenv(shadow._ENV_FLAG, "1")
+    scheduled: list = []
+    monkeypatch.setattr(shadow, "submit_observation", lambda fn, *args: scheduled.append((fn, args)))
+    _patch_policy_engine(
+        monkeypatch,
+        lambda tenant_id, action, context=None: {"result": "allowed", "reason": "ok", "policy_name": "quota_policy"},
+    )
+    result = shadow.shadow_policy("t1", "decision.create", {"estimated_cost": 1.0})
+    assert result == {"result": "allowed", "reason": "ok", "policy_name": "quota_policy"}
+    assert len(scheduled) == 1
+
+
+def test_shadow_policy_none_result_kept(monkeypatch):
+    monkeypatch.setenv(shadow._ENV_FLAG, "1")
+    scheduled: list = []
+    monkeypatch.setattr(shadow, "submit_observation", lambda fn, *args: scheduled.append((fn, args)))
+    _patch_policy_engine(monkeypatch, lambda tenant_id, action, context=None: None)
+    result = shadow.shadow_policy("t1", "decision.create", {})
+    assert result is None  # вердикт не меняется
+    assert scheduled == []  # наблюдение пропущено, ничего не брошено
+
+
+def test_shadow_policy_nondict_result_kept(monkeypatch):
+    monkeypatch.setenv(shadow._ENV_FLAG, "1")
+    scheduled: list = []
+    monkeypatch.setattr(shadow, "submit_observation", lambda fn, *args: scheduled.append((fn, args)))
+    _patch_policy_engine(monkeypatch, lambda tenant_id, action, context=None: ["allowed", "ok"])
+    result = shadow.shadow_policy("t1", "decision.create", {})
+    assert result == ["allowed", "ok"]  # вердикт не меняется
+    assert scheduled == []  # наблюдение пропущено, ничего не брошено
+
+
+def test_shadow_policy_disabled_noop(monkeypatch):
+    monkeypatch.delenv(shadow._ENV_FLAG, raising=False)
+    scheduled: list = []
+    monkeypatch.setattr(shadow, "submit_observation", lambda fn, *args: scheduled.append((fn, args)))
+    _patch_policy_engine(monkeypatch, lambda tenant_id, action, context=None: None)
+    result = shadow.shadow_policy("t1", "decision.create", {})
+    assert result is None  # при выключенном флаге вердикт возвращается как есть
+    assert scheduled == []

@@ -332,6 +332,12 @@ def shadow_policy(
     result = evaluate_policies(tenant_id, action, context)
     if not is_enabled():
         return result
+    if not isinstance(result, dict):
+        logger.warning(
+            "jev policy shadow: evaluate_policies returned non-dict (%s) — verdict kept",
+            type(result).__name__,
+        )
+        return result
     try:
         from core.jev_client import tenant_ref
 
