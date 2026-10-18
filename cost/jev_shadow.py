@@ -26,17 +26,21 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
 from core.jev_observer import submit_observation
+from core.jev_shadow_log import record
+from monitoring.metrics import track_jev_shadow
 
 logger = logging.getLogger("roma.gate.jev_shadow")
 
 # ── Config ───────────────────────────────────────────────────────────────
 _ENV_FLAG = "JEV_GATE_SHADOW"
 _SEND_UNTRUSTED_ENV = "JEV_GATE_SHADOW_SEND_UNTRUSTED"
+_POINT = "R1"
 
 # Temporary thresholds (docs/jev-integration-roma.md, R1 row). Real values only
 # after shadow-mode produces a labeled dataset (see G-JEV-BRIDGE-SPIKE-REPORT.md).
@@ -154,23 +158,66 @@ def capture_state(tenant_id: str, payload: dict | None) -> dict[str, Any]:
 # ── Observation (fail-closed) ────────────────────────────────────────────
 
 
+def _error_reason(exc: Exception) -> str:
+    """Фиксированный набор причин fallback (см. ``_JEV_REASONS`` в monitoring/metrics.py)."""
+    from core.jev_client import JevRateLimited, JevTimeout
+
+    if isinstance(exc, JevTimeout):
+        return "timeout"
+    if isinstance(exc, JevRateLimited):
+        return "rate_limited"
+    return "jev_error"
+
+
+def _agrees(choice: str, verdict: str) -> bool:
+    """R1-отображение compliant/non-compliant (то же, что COMPLIANT в scripts/jev_shadow_agreement.py)."""
+    return (choice == "normal") == (verdict == "allowed")
+
+
+def _track(**fields: Any) -> None:
+    """Метрики — best-effort: сбой телеметрии не меняет вердикт и не бросает."""
+    try:
+        track_jev_shadow(_POINT, **fields)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("jev gate shadow metrics failed: %r", exc)
+
+
+def _record_fallback(verdict: str, reason: str, latency_s: float) -> None:
+    """Fallback = наблюдения нет; пишем запись и счётчики, вердикт остаётся детерминированным."""
+    _track(outcome="fallback", reason=reason)
+    record(
+        _POINT,
+        schema=1,
+        outcome="fallback",
+        reason=reason,
+        verdict=verdict,
+        latency_ms=round(latency_s * 1000, 2),
+        observed_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+
 def observe_once(state: dict[str, Any], verdict: str, *, client: Any = None) -> ShadowObservation | None:
     """One shadow observation. Fail-closed: any error → ``None`` (verdict stands)."""
     from core.jev_client import JevClient, JevError, normalize_answers
 
     c = client if client is not None else JevClient()
+    started = time.monotonic()
     try:
         payload = c.evaluate(state, {"anomaly": QUESTION})
     except JevError as exc:
         logger.warning("jev gate shadow failed (verdict kept): %s", exc)
+        _record_fallback(verdict, _error_reason(exc), time.monotonic() - started)
         return None
     except Exception as exc:  # noqa: BLE001 — shadow must never break the hot path
         logger.warning("jev gate shadow unexpected error (verdict kept): %r", exc)
+        _record_fallback(verdict, "jev_error", time.monotonic() - started)
         return None
+    latency_s = time.monotonic() - started
 
     answer = normalize_answers(payload).get("anomaly")
     if not answer or answer.get("type") != "choice" or answer.get("value") is None:
         logger.warning("jev gate shadow: no valid 'anomaly' answer")
+        _record_fallback(verdict, "no_answer", latency_s)
         return None
 
     probs = answer.get("probabilities") or {}
@@ -189,16 +236,24 @@ def observe_once(state: dict[str, Any], verdict: str, *, client: Any = None) -> 
         observation.prob_anomaly,
         observation.zone,
     )
-    from core.jev_shadow_log import record
 
     record(
-        "R1",
+        _POINT,
+        schema=1,
+        outcome="ok",
+        reason="",
+        latency_ms=round(latency_s * 1000, 2),
         choice=observation.choice,
         prob_anomaly=observation.prob_anomaly,
         zone=observation.zone,
         confidence=observation.confidence,
         verdict=observation.verdict,
         observed_at=observation.observed_at,
+    )
+    _track(
+        outcome="ok",
+        agree="yes" if _agrees(observation.choice, observation.verdict) else "no",
+        latency_s=latency_s,
     )
     return observation
 
@@ -225,8 +280,9 @@ def shadow_evaluate(gate: Any, tenant_id: str, payload: dict | None = None, *, c
         state = capture_state(tenant_id, payload)
     except Exception as exc:  # noqa: BLE001
         logger.warning("jev gate shadow: state capture failed (verdict kept): %r", exc)
+        _record_fallback(_verdict_label(verdict), "state_capture", 0.0)
         return verdict
-    submit_observation(_observe_safely, state, _verdict_label(verdict), client)
+    submit_observation(_observe_safely, state, _verdict_label(verdict), client, point=_POINT)
     return verdict
 
 

@@ -6,7 +6,11 @@ Instrumentation points:
 - submit_job / complete_job → automatically covered via _increment_usage
 """
 
+import logging
+
 from prometheus_client import Counter, Gauge, Histogram
+
+logger = logging.getLogger("roma.monitoring.metrics")
 
 gpu_seconds_total = Counter(
     "roma_gpu_seconds_total",
@@ -149,3 +153,78 @@ try:
     roma_spend_cap_pct = spend_cap_pct
 except NameError:
     pass
+
+
+# --- Jev shadow (R1/R3/R5) — наблюдаемость shadow-контура ---
+# Лейблы — только из фиксированных множеств ниже: ни tenant_id, ни текста сообщения.
+_JEV_POINTS = ("R1", "R3", "R5")
+_JEV_OUTCOMES = ("ok", "fallback")
+_JEV_REASONS = ("jev_error", "timeout", "rate_limited", "no_answer", "state_capture")
+_JEV_AGREE = ("yes", "no")
+
+jev_shadow_observations_total = Counter(
+    "roma_jev_shadow_observations_total",
+    "Jev shadow observations by outcome (ok = observation recorded)",
+    ["point", "outcome"],
+)
+
+jev_shadow_fallback_total = Counter(
+    "roma_jev_shadow_fallback_total",
+    "Jev shadow fallbacks: deterministic baseline kept instead of an observation",
+    ["point", "reason"],
+)
+
+jev_shadow_agreement_total = Counter(
+    "roma_jev_shadow_agreement_total",
+    "Jev shadow class vs deterministic verdict (compliant mapping)",
+    ["point", "agree"],
+)
+
+jev_shadow_dropped_total = Counter(
+    "roma_jev_shadow_dropped_total",
+    "Jev shadow observations dropped by the bounded observer queue",
+    ["point"],
+)
+
+jev_shadow_latency_seconds = Histogram(
+    "roma_jev_shadow_latency_seconds",
+    "Jev shadow observation latency (one Jev call)",
+    ["point"],
+    buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8),
+)
+
+
+def _one_of(value: str, allowed: tuple[str, ...]) -> str:
+    """Неизвестное значение схлопывается в ``other`` — кардинальность лейбла фиксирована."""
+    return value if value in allowed else "other"
+
+
+def track_jev_shadow(
+    point: str,
+    *,
+    outcome: str | None = None,
+    reason: str | None = None,
+    agree: str | None = None,
+    dropped: bool = False,
+    latency_s: float | None = None,
+) -> None:
+    """Записать метрики shadow-контура (best-effort).
+
+    Никогда не бросает: сбой телеметрии не имеет права влиять на вердикт.
+    """
+    try:
+        p = _one_of(point, _JEV_POINTS)
+        if outcome is not None:
+            jev_shadow_observations_total.labels(
+                point=p, outcome=_one_of(outcome, _JEV_OUTCOMES)
+            ).inc()
+        if reason is not None:
+            jev_shadow_fallback_total.labels(point=p, reason=_one_of(reason, _JEV_REASONS)).inc()
+        if agree is not None:
+            jev_shadow_agreement_total.labels(point=p, agree=_one_of(agree, _JEV_AGREE)).inc()
+        if dropped:
+            jev_shadow_dropped_total.labels(point=p).inc()
+        if latency_s is not None:
+            jev_shadow_latency_seconds.labels(point=p).observe(max(0.0, float(latency_s)))
+    except Exception as exc:  # noqa: BLE001 — телеметрия не ломает горячий путь
+        logger.debug("jev shadow metrics failed: %r", exc)
