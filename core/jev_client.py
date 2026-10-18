@@ -28,7 +28,9 @@ from typing import Any, Callable
 # ── Конфигурация транспорта ─────────────────────────────────────────────
 
 ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
-DEFAULT_MODEL = "typesafe/jev-1.13"
+PINNED_JEV_MODEL = "typesafe/jev-1.13"
+FORBIDDEN_MODEL_MARKERS = ("jev-latest",)
+DEFAULT_MODEL = PINNED_JEV_MODEL
 
 LIMITS: dict[str, float] = {
     "timeout_s": 8.0,
@@ -43,6 +45,10 @@ LIMITS: dict[str, float] = {
 
 class JevError(RuntimeError):
     """Базовая ошибка адаптера: наружу её гасит adapter.decide -> skip."""
+
+    def __init__(self, message: str = "", *, reason: str | None = None) -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 class JevDisabled(JevError):
@@ -142,6 +148,28 @@ def http_transport(url: str, payload: dict[str, Any], key: str, timeout: float) 
         raise JevBadResponse("ответ не JSON") from exc
 
 
+# ── Пин модели ──────────────────────────────────────────────────────────
+
+
+def check_model_pin(model: str) -> None:
+    """Модель закреплена: чужая (включая ``jev-latest``) — отказ до сети."""
+    if model != PINNED_JEV_MODEL or any(marker in model for marker in FORBIDDEN_MODEL_MARKERS):
+        raise JevError(
+            f"модель Jev закреплена как {PINNED_JEV_MODEL!r}, получено {model!r}",
+            reason="model_pin",
+        )
+
+
+def check_response_model(payload: Any) -> None:
+    """Модель в ответе: поле отсутствует — ок; есть и не совпало — отказ."""
+    if not isinstance(payload, dict):
+        return
+    reported = payload.get("model")
+    if reported is None or str(reported) == PINNED_JEV_MODEL:
+        return
+    raise JevError(f"ответ Jev от незакреплённой модели: {reported!r}", reason="model_pin_response")
+
+
 # ── Клиент ───────────────────────────────────────────────────────────────
 
 
@@ -159,6 +187,7 @@ class JevClient:
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._env = dict(os.environ if env is None else env)
+        check_model_pin(model)
         self.model = model
         self.timeout = float(LIMITS["timeout_s"] if timeout is None else timeout)
         self.retries = int(LIMITS["retries"] if retries is None else retries)
@@ -181,6 +210,7 @@ class JevClient:
 
     def evaluate(self, state: dict[str, Any], questions: dict[str, dict[str, Any]]) -> dict[str, Any]:
         """Одна оценка Decisions API. Исключения наружу гасит adapter.decide -> skip."""
+        check_model_pin(self.model)
         if not self.enabled:
             raise JevDisabled("JEV_ENABLED выключен или OPENROUTER_API_KEY пуст")
         payload = {"state": state, "model": self.model, "questions": questions}
@@ -190,7 +220,7 @@ class JevClient:
         for attempt in range(self.retries + 1):
             self.attempts += 1
             try:
-                return self._transport(ENDPOINT, payload, key, self.timeout)
+                response = self._transport(ENDPOINT, payload, key, self.timeout)
             except JevRateLimited as exc:
                 last = exc
                 if attempt < self.retries:
@@ -202,6 +232,8 @@ class JevClient:
                 raise type(exc)(mask(str(exc), key)) from exc
             except Exception as exc:
                 raise JevError(f"transport: {mask(exc, key)}") from exc
+            check_response_model(response)
+            return response
         raise last if last is not None else JevError("transport exhausted")
 
 

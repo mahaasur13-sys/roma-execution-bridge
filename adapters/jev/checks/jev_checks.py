@@ -26,8 +26,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from adapters.jev.adapter import JevAdapter, _risk_value  # noqa: E402
-from adapters.jev.client import JevClient, JevRateLimited, JevTimeout  # noqa: E402
+from adapters.jev.client import JevClient, JevError, JevRateLimited, JevTimeout  # noqa: E402
 from adapters.jev.contract import THRESHOLDS, state_bytes  # noqa: E402
+from core.jev_client import PINNED_JEV_MODEL  # noqa: E402
 
 FAKE_KEY = "unit-test-placeholder-key"
 
@@ -692,3 +693,105 @@ def test_malformed_answer_never_executes(payload: dict[str, Any]) -> None:
     verdict = _adapter(_Recorder(result=payload)).decide(_state())
     assert verdict["decision"] != "execute"
     assert verdict["decision"] in ("skip", "confirm", "abort")
+
+
+# ── Пин модели Jev: typesafe/jev-1.13 ────────────────────────────────────
+
+
+def test_pinned_model_is_accepted_and_sent() -> None:
+    """Закреплённая модель проходит и уходит в тело запроса как есть."""
+    recorder = _Recorder(result={"model": PINNED_JEV_MODEL, "answers": {}})
+    client = JevClient(env=_env(), transport=recorder, sleep=lambda _seconds: None)
+    assert client.evaluate(_state(), {"gate": {}})["model"] == PINNED_JEV_MODEL
+    assert recorder.calls[0]["model"] == PINNED_JEV_MODEL
+
+
+def test_foreign_model_rejected_in_ctor_without_network() -> None:
+    """Чужая модель — отказ до сети: транспорт не вызывается ни разу."""
+    recorder = _Recorder(result={"answers": {}})
+    with pytest.raises(JevError) as excinfo:
+        JevClient(env=_env(), transport=recorder, model="openai/gpt-4o-mini")
+    assert excinfo.value.reason == "model_pin"
+    assert recorder.calls == []
+
+
+def test_jev_latest_marker_rejected() -> None:
+    """Плавающий тег запрещён отдельным маркером, а не только сравнением с пином."""
+    with pytest.raises(JevError) as excinfo:
+        JevClient(env=_env(), model="typesafe/jev-latest")
+    assert excinfo.value.reason == "model_pin"
+
+
+def test_model_mutation_after_ctor_rejected_before_request() -> None:
+    """Мутация client.model после конструктора ловится в evaluate до сети."""
+    recorder = _Recorder(result={"answers": {}})
+    client = JevClient(env=_env(), transport=recorder, sleep=lambda _seconds: None)
+    client.model = "typesafe/jev-latest"
+    with pytest.raises(JevError) as excinfo:
+        client.evaluate(_state(), {"gate": {}})
+    assert excinfo.value.reason == "model_pin"
+    assert recorder.calls == []
+
+
+def test_adapter_rejects_foreign_model_in_ctor() -> None:
+    """JevAdapter валидирует модель до присвоения клиенту."""
+    with pytest.raises(JevError) as excinfo:
+        JevAdapter(model="typesafe/jev-latest")
+    assert excinfo.value.reason == "model_pin"
+
+
+def test_response_without_model_field_is_accepted() -> None:
+    """Отсутствие поля model в ответе — не нарушение пина."""
+    recorder = _Recorder(result={"answers": {}})
+    client = JevClient(env=_env(), transport=recorder, sleep=lambda _seconds: None)
+    assert client.evaluate(_state(), {"gate": {}}) == {"answers": {}}
+
+
+def test_response_with_foreign_model_is_rejected() -> None:
+    """Ответ от чужой модели помечается reason=\"model_pin_response\"."""
+    recorder = _Recorder(result={"model": "typesafe/jev-latest", "answers": {}})
+    client = JevClient(env=_env(), transport=recorder, sleep=lambda _seconds: None)
+    with pytest.raises(JevError) as excinfo:
+        client.evaluate(_state(), {"gate": {}})
+    assert excinfo.value.reason == "model_pin_response"
+
+
+def test_shadow_observe_once_returns_none_on_pin_error(monkeypatch: Any) -> None:
+    """Fail-closed: ошибка пина гасится в None и не доходит до сети."""
+    from cost.jev_shadow import observe_once
+
+    monkeypatch.setenv("JEV_ENABLED", "1")
+    monkeypatch.setenv("OPENROUTER_API_KEY", FAKE_KEY)
+    recorder = _Recorder(result={"answers": {}})
+    client = JevClient(env=_env(), transport=recorder, sleep=lambda _seconds: None)
+    client.model = "typesafe/jev-latest"
+    assert observe_once(_state(), "denied", client=client) is None
+    assert recorder.calls == []
+
+
+def test_cli_rejects_foreign_model_with_exit_2_and_no_traceback(tmp_path: Path) -> None:
+    """CLI: отказ пина — одна строка в stderr, код 2, без traceback."""
+    import os
+    import subprocess
+
+    state_file = tmp_path / "state.json"
+    state_file.write_text(json.dumps(_state()), encoding="utf-8")
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "adapters.jev.run",
+            "--state-file",
+            str(state_file),
+            "--model",
+            "typesafe/jev-latest",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(REPO_ROOT),
+        env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO_ROOT), "JEV_ENABLED": "0"},
+        timeout=60,
+    )
+    assert proc.returncode == 2, (proc.returncode, proc.stdout, proc.stderr)
+    assert "Traceback" not in proc.stderr
+    assert len(proc.stderr.strip().splitlines()) == 1
