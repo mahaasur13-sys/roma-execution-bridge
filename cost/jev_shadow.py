@@ -160,8 +160,10 @@ def capture_state(tenant_id: str, payload: dict | None) -> dict[str, Any]:
 
 def _error_reason(exc: Exception) -> str:
     """Фиксированный набор причин fallback (см. ``_JEV_REASONS`` в monitoring/metrics.py)."""
-    from core.jev_client import JevRateLimited, JevTimeout
+    from core.jev_client import JevDisabled, JevRateLimited, JevTimeout
 
+    if isinstance(exc, JevDisabled):
+        return "disabled"
     if isinstance(exc, JevTimeout):
         return "timeout"
     if isinstance(exc, JevRateLimited):
