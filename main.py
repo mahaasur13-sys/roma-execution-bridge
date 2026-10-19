@@ -278,8 +278,51 @@ def _save_json(filename: str, data: dict) -> None:
 # API KEY AUTH + MULTI-TENANCY
 # ============================================
 
-db.init_db()
-db.seed_tenants(API_KEYS)
+def _init_db_with_retry(
+    timeout_s: float | None = None,
+    delay_s: float = 2.0,
+    max_delay_s: float = 10.0,
+) -> None:
+    """Довести init_db+seed_tenants до успеха либо бросить последнее исключение.
+
+    Зачем: после рестарта песочницы PG поднимается позже приложения. Без ретрая импорт
+    main падал на первом же отказе соединения, supervisor сжигал startretries
+    (20 мгновенных падений внутри startsecs=5) и уходил в FATAL — сервис не поднимался.
+
+    Бюджет ожидания: ROMA_DB_INIT_TIMEOUT_S (по умолчанию 60 с). В лог идёт только тип
+    исключения — DSN и его части не печатаются.
+    """
+    if timeout_s is None:
+        try:
+            timeout_s = float(os.getenv("ROMA_DB_INIT_TIMEOUT_S", "60"))
+        except ValueError:
+            timeout_s = 60.0
+
+    deadline = time.monotonic() + timeout_s
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            db.init_db()
+            db.seed_tenants(API_KEYS)
+            return
+        except Exception as exc:
+            if time.monotonic() >= deadline:
+                logger.error(
+                    "db init failed after %d attempt(s): %s", attempt, type(exc).__name__
+                )
+                raise
+            logger.warning(
+                "db init attempt %d failed (%s) — retry in %.1fs",
+                attempt,
+                type(exc).__name__,
+                delay_s,
+            )
+            time.sleep(delay_s)
+            delay_s = min(delay_s * 2, max_delay_s)
+
+
+_init_db_with_retry()
 
 
 def verify_api_key(x_api_key: str = Header(None)) -> dict:
