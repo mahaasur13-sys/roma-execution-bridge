@@ -20,7 +20,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import cost.jev_shadow as shadow  # noqa: E402
-from adapters.jev.client import JevError, JevRateLimited, JevTimeout  # noqa: E402
+from adapters.jev.client import JevDisabled, JevError, JevRateLimited, JevTimeout  # noqa: E402
 
 import pytest  # noqa: E402
 from prometheus_client import REGISTRY  # noqa: E402
@@ -272,6 +272,15 @@ def test_rate_limited_and_generic_error_reasons():
         shadow.observe_once({}, "allowed", client=_FakeClient(error=JevRateLimited("429")))
         shadow.observe_once({}, "allowed", client=_FakeClient(error=JevError("boom")))
     assert (rl.value, je.value) == (1.0, 1.0)
+
+def test_disabled_has_own_reason():
+    with _Delta("roma_jev_shadow_fallback_total", point="R1", reason="disabled") as dis, _Delta(
+        "roma_jev_shadow_fallback_total", point="R1", reason="jev_error"
+    ) as je:
+        obs = shadow.observe_once({}, "allowed", client=_FakeClient(error=JevDisabled("flag off")))
+    assert obs is None
+    assert (dis.value, je.value) == (1.0, 0.0)
+    assert _records()[0]["reason"] == "disabled"
 
 
 def test_no_answer_increments_fallback():

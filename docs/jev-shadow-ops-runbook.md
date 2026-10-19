@@ -75,7 +75,7 @@ except JevError as e:
 | Метрика | Лейблы | Смысл |
 |---------|--------|-------|
 | `roma_jev_shadow_observations_total` | `point`, `outcome` (`ok`/`fallback`) | наблюдение записано / ушло в fallback |
-| `roma_jev_shadow_fallback_total` | `point`, `reason` (`jev_error`/`timeout`/`rate_limited`/`no_answer`/`state_capture`) | почему вердикт остался детерминированным |
+| `roma_jev_shadow_fallback_total` | `point`, `reason` (`jev_error`/`timeout`/`rate_limited`/`no_answer`/`state_capture`/`disabled`) | почему вердикт остался детерминированным |
 | `roma_jev_shadow_agreement_total` | `point`, `agree` (`yes`/`no`) | класс Jev совпал с детерминированным вердиктом (R1: `normal` ↔ `allowed`) |
 | `roma_jev_shadow_dropped_total` | `point` | наблюдение выброшено bounded-очередью `core/jev_observer.py` (переполнение или сбой submit) |
 | `roma_jev_shadow_latency_seconds` | `point` | латентность одного вызова Jev (buckets 0.05…8 с) |
@@ -90,6 +90,12 @@ except JevError as e:
 
 JSONL (`JEV_SHADOW_LOG`) пишется и на fallback: `schema=1`, `outcome`, `reason`, `latency_ms`
 плюс прежние поля (`choice`, `prob_anomaly`, `zone`, `verdict`, `observed_at`).
+
+Ротация файла (`core/jev_shadow_log.py`): по размеру, `JEV_SHADOW_LOG_MAX_BYTES` (дефолт 50 MB) и
+`JEV_SHADOW_LOG_BACKUPS` (дефолт 5) → `<log>.1` … `<log>.N`, старейший бэкап удаляется. Запись и
+ротация идут под одним lock (пишут два воркера observer'а); сбой ротации не теряет запись — append
+продолжается, warning пишется не чаще раза в 60 с. `iter_records()` читает **только живой файл**,
+бэкапы не читает — при разборе ротированной истории подавать их явно.
 
 ## 5. Rollback
 

@@ -159,7 +159,7 @@ except NameError:
 # Лейблы — только из фиксированных множеств ниже: ни tenant_id, ни текста сообщения.
 _JEV_POINTS = ("R1", "R3", "R5")
 _JEV_OUTCOMES = ("ok", "fallback")
-_JEV_REASONS = ("jev_error", "timeout", "rate_limited", "no_answer", "state_capture")
+_JEV_REASONS = ("jev_error", "disabled", "timeout", "rate_limited", "no_answer", "state_capture")
 _JEV_AGREE = ("yes", "no")
 
 jev_shadow_observations_total = Counter(
