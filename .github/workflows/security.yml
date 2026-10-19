@@ -77,9 +77,10 @@ jobs:
   # только на находках уровня ERROR).
   sast:
     # push в ветку, отличную от default — пропускаем: дельта уже гейтится в
-    # pull_request (там baseline = base.sha доступен). push в default — держим,
-    # baseline = before с fallback на HEAD~1 (нулевой/недоступный before).
-    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch)
+    # pull_request (там baseline = base.sha доступен). push в default и push тега
+    # (релизный путь cosign) — держим. baseline = before; пустой/нулевой/недоступный
+    # before → полный скан (fail-closed), без частичной дельты.
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && (github.ref_name == github.event.repository.default_branch || startsWith(github.ref, 'refs/tags/')))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -105,20 +106,17 @@ jobs:
       # (bandit medium+ / repo-wide) продолжает работать по всему дереву.
       - name: semgrep — p/ci (fail on ERROR, delta-only)
         env:
-          # PR: база PR. push в default: предыдущий head (before).
+          # PR: база PR. push: предыдущий head (before).
           BASELINE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           baseline="${BASELINE_SHA}"
-          if [ -n "$baseline" ] && git cat-file -e "${baseline}^{commit}" 2>/dev/null; then
+          zero="0000000000000000000000000000000000000000"
+          if [ -n "$baseline" ] && [ "$baseline" != "$zero" ] && git cat-file -e "${baseline}^{commit}" 2>/dev/null; then
             echo "baseline commit: $baseline"
             semgrep scan --config=p/ci --error --metrics=off \
               --baseline-commit="$baseline"
-          elif head1="$(git rev-parse 'HEAD~1^{commit}' 2>/dev/null)" && [ -n "$head1" ]; then
-            echo "baseline commit недоступен ($baseline) — использую HEAD~1 ($head1)"
-            semgrep scan --config=p/ci --error --metrics=off \
-              --baseline-commit="$head1"
           else
-            echo "baseline commit недоступен (ни $baseline, ни HEAD~1) — полный скан"
+            echo "baseline commit недоступен ($baseline) — полный скан (fail-closed)"
             semgrep scan --config=p/ci --error --metrics=off
           fi
 
