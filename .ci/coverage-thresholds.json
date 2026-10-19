@@ -104,7 +104,8 @@
       "**/*_test.py",
       "deploy/ops/",
       "adapters/",
-      "deploy/stripe-webhook/"
+      "deploy/stripe-webhook/",
+      "main_checks.py"
     ],
     "note": "exclude: tests/ — тесты не измеряют сами себя; deploy/ops/ — операционные артефакты (сторожа, релей, барьеры): версионируются для воспроизводимости (N6), но не продукт. Остальной deploy/ остаётся в области измерения.",
     "exclude_reason": {
@@ -195,6 +196,11 @@
       "date": "2026-10-17",
       "scope": "product-only, exclude += deploy/stripe-webhook/",
       "reason": "PR #133: отдельный k8s-микросервис stripe-webhook (свой образ, не часть продукта ROMA); стал виден gate после появления tests/test_stripe_webhook_fail_closed.py"
+    },
+    {
+      "date": "2026-10-19",
+      "scope": "product-only, exclude += main_checks.py",
+      "reason": "PR #142: корневой main_checks.py — набор проверок стартового retry-обёртки (не продукт), стал виден gate как 'unscoped: main_checks.py' после добавления файла в ветке fix/roma-init-db-retry"
     }
   ],
   "measured_on": {
