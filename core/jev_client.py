@@ -161,11 +161,18 @@ def check_model_pin(model: str) -> None:
 
 
 def check_response_model(payload: Any) -> None:
-    """Модель в ответе: поле отсутствует — ок; есть и не совпало — отказ."""
+    """Модель в ответе: поле отсутствует — ок; есть и не совпало — отказ.
+
+    OpenRouter может вернуть датированный снапшот той же модели
+    (``typesafe/jev-1.13-20260917``) — принимаем его как тот же пин;
+    иная модель / префикс без 8-значной даты / чужой неймспейс — отказ.
+    """
     if not isinstance(payload, dict):
         return
     reported = payload.get("model")
     if reported is None or str(reported) == PINNED_JEV_MODEL:
+        return
+    if re.fullmatch(rf"{re.escape(PINNED_JEV_MODEL)}-\d{{8}}", str(reported)):
         return
     raise JevError(f"ответ Jev от незакреплённой модели: {reported!r}", reason="model_pin_response")
 
