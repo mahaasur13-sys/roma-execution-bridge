@@ -244,6 +244,7 @@ def observe_once(state: dict[str, Any], verdict: str, *, client: Any = None) -> 
         schema=1,
         outcome="ok",
         reason="",
+        model=payload.get("model"),
         latency_ms=round(latency_s * 1000, 2),
         choice=observation.choice,
         prob_anomaly=observation.prob_anomaly,

@@ -317,6 +317,8 @@ def test_ok_record_carries_schema_fields():
     # старые поля не удалены
     assert rec["choice"] == "anomaly"
     assert "verdict" in rec and "observed_at" in rec and "prob_anomaly" in rec
+    # фактический id модели (в т.ч. датированный снапшот) логируется в записи
+    assert rec["model"] == "typesafe/jev-1.13"
 
 
 def test_fallback_record_carries_schema_fields():

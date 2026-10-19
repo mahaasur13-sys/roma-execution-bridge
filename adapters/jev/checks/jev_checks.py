@@ -756,6 +756,34 @@ def test_response_with_foreign_model_is_rejected() -> None:
     assert excinfo.value.reason == "model_pin_response"
 
 
+def test_response_with_dated_snapshot_model_is_accepted() -> None:
+    """Датированный снапшот той же модели (YYYYMMDD) принимается как тот же пин."""
+    snapshot = "typesafe/jev-1.13-20260917"
+    recorder = _Recorder(result={"model": snapshot, "answers": {}})
+    client = JevClient(env=_env(), transport=recorder, sleep=lambda _seconds: None)
+    assert client.evaluate(_state(), {"gate": {}})["model"] == snapshot
+
+
+@pytest.mark.parametrize(
+    "bad_model",
+    [
+        "typesafe/jev-1.13-2026",       # не 8 цифр
+        "typesafe/jev-1.13-20260917x",  # хвостовой символ
+        "typesafe/jev-1.130",           # префикс без даты
+        "typesafe/jev-1.14-20260917",   # другая версия
+        "other/jev-1.13-20260917",      # чужой неймспейс
+        "",                             # пусто
+    ],
+)
+def test_response_with_bad_dated_model_is_rejected(bad_model: str) -> None:
+    """Не-снапшот (или чужая модель) в ответе помечается reason="model_pin_response"."""
+    recorder = _Recorder(result={"model": bad_model, "answers": {}})
+    client = JevClient(env=_env(), transport=recorder, sleep=lambda _seconds: None)
+    with pytest.raises(JevError) as excinfo:
+        client.evaluate(_state(), {"gate": {}})
+    assert excinfo.value.reason == "model_pin_response"
+
+
 def test_shadow_observe_once_returns_none_on_pin_error(monkeypatch: Any) -> None:
     """Fail-closed: ошибка пина гасится в None и не доходит до сети."""
     from cost.jev_shadow import observe_once
