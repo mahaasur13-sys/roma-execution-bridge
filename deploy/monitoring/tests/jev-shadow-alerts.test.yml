@@ -1,6 +1,6 @@
 rule_files:
   - ../alert-rules-roma.yml
-evaluation_interval: 1m
+evaluation_interval: 30s
 tests:
   # (a) all traffic disabled. Producer semantics (monitoring/metrics.py:217-222,
   # one call per observation from cost/jev_shadow.py:_record_fallback): one fallback
@@ -8,12 +8,12 @@ tests:
   # fallback{reason="disabled"} and jev_error is necessarily 0. The disabled series
   # cancels out of the ratio -> FallbackHigh must NOT fire, early or late.
   - name: a_disabled_only_no_fire
-    interval: 1m
+    interval: 30s
     input_series:
-      - series: 'roma_jev_shadow_observations_total{outcome="fallback"}'
-        values: '0+5x40'
-      - series: 'roma_jev_shadow_fallback_total{reason="disabled"}'
-        values: '0+5x40'
+      - series: 'roma_jev_shadow_observations_total{point="R1", outcome="fallback"}'
+        values: '0+5x80'
+      - series: 'roma_jev_shadow_fallback_total{point="R1", reason="disabled"}'
+        values: '0+5x80'
     alert_rule_test:
       - eval_time: 5m
         alertname: JevShadowFallbackHigh
@@ -25,19 +25,20 @@ tests:
   # (a2) 30% jev_error and the disabled series is ABSENT -> fires
   # (exercises the "or" fallback: obs - empty == empty in PromQL)
   - name: a2_no_disabled_series_fires
-    interval: 1m
+    interval: 30s
     input_series:
-      - series: 'roma_jev_shadow_observations_total{outcome="ok"}'
-        values: '0+7x40'
-      - series: 'roma_jev_shadow_observations_total{outcome="fallback"}'
-        values: '0+3x40'
-      - series: 'roma_jev_shadow_fallback_total{reason="jev_error"}'
-        values: '0+3x40'
+      - series: 'roma_jev_shadow_observations_total{point="R1", outcome="ok"}'
+        values: '0+7x80'
+      - series: 'roma_jev_shadow_observations_total{point="R1", outcome="fallback"}'
+        values: '0+3x80'
+      - series: 'roma_jev_shadow_fallback_total{point="R1", reason="jev_error"}'
+        values: '0+3x80'
     alert_rule_test:
       - eval_time: 35m
         alertname: JevShadowFallbackHigh
         exp_alerts:
           - exp_labels:
+              point: R1
               severity: warning
               category: jev-shadow
             exp_annotations:
@@ -52,16 +53,16 @@ tests:
 
   # (b) 30% jev_error among non-disabled, 50% disabled -> fires
   - name: b_30pct_fires
-    interval: 1m
+    interval: 30s
     input_series:
-      - series: 'roma_jev_shadow_observations_total{outcome="ok"}'
-        values: '0+7x40'
-      - series: 'roma_jev_shadow_observations_total{outcome="fallback"}'
-        values: '0+13x40'
-      - series: 'roma_jev_shadow_fallback_total{reason="jev_error"}'
-        values: '0+3x40'
-      - series: 'roma_jev_shadow_fallback_total{reason="disabled"}'
-        values: '0+10x40'
+      - series: 'roma_jev_shadow_observations_total{point="R1", outcome="ok"}'
+        values: '0+7x80'
+      - series: 'roma_jev_shadow_observations_total{point="R1", outcome="fallback"}'
+        values: '0+13x80'
+      - series: 'roma_jev_shadow_fallback_total{point="R1", reason="jev_error"}'
+        values: '0+3x80'
+      - series: 'roma_jev_shadow_fallback_total{point="R1", reason="disabled"}'
+        values: '0+10x80'
     alert_rule_test:
       # 30% is already above the threshold at 10m, but `for: 15m` is not satisfied
       # yet -> detects removal of the `for` clause.
@@ -72,6 +73,7 @@ tests:
         alertname: JevShadowFallbackHigh
         exp_alerts:
           - exp_labels:
+              point: R1
               severity: warning
               category: jev-shadow
             exp_annotations:
@@ -86,16 +88,16 @@ tests:
 
   # (c) 10% jev_error among non-disabled -> must NOT fire
   - name: c_10pct_no_fire
-    interval: 1m
+    interval: 30s
     input_series:
-      - series: 'roma_jev_shadow_observations_total{outcome="ok"}'
-        values: '0+9x40'
-      - series: 'roma_jev_shadow_observations_total{outcome="fallback"}'
-        values: '0+11x40'
-      - series: 'roma_jev_shadow_fallback_total{reason="jev_error"}'
-        values: '0+1x40'
-      - series: 'roma_jev_shadow_fallback_total{reason="disabled"}'
-        values: '0+10x40'
+      - series: 'roma_jev_shadow_observations_total{point="R1", outcome="ok"}'
+        values: '0+9x80'
+      - series: 'roma_jev_shadow_observations_total{point="R1", outcome="fallback"}'
+        values: '0+11x80'
+      - series: 'roma_jev_shadow_fallback_total{point="R1", reason="jev_error"}'
+        values: '0+1x80'
+      - series: 'roma_jev_shadow_fallback_total{point="R1", reason="disabled"}'
+        values: '0+10x80'
     alert_rule_test:
       - eval_time: 35m
         alertname: JevShadowFallbackHigh
@@ -104,15 +106,16 @@ tests:
   # (d) dropped series created with value 1 -> fires immediately;
   # the same series steady for >15m -> no false positive
   - name: d_first_dropped_fires
-    interval: 1m
+    interval: 30s
     input_series:
-      - series: 'roma_jev_shadow_dropped_total'
-        values: '1+0x40'
+      - series: 'roma_jev_shadow_dropped_total{point="R1"}'
+        values: '1+0x80'
     alert_rule_test:
       - eval_time: 5m
         alertname: JevShadowDropped
         exp_alerts:
           - exp_labels:
+              point: R1
               severity: warning
               category: jev-shadow
             exp_annotations:
@@ -130,10 +133,10 @@ tests:
   # (d2) dropped series steady at 0 for 20m and only then growing -> covers the
   # increase(...[15m]) > 0 branch, which the "new series" cases never reach.
   - name: d2_dropped_increase_after_15m
-    interval: 1m
+    interval: 30s
     input_series:
-      - series: 'roma_jev_shadow_dropped_total'
-        values: '0+0x20 1+0x20'
+      - series: 'roma_jev_shadow_dropped_total{point="R1"}'
+        values: '0+0x40 1+0x40'
     alert_rule_test:
       - eval_time: 14m
         alertname: JevShadowDropped
@@ -145,6 +148,7 @@ tests:
         alertname: JevShadowDropped
         exp_alerts:
           - exp_labels:
+              point: R1
               severity: warning
               category: jev-shadow
             exp_annotations:
@@ -161,11 +165,73 @@ tests:
 
   # (e) dropped constant 0 -> must NOT fire
   - name: e_zero_dropped_no_fire
-    interval: 1m
+    interval: 30s
     input_series:
-      - series: 'roma_jev_shadow_dropped_total'
-        values: '0+0x40'
+      - series: 'roma_jev_shadow_dropped_total{point="R1"}'
+        values: '0+0x80'
     alert_rule_test:
       - eval_time: 5m
         alertname: JevShadowDropped
         exp_alerts: []
+
+  # (r1) counter reset (restart) 5 -> 0 -> 1 -> fires on the drop after reset
+  - name: r1_drop_after_restart_fires
+    interval: 30s
+    input_series:
+      - series: 'roma_jev_shadow_dropped_total{point="R1"}'
+        values: '5+0x40 0 1+0x40'
+    alert_rule_test:
+      - eval_time: 18m
+        alertname: JevShadowDropped
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: JevShadowDropped
+        exp_alerts:
+          - exp_labels:
+              point: R1
+              severity: warning
+              category: jev-shadow
+            exp_annotations:
+              summary: "Jev R1 shadow: наблюдения отброшены (dropped)"
+              description: |
+                Очередь bounded-обсервера переполнена: хотя бы одно наблюдение отброшено
+                за 15m либо серия впервые появилась с ненулевым значением.
+                Данные shadow неполные, agreement-метрика занижена.
+                Runbook: docs/jev-shadow-ops-runbook.md
+                Откат: удалить JEV_GATE_SHADOW и JEV_ENABLED из реестра сервиса ключами.
+
+  # (p1) series with point="R2" -> selector {point="R1"} must NOT match
+  - name: p1_other_point_ignored
+    interval: 30s
+    input_series:
+      - series: 'roma_jev_shadow_dropped_total{point="R2"}'
+        values: '1+0x80'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: JevShadowDropped
+        exp_alerts: []
+
+  # (m1) two instances dropping -> exactly ONE alert (sum by (point) dedupes)
+  - name: m1_two_instances_single_alert
+    interval: 30s
+    input_series:
+      - series: 'roma_jev_shadow_dropped_total{point="R1", instance="a"}'
+        values: '1+0x80'
+      - series: 'roma_jev_shadow_dropped_total{point="R1", instance="b"}'
+        values: '1+0x80'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: JevShadowDropped
+        exp_alerts:
+          - exp_labels:
+              point: R1
+              severity: warning
+              category: jev-shadow
+            exp_annotations:
+              summary: "Jev R1 shadow: наблюдения отброшены (dropped)"
+              description: |
+                Очередь bounded-обсервера переполнена: хотя бы одно наблюдение отброшено
+                за 15m либо серия впервые появилась с ненулевым значением.
+                Данные shadow неполные, agreement-метрика занижена.
+                Runbook: docs/jev-shadow-ops-runbook.md
+                Откат: удалить JEV_GATE_SHADOW и JEV_ENABLED из реестра сервиса ключами.
