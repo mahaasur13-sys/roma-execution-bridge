@@ -135,15 +135,17 @@ groups:
             Откат: удалить JEV_GATE_SHADOW и JEV_ENABLED из реестра сервиса ключами.
 
       - alert: JevShadowDropped
-        # increase() is reset-safe: a counter reset (restart) starts a new monotonic
-        # segment, so the first drop after a restart (5->0->1) still yields
-        # increase>0. The `unless offset` branch covers a brand-new non-zero series.
+        # increase() is reset-safe (5->0->1 still yields increase>0). The right branch
+        # applies `unless offset` PER-SERIES before sum, so a brand-new instance's
+        # first drop fires even when other instances already have 15m of history.
         expr: |
           (
             sum by (point) (increase(roma_jev_shadow_dropped_total{point="R1"}[15m])) > 0
             or
-            (sum by (point) (roma_jev_shadow_dropped_total{point="R1"}) > 0
-             unless sum by (point) (roma_jev_shadow_dropped_total{point="R1"} offset 15m))
+            (sum by (point) (
+              roma_jev_shadow_dropped_total{point="R1"} > 0
+              unless roma_jev_shadow_dropped_total{point="R1"} offset 15m
+            ) > 0)
           )
         for: 0m
         labels: {severity: warning, category: jev-shadow}

@@ -235,3 +235,35 @@ tests:
                 Данные shadow неполные, agreement-метрика занижена.
                 Runbook: docs/jev-shadow-ops-runbook.md
                 Откат: удалить JEV_GATE_SHADOW и JEV_ENABLED из реестра сервиса ключами.
+
+  # (n1) new instance's first drop: instance="a" holds 0, instance="b" appears
+  # later with value 1 -> the per-series `unless offset` (before sum) fires once.
+  - name: n1_new_instance_first_drop
+    interval: 30s
+    input_series:
+      - series: 'roma_jev_shadow_dropped_total{point="R1", instance="a"}'
+        values: '0+0x80'
+      - series: 'roma_jev_shadow_dropped_total{point="R1", instance="b"}'
+        values: '_x40 1+0x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: JevShadowDropped
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: JevShadowDropped
+        exp_alerts:
+          - exp_labels:
+              point: R1
+              severity: warning
+              category: jev-shadow
+            exp_annotations:
+              summary: "Jev R1 shadow: наблюдения отброшены (dropped)"
+              description: |
+                Очередь bounded-обсервера переполнена: хотя бы одно наблюдение отброшено
+                за 15m либо серия впервые появилась с ненулевым значением.
+                Данные shadow неполные, agreement-метрика занижена.
+                Runbook: docs/jev-shadow-ops-runbook.md
+                Откат: удалить JEV_GATE_SHADOW и JEV_ENABLED из реестра сервиса ключами.
+      - eval_time: 40m
+        alertname: JevShadowDropped
+        exp_alerts: []
