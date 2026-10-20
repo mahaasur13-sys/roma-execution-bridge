@@ -210,3 +210,34 @@ jobs:
           bandit -r billing/ routers/ auth/ monitoring/ security/ main.py db_adapter.py -ll -q
       - name: bandit — repo-wide (high only)
         run: bandit -r . -x ./.venv,./node_modules,./tests,./.git -lll -q
+
+  promtool-rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: Detect monitoring changes
+        id: filter
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
+        with:
+          filters: |
+            monitoring:
+              - 'deploy/monitoring/**'
+      - name: Download Prometheus v2.54.1 (sha256-pinned)
+        if: steps.filter.outputs.monitoring == 'true'
+        run: |
+          curl -fsSL -o /tmp/prometheus.tar.gz \
+            https://github.com/prometheus/prometheus/releases/download/v2.54.1/prometheus-2.54.1.linux-amd64.tar.gz
+          echo "31715ef65e8a898d0f97c8c08c03b6b9afe485ac84e1698bcfec90fc6e62924f  /tmp/prometheus.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/prometheus.tar.gz -C /tmp --strip-components=1
+          sudo install -m 0755 /tmp/promtool /usr/local/bin/promtool
+      - name: promtool check rules
+        if: steps.filter.outputs.monitoring == 'true'
+        run: promtool check rules deploy/monitoring/alert-rules-roma.yml
+      - name: promtool test rules
+        if: steps.filter.outputs.monitoring == 'true'
+        run: |
+          cd deploy/monitoring/tests
+          promtool test rules *.test.yml
