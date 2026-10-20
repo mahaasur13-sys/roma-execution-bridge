@@ -2,7 +2,11 @@ rule_files:
   - ../alert-rules-roma.yml
 evaluation_interval: 1m
 tests:
-  # (a) only disabled fallbacks -> FallbackHigh must NOT fire
+  # (a) all traffic disabled. Producer semantics (monitoring/metrics.py:217-222,
+  # one call per observation from cost/jev_shadow.py:_record_fallback): one fallback
+  # is recorded with exactly one reason, so observations{outcome="fallback"} ==
+  # fallback{reason="disabled"} and jev_error is necessarily 0. The disabled series
+  # cancels out of the ratio -> FallbackHigh must NOT fire, early or late.
   - name: a_disabled_only_no_fire
     interval: 1m
     input_series:
@@ -11,6 +15,9 @@ tests:
       - series: 'roma_jev_shadow_fallback_total{reason="disabled"}'
         values: '0+5x40'
     alert_rule_test:
+      - eval_time: 5m
+        alertname: JevShadowFallbackHigh
+        exp_alerts: []
       - eval_time: 35m
         alertname: JevShadowFallbackHigh
         exp_alerts: []
@@ -56,6 +63,11 @@ tests:
       - series: 'roma_jev_shadow_fallback_total{reason="disabled"}'
         values: '0+10x40'
     alert_rule_test:
+      # 30% is already above the threshold at 10m, but `for: 15m` is not satisfied
+      # yet -> detects removal of the `for` clause.
+      - eval_time: 10m
+        alertname: JevShadowFallbackHigh
+        exp_alerts: []
       - eval_time: 35m
         alertname: JevShadowFallbackHigh
         exp_alerts:
@@ -112,6 +124,38 @@ tests:
                 Runbook: docs/jev-shadow-ops-runbook.md
                 Откат: удалить JEV_GATE_SHADOW и JEV_ENABLED из реестра сервиса ключами.
       - eval_time: 35m
+        alertname: JevShadowDropped
+        exp_alerts: []
+
+  # (d2) dropped series steady at 0 for 20m and only then growing -> covers the
+  # increase(...[15m]) > 0 branch, which the "new series" cases never reach.
+  - name: d2_dropped_increase_after_15m
+    interval: 1m
+    input_series:
+      - series: 'roma_jev_shadow_dropped_total'
+        values: '0+0x20 1+0x20'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: JevShadowDropped
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: JevShadowDropped
+        exp_alerts: []
+      - eval_time: 21m
+        alertname: JevShadowDropped
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              category: jev-shadow
+            exp_annotations:
+              summary: "Jev R1 shadow: наблюдения отброшены (dropped)"
+              description: |
+                Очередь bounded-обсервера переполнена: хотя бы одно наблюдение отброшено
+                за 15m либо серия впервые появилась с ненулевым значением.
+                Данные shadow неполные, agreement-метрика занижена.
+                Runbook: docs/jev-shadow-ops-runbook.md
+                Откат: удалить JEV_GATE_SHADOW и JEV_ENABLED из реестра сервиса ключами.
+      - eval_time: 36m
         alertname: JevShadowDropped
         exp_alerts: []
 
