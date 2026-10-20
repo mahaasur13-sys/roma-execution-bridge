@@ -102,31 +102,50 @@ groups:
     interval: 30s
     rules:
       - alert: JevShadowFallbackHigh
+        # Denominator excludes disabled too: _record_fallback increments
+        # observations_total for disabled as well. A - empty == empty in PromQL,
+        # hence the "or" fallback to the raw observations rate.
         expr: |
-          sum(rate(roma_jev_shadow_fallback_total{reason!="disabled"}[30m]))
-          /
-          clamp_min(sum(rate(roma_jev_shadow_observations_total[30m])), 1e-9) > 0.2
+          (
+            sum(rate(roma_jev_shadow_fallback_total{reason!="disabled"}[30m]))
+            /
+            clamp_min(
+              sum(rate(roma_jev_shadow_observations_total[30m]))
+              - sum(rate(roma_jev_shadow_fallback_total{reason="disabled"}[30m]))
+              or sum(rate(roma_jev_shadow_observations_total[30m])),
+              1e-9
+            )
+          ) > 0.2
           and
-          sum(rate(roma_jev_shadow_observations_total[30m])) > 0
+          (
+            sum(rate(roma_jev_shadow_observations_total[30m]))
+            - (sum(rate(roma_jev_shadow_fallback_total{reason="disabled"}[30m])) or vector(0))
+          ) > 0
         for: 15m
         labels: {severity: warning, category: jev-shadow}
         annotations:
           summary: "Jev R1 shadow: fallback выше 20% наблюдений ({{ $value | humanizePercentage }})"
           description: |
             Доля fallback-исходов среди shadow-наблюдений R1 выше 20% за 30m
-            (reason="disabled" исключён). Shadow не меняет вердикт, но деградация
-            Jev скрывает реальные расхождения классификатора.
+            (reason="disabled" исключён из числителя и знаменателя). Shadow не
+            меняет вердикт, но деградация Jev скрывает реальные расхождения
+            классификатора.
             Runbook: docs/jev-shadow-ops-runbook.md
             Откат: удалить JEV_GATE_SHADOW и JEV_ENABLED из реестра сервиса ключами.
 
       - alert: JevShadowDropped
-        expr: increase(roma_jev_shadow_dropped_total[15m]) > 0
+        # The dropped series is created only on the first .inc(); increase() alone
+        # misses that first event, so also fire when the series is new and non-zero.
+        expr: |
+          increase(roma_jev_shadow_dropped_total[15m]) > 0
+          or (roma_jev_shadow_dropped_total > 0 unless roma_jev_shadow_dropped_total offset 15m)
         for: 0m
         labels: {severity: warning, category: jev-shadow}
         annotations:
           summary: "Jev R1 shadow: наблюдения отброшены (dropped)"
           description: |
             Очередь bounded-обсервера переполнена: хотя бы одно наблюдение отброшено
-            за 15m. Данные shadow неполные, agreement-метрика занижена.
+            за 15m либо серия впервые появилась с ненулевым значением.
+            Данные shadow неполные, agreement-метрика занижена.
             Runbook: docs/jev-shadow-ops-runbook.md
             Откат: удалить JEV_GATE_SHADOW и JEV_ENABLED из реестра сервиса ключами.
