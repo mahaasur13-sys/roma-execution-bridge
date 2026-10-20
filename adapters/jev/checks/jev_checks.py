@@ -773,6 +773,7 @@ def test_response_with_dated_snapshot_model_is_accepted() -> None:
         "typesafe/jev-1.14-20260917",   # другая версия
         "other/jev-1.13-20260917",      # чужой неймспейс
         "",                             # пусто
+        "typesafe/jev-1.13-٢٠٢٦٠٩١٧",  # восточно-арабские цифры (не ASCII)
     ],
 )
 def test_response_with_bad_dated_model_is_rejected(bad_model: str) -> None:

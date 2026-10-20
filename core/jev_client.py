@@ -172,7 +172,7 @@ def check_response_model(payload: Any) -> None:
     reported = payload.get("model")
     if reported is None or str(reported) == PINNED_JEV_MODEL:
         return
-    if re.fullmatch(rf"{re.escape(PINNED_JEV_MODEL)}-\d{{8}}", str(reported)):
+    if re.fullmatch(rf"{re.escape(PINNED_JEV_MODEL)}-[0-9]{{8}}", str(reported)):
         return
     raise JevError(f"ответ Jev от незакреплённой модели: {reported!r}", reason="model_pin_response")
 
