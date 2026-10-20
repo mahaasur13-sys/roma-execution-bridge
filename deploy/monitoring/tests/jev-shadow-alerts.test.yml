@@ -1,0 +1,127 @@
+rule_files:
+  - ../alert-rules-roma.yml
+evaluation_interval: 1m
+tests:
+  # (a) only disabled fallbacks -> FallbackHigh must NOT fire
+  - name: a_disabled_only_no_fire
+    interval: 1m
+    input_series:
+      - series: 'roma_jev_shadow_observations_total{outcome="fallback"}'
+        values: '0+5x40'
+      - series: 'roma_jev_shadow_fallback_total{reason="disabled"}'
+        values: '0+5x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: JevShadowFallbackHigh
+        exp_alerts: []
+
+  # (a2) 30% jev_error and the disabled series is ABSENT -> fires
+  # (exercises the "or" fallback: obs - empty == empty in PromQL)
+  - name: a2_no_disabled_series_fires
+    interval: 1m
+    input_series:
+      - series: 'roma_jev_shadow_observations_total{outcome="ok"}'
+        values: '0+7x40'
+      - series: 'roma_jev_shadow_observations_total{outcome="fallback"}'
+        values: '0+3x40'
+      - series: 'roma_jev_shadow_fallback_total{reason="jev_error"}'
+        values: '0+3x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: JevShadowFallbackHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              category: jev-shadow
+            exp_annotations:
+              summary: "Jev R1 shadow: fallback выше 20% наблюдений (30%)"
+              description: |
+                Доля fallback-исходов среди shadow-наблюдений R1 выше 20% за 30m
+                (reason="disabled" исключён из числителя и знаменателя). Shadow не
+                меняет вердикт, но деградация Jev скрывает реальные расхождения
+                классификатора.
+                Runbook: docs/jev-shadow-ops-runbook.md
+                Откат: удалить JEV_GATE_SHADOW и JEV_ENABLED из реестра сервиса ключами.
+
+  # (b) 30% jev_error among non-disabled, 50% disabled -> fires
+  - name: b_30pct_fires
+    interval: 1m
+    input_series:
+      - series: 'roma_jev_shadow_observations_total{outcome="ok"}'
+        values: '0+7x40'
+      - series: 'roma_jev_shadow_observations_total{outcome="fallback"}'
+        values: '0+13x40'
+      - series: 'roma_jev_shadow_fallback_total{reason="jev_error"}'
+        values: '0+3x40'
+      - series: 'roma_jev_shadow_fallback_total{reason="disabled"}'
+        values: '0+10x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: JevShadowFallbackHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              category: jev-shadow
+            exp_annotations:
+              summary: "Jev R1 shadow: fallback выше 20% наблюдений (30%)"
+              description: |
+                Доля fallback-исходов среди shadow-наблюдений R1 выше 20% за 30m
+                (reason="disabled" исключён из числителя и знаменателя). Shadow не
+                меняет вердикт, но деградация Jev скрывает реальные расхождения
+                классификатора.
+                Runbook: docs/jev-shadow-ops-runbook.md
+                Откат: удалить JEV_GATE_SHADOW и JEV_ENABLED из реестра сервиса ключами.
+
+  # (c) 10% jev_error among non-disabled -> must NOT fire
+  - name: c_10pct_no_fire
+    interval: 1m
+    input_series:
+      - series: 'roma_jev_shadow_observations_total{outcome="ok"}'
+        values: '0+9x40'
+      - series: 'roma_jev_shadow_observations_total{outcome="fallback"}'
+        values: '0+11x40'
+      - series: 'roma_jev_shadow_fallback_total{reason="jev_error"}'
+        values: '0+1x40'
+      - series: 'roma_jev_shadow_fallback_total{reason="disabled"}'
+        values: '0+10x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: JevShadowFallbackHigh
+        exp_alerts: []
+
+  # (d) dropped series created with value 1 -> fires immediately;
+  # the same series steady for >15m -> no false positive
+  - name: d_first_dropped_fires
+    interval: 1m
+    input_series:
+      - series: 'roma_jev_shadow_dropped_total'
+        values: '1+0x40'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: JevShadowDropped
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              category: jev-shadow
+            exp_annotations:
+              summary: "Jev R1 shadow: наблюдения отброшены (dropped)"
+              description: |
+                Очередь bounded-обсервера переполнена: хотя бы одно наблюдение отброшено
+                за 15m либо серия впервые появилась с ненулевым значением.
+                Данные shadow неполные, agreement-метрика занижена.
+                Runbook: docs/jev-shadow-ops-runbook.md
+                Откат: удалить JEV_GATE_SHADOW и JEV_ENABLED из реестра сервиса ключами.
+      - eval_time: 35m
+        alertname: JevShadowDropped
+        exp_alerts: []
+
+  # (e) dropped constant 0 -> must NOT fire
+  - name: e_zero_dropped_no_fire
+    interval: 1m
+    input_series:
+      - series: 'roma_jev_shadow_dropped_total'
+        values: '0+0x40'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: JevShadowDropped
+        exp_alerts: []
