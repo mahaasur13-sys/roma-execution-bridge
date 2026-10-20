@@ -107,19 +107,20 @@ groups:
         # hence the "or" fallback to the raw observations rate.
         expr: |
           (
-            sum(rate(roma_jev_shadow_fallback_total{reason!="disabled"}[30m]))
+            sum by (point) (rate(roma_jev_shadow_fallback_total{point="R1", reason!="disabled"}[30m]))
             /
             clamp_min(
-              sum(rate(roma_jev_shadow_observations_total[30m]))
-              - sum(rate(roma_jev_shadow_fallback_total{reason="disabled"}[30m]))
-              or sum(rate(roma_jev_shadow_observations_total[30m])),
+              sum by (point) (rate(roma_jev_shadow_observations_total{point="R1"}[30m]))
+              - sum by (point) (rate(roma_jev_shadow_fallback_total{point="R1", reason="disabled"}[30m]))
+              or sum by (point) (rate(roma_jev_shadow_observations_total{point="R1"}[30m])),
               1e-9
             )
           ) > 0.2
           and
           (
-            sum(rate(roma_jev_shadow_observations_total[30m]))
-            - (sum(rate(roma_jev_shadow_fallback_total{reason="disabled"}[30m])) or vector(0))
+            sum by (point) (rate(roma_jev_shadow_observations_total{point="R1"}[30m]))
+            - sum by (point) (rate(roma_jev_shadow_fallback_total{point="R1", reason="disabled"}[30m]))
+            or sum by (point) (rate(roma_jev_shadow_observations_total{point="R1"}[30m]))
           ) > 0
         for: 15m
         labels: {severity: warning, category: jev-shadow}
@@ -134,11 +135,18 @@ groups:
             Откат: удалить JEV_GATE_SHADOW и JEV_ENABLED из реестра сервиса ключами.
 
       - alert: JevShadowDropped
-        # The dropped series is created only on the first .inc(); increase() alone
-        # misses that first event, so also fire when the series is new and non-zero.
+        # increase() is reset-safe (5->0->1 still yields increase>0). The right branch
+        # applies `unless offset` PER-SERIES before sum, so a brand-new instance's
+        # first drop fires even when other instances already have 15m of history.
         expr: |
-          increase(roma_jev_shadow_dropped_total[15m]) > 0
-          or (roma_jev_shadow_dropped_total > 0 unless roma_jev_shadow_dropped_total offset 15m)
+          (
+            sum by (point) (increase(roma_jev_shadow_dropped_total{point="R1"}[15m])) > 0
+            or
+            (sum by (point) (
+              roma_jev_shadow_dropped_total{point="R1"} > 0
+              unless roma_jev_shadow_dropped_total{point="R1"} offset 15m
+            ) > 0)
+          )
         for: 0m
         labels: {severity: warning, category: jev-shadow}
         annotations:
