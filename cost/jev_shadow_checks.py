@@ -307,7 +307,9 @@ def test_state_capture_failure_increments_fallback(monkeypatch):
 
 
 def test_ok_record_carries_schema_fields():
-    shadow.observe_once({"tenant_ref": "t_x"}, "allowed", client=_FakeClient(payload=_choice_payload()))
+    payload = _choice_payload()
+    payload["model"] = "typesafe/jev-1.13-20260917"
+    shadow.observe_once({"tenant_ref": "t_x"}, "allowed", client=_FakeClient(payload=payload))
     rec = _records()[0]
     assert rec["point"] == "R1"
     assert rec["schema"] == 1
@@ -317,8 +319,27 @@ def test_ok_record_carries_schema_fields():
     # старые поля не удалены
     assert rec["choice"] == "anomaly"
     assert "verdict" in rec and "observed_at" in rec and "prob_anomaly" in rec
-    # фактический id модели (в т.ч. датированный снапшот) логируется в записи
-    assert rec["model"] == "typesafe/jev-1.13"
+    # фактический id модели (датированный снапшот) логируется как строка
+    assert rec["model"] == "typesafe/jev-1.13-20260917"
+
+
+def test_ok_record_without_model_writes_unknown():
+    payload = _choice_payload()
+    payload.pop("model", None)
+    shadow.observe_once({"tenant_ref": "t_x"}, "allowed", client=_FakeClient(payload=payload))
+    rec = _records()[0]
+    assert rec["outcome"] == "ok"
+    assert rec["model"] == "unknown"
+
+
+def test_ok_record_with_nonstring_model_writes_str():
+    # guard (check_response_model) отвергает нестроковый model в проде; здесь
+    # _FakeClient обходит guard и показывает, что запись всё равно строковая.
+    payload = _choice_payload()
+    payload["model"] = 123
+    shadow.observe_once({"tenant_ref": "t_x"}, "allowed", client=_FakeClient(payload=payload))
+    rec = _records()[0]
+    assert rec["model"] == "123"
 
 
 def test_fallback_record_carries_schema_fields():
