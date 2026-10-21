@@ -465,10 +465,44 @@ from models.app import (
 from contextlib import asynccontextmanager
 
 
-async def _reconciliation_loop():
-    import glob
+ROMABACKUP_STATE_DEFAULT = "/root/.sealed/pgdump/state.json"
+
+
+def _backup_last_success_ts() -> float:
+    """Last successful pg_dump time from the backup service state file."""
+    import json
     import os
 
+    path = os.environ.get("ROMA_BACKUP_STATE_FILE", ROMABACKUP_STATE_DEFAULT)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            ts = json.load(fh).get("last_success_ts")
+    except FileNotFoundError:
+        logger.warning("backup state file missing: %s", path)
+        return 0.0
+    except (OSError, ValueError) as e:
+        logger.warning("backup state unreadable path=%s: %s", path, e)
+        return 0.0
+    except AttributeError:
+        logger.warning("backup state is not an object: %s", path)
+        return 0.0
+    if not ts:
+        logger.warning("backup state without last_success_ts: %s", path)
+        return 0.0
+    try:
+        return float(ts)
+    except (TypeError, ValueError):
+        logger.warning("backup state last_success_ts not numeric: %r", ts)
+        return 0.0
+
+
+def _set_backup_metric() -> None:
+    from monitoring.metrics import roma_backup_last_success_timestamp
+
+    roma_backup_last_success_timestamp.set(_backup_last_success_ts())
+
+
+async def _reconciliation_loop():
     while True:
         try:
             from billing.pg_ledger import PGBillingLedger
@@ -477,7 +511,6 @@ async def _reconciliation_loop():
                 roma_api_balance,
                 roma_ledger_reconciliation_diff,
                 roma_ledger_entry_count,
-                roma_backup_last_success_timestamp,
             )
 
             ledger = PGBillingLedger()
@@ -497,13 +530,7 @@ async def _reconciliation_loop():
                     roma_ledger_entry_count.labels(tenant_id=tenant_id).set(count)
                 except Exception as e:
                     logger.warning("reconciliation failed tenant=%s: %s", tenant_id, e)
-            try:
-                files = glob.glob("/home/felix/backups/roma/roma_*.sql.gz")
-                if files:
-                    latest = max(files, key=os.path.getmtime)
-                    roma_backup_last_success_timestamp.set(os.path.getmtime(latest))
-            except Exception as e:
-                logger.warning("backup scan failed: %s", e)
+            _set_backup_metric()
         except Exception as e:
             logger.warning("reconciliation loop error: %s", e)
         await asyncio.sleep(900)
