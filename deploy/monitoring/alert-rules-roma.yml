@@ -16,17 +16,23 @@ groups:
           description: "5xx errors spiking. Check /metrics and Loki logs for /dev/shm/roma-execution-bridge.log"
 
       - alert: ROMABillingWebhookDown
-        expr: |
-          (sum(increase(roma_cloudpayments_failure_total[10m])) > 0)
-          or (absent(roma_cloudpayments_webhooks_total))
+        expr: sum(increase(roma_cloudpayments_failure_total[10m])) > 0
         for: 3m
         labels: {severity: critical, category: billing}
         annotations:
           summary: "CloudPayments webhook failures detected"
           description: "investigate immediately — tenants cannot complete payments"
 
+      - alert: ROMABillingMetricsAbsent
+        expr: absent(roma_cloudpayments_failure_total)
+        for: 10m
+        labels: {severity: critical, category: billing}
+        annotations:
+          summary: "CloudPayments metrics missing — billing is blind"
+          description: "roma_cloudpayments_failure_total stopped being exported, so webhook failures are unobservable and ROMABillingWebhookDown cannot fire. Check billing metrics wiring and /metrics."
+
       - alert: ROMANoMetrics
-        expr: roma_requests_total or absent(roma_requests_total)
+        expr: absent(roma_requests_total)
         for: 2m
         labels: {severity: critical, category: monitoring}
         annotations:
