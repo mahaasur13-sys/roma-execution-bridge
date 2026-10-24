@@ -163,3 +163,21 @@ groups:
             Данные shadow неполные, agreement-метрика занижена.
             Runbook: docs/jev-shadow-ops-runbook.md
             Откат: удалить JEV_GATE_SHADOW и JEV_ENABLED из реестра сервиса ключами.
+
+  # pg_restore drill — scripts/pg_restore_drill.sh, state: /root/.sealed/pgdump/drill_state.json
+  # Отдельная группа (не входит в drift-check AstroFin: roma-critical/warning/billing),
+  # потому что drill-метрика экспортируется только этим репозиторием.
+  # Расписание не включено: запуск раз в неделю — отдельным GO.
+  - name: roma-drill
+    rules:
+      - alert: ROMADRDrillStale
+        expr: time() - roma_dr_drill_last_success_timestamp > 8 * 86400
+        for: 1h
+        labels: {severity: critical, category: backup}
+        annotations:
+          summary: "pg_restore drill не проходил 8 дней"
+          description: |
+            scripts/pg_restore_drill.sh не завершался успехом более 8 суток, либо
+            метрика равна 0 (drill_state.json отсутствует/нечитаем). Дрилл — единственное
+            доказательство того, что бэкапы действительно восстанавливаются.
+            Проверить: cat /root/.sealed/pgdump/drill_state.json, /dev/shm/astrofin-pg-restore-drill.log.

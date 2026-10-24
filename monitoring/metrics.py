@@ -139,6 +139,14 @@ roma_tenant_lookup_total = Counter(
 roma_backup_last_success_timestamp = Gauge(
     "roma_backup_last_success_timestamp", "Last successful backup epoch seconds", []
 )
+roma_dr_drill_last_success_timestamp = Gauge(
+    "roma_dr_drill_last_success_timestamp",
+    "Last successful pg_restore drill epoch seconds",
+    [],
+)
+roma_dr_drill_rto_seconds = Gauge(
+    "roma_dr_drill_rto_seconds", "Last pg_restore drill recovery time in seconds", []
+)
 
 # алиасы для нового префикса (совместимость)
 roma_spend_cap_balance_usd = spend_cap_balance
