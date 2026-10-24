@@ -1982,8 +1982,11 @@ def update_execution_job(
 def sweep_orphan_running_jobs(timeout_seconds: int) -> int:
     """Пометить осиротевшие running-джобы как 'timeout'. Возвращает число строк.
 
-    Осиротевший = status='running' и started_at старше timeout_seconds: воркер,
-    запустивший задание, перезапустился/умер, и финализировать его больше некому.
+    Осиротевший = status='running' и COALESCE(started_at, updated_at) старше
+    timeout_seconds: воркер, запустивший задание, перезапустился/умер, и
+    финализировать его больше некому. updated_at — фолбэк для строк, у которых
+    started_at никогда не проставлялся (задание взято в работу старой версией
+    воркера); без него такие строки висели в running вечно.
     Биллинг здесь НЕ трогается: finalize для 'timeout' возвращает 'skip'
     (billing/finalize.py), а резервов/холдов в леджере нет по схеме
     (ledger_entries.entry_type ∈ {CREDIT, DEBIT}) — списывать и возвращать нечего.
@@ -2002,8 +2005,8 @@ def sweep_orphan_running_jobs(timeout_seconds: int) -> int:
                            error = 'orphaned: worker restart',
                            completed_at = now()
                      WHERE status = 'running'
-                       AND started_at IS NOT NULL
-                       AND started_at < now() - (%s * interval '1 second')
+                       AND COALESCE(started_at, updated_at)
+                           < now() - (%s * interval '1 second')
                     """,
                     (int(timeout_seconds),),
                 )
@@ -2024,8 +2027,7 @@ def sweep_orphan_running_jobs(timeout_seconds: int) -> int:
                        error = 'orphaned: worker restart',
                        completed_at = datetime('now')
                  WHERE status = 'running'
-                   AND started_at IS NOT NULL
-                   AND datetime(started_at) < datetime('now', ?)
+                   AND datetime(COALESCE(started_at, updated_at)) < datetime('now', ?)
                 """,
                 (f"-{int(timeout_seconds)} seconds",),
             )

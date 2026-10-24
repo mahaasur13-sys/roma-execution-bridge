@@ -37,12 +37,18 @@ def sqlite_db(tmp_path, monkeypatch):
     return _conn
 
 
-def _insert(conn_factory, job_id: str, status: str, started_at: str | None) -> None:
+def _insert(
+    conn_factory,
+    job_id: str,
+    status: str,
+    started_at: str | None,
+    updated_at: str | None = None,
+) -> None:
     with conn_factory() as c:
         c.execute(
-            "INSERT INTO execution_jobs (id, tenant_id, status, started_at)"
-            " VALUES (?, ?, ?, ?)",
-            (job_id, "tenant-sweeper", status, started_at),
+            "INSERT INTO execution_jobs (id, tenant_id, status, started_at, updated_at)"
+            " VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')))",
+            (job_id, "tenant-sweeper", status, started_at, updated_at),
         )
         c.commit()
 
@@ -92,6 +98,25 @@ def test_queued_completed_and_null_started_untouched(sqlite_db):
     assert _row(sqlite_db, "queued-old")["status"] == "queued"
     assert _row(sqlite_db, "completed-old")["status"] == "completed"
     assert _row(sqlite_db, "running-no-start")["status"] == "running"
+
+
+def test_null_started_old_updated_at_becomes_timeout(sqlite_db):
+    """started_at не проставлен, но строка висит с давних пор — это осиротевший джоб."""
+    _insert(sqlite_db, "running-null-start-old-updated", "running", None, _ago(3))
+
+    assert db.sweep_orphan_running_jobs(1200) == 1
+    row = _row(sqlite_db, "running-null-start-old-updated")
+    assert row["status"] == "timeout"
+    assert row["error"] == "orphaned: worker restart"
+    assert row["cost_usd"] == 0.0
+
+
+def test_null_started_fresh_updated_at_untouched(sqlite_db):
+    """started_at не проставлен, но работа идёт прямо сейчас — не трогаем."""
+    _insert(sqlite_db, "running-null-start-fresh-updated", "running", None, _ago(0.1))
+
+    assert db.sweep_orphan_running_jobs(1200) == 0
+    assert _row(sqlite_db, "running-null-start-fresh-updated")["status"] == "running"
 
 
 def test_sweep_is_idempotent(sqlite_db):
