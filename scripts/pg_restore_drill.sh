@@ -40,6 +40,10 @@ if ! [[ "$DRILL_DB" =~ ^roma_drill_[A-Za-z0-9_]+$ ]]; then
   log "REFUSING: bad DRILL_DB (want ^roma_drill_[A-Za-z0-9_]+$, got '$DRILL_DB')"
   exit 2
 fi
+if [ "${#DRILL_DB}" -gt 63 ]; then
+  log "REFUSING: drill db name longer than 63 bytes (got ${#DRILL_DB})"
+  exit 2
+fi
 if [ "$DRILL_DB" = "$LIVE_DB" ]; then
   log "REFUSING: drill db equals live db"
   exit 2

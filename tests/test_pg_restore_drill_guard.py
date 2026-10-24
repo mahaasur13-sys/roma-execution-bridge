@@ -16,6 +16,7 @@ REJECTED = [
     "roma_drill_x y",
     "roma_drill_x#",
     "roma_drill_x$(id)",
+    "roma_drill_" + "x" * 70,
 ]
 
 
