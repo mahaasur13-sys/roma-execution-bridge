@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""ROMA Runtime Estimator — Plugin-aware runtime estimation based on historical data."""
+"""ROMA Runtime Estimator — runtime estimation based on historical data."""
 
-import sys
+import logging
 
-sys.path.insert(0, '/home/workspace/roma-execution-bridge')
+logger = logging.getLogger("roma.cost.estimator")
+
+HISTORY_LIMIT = 1000
 
 
 class RuntimeEstimator:
@@ -39,13 +41,23 @@ class RuntimeEstimator:
         }
         self.historical_events = self._load_historical_events()
 
-    def _load_historical_events(self) -> list:
-        try:
-            from durability.event_store import EventStore
+    def _load_historical_events(self, limit: int = HISTORY_LIMIT) -> list:
+        """Последние `limit` завершённых заданий: [{'duration_seconds': float}].
 
-            store = EventStore()
-            return store.get_all_events()
-        except Exception:
+        Источник — `execution_jobs` (status='completed'), единственное место, где
+        лежат реальные длительности прогонов. Колонки plugin_type в таблице нет,
+        поэтому история НЕ разбита по типам: `_hist_avg` даёт одно общее среднее,
+        и `estimate` применяет его к любому запрошенному плагину.
+
+        Сбой чтения не глушится молча: warning в лог и пустая история
+        (оценка идёт без исторической поправки).
+        """
+        try:
+            import db_adapter as db
+
+            return db.list_completed_execution_jobs(limit)
+        except Exception as exc:
+            logger.warning("runtime history unavailable: %s", exc)
             return []
 
     def estimate(
@@ -81,7 +93,7 @@ class RuntimeEstimator:
 
         # Historical adjustment
         if self.historical_events:
-            avg = self._hist_avg(plugin_type)
+            avg = self._hist_avg()
             if avg:
                 estimated_seconds = int(estimated_seconds * 0.7 + avg * 0.3)
 
@@ -102,13 +114,19 @@ class RuntimeEstimator:
             },
         }
 
-    def _hist_avg(self, plugin_type: str) -> float:
-        relevant = [
-            e for e in self.historical_events if e.get("type", "").endswith(plugin_type)
+    def _hist_avg(self) -> float:
+        """Средняя длительность по ВСЕМ завершённым заданиям (без разбивки по плагинам).
+
+        Фильтр по типу плагина невозможен: в `execution_jobs` нет plugin_type.
+        """
+        durations = [
+            e["duration_seconds"]
+            for e in self.historical_events
+            if e.get("duration_seconds", 0) > 0
         ]
-        if not relevant:
+        if not durations:
             return 0.0
-        return sum(e.get("duration", 0) for e in relevant) / len(relevant)
+        return sum(durations) / len(durations)
 
 
 if __name__ == "__main__":
