@@ -11,6 +11,7 @@ import logging
 import os
 import threading
 import concurrent.futures
+from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 try:
@@ -28,6 +29,8 @@ _USE_PG: bool | None = None
 _PG_POOL = None
 _PG_POOL_LOCK = threading.Lock()
 _PG_POOL_CONFIG = {"minconn": 2, "maxconn": 20, "connect_timeout": 10}
+# Module-level so tests can redirect the sqlite fallback away from ./data/roma.db.
+DB_PATH = Path(__file__).parent / "data" / "roma.db"
 
 
 def _redact_dsn(dsn: str) -> str:
@@ -81,9 +84,7 @@ def _run_async(coro):
 
 def _sqlite_conn():
     import sqlite3
-    from pathlib import Path
 
-    DB_PATH = Path(__file__).parent / "data" / "roma.db"
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(str(DB_PATH))
     c.row_factory = sqlite3.Row

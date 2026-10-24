@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import types
 from pathlib import Path
@@ -142,6 +143,31 @@ def _sweep_and_report() -> None:
         pytest.exit(message, returncode=_isolation.REFUSED_EXIT_CODE)
 
 
+_SESSION_SQLITE_DIR: Path | None = None
+
+
+def _redirect_sqlite_fallback() -> None:
+    """Увести sqlite-fallback (`db_adapter.DB_PATH`, `db.DB_PATH`) из рабочей копии.
+
+    По умолчанию оба модуля открывают `<repo>/data/roma.db` — тот же файл, что
+    читает сервис. Импорт `main.py` и тесты без фикстуры писали туда строки
+    `test-*` ещё на этапе коллекции, то есть до любой фикстуры; поэтому редирект
+    делается здесь (pytest_sessionstart — раньше collection), а не в фикстуре.
+    """
+    global _SESSION_SQLITE_DIR
+    import tempfile
+
+    import db
+    import db_adapter
+
+    _SESSION_SQLITE_DIR = Path(tempfile.mkdtemp(prefix="roma-test-sqlite-"))
+    # Один файл на оба модуля: раньше они писали в общий ./data/roma.db и
+    # делили схему (db.py — tenants/подписки, db_adapter — execution_jobs).
+    shared = _SESSION_SQLITE_DIR / "roma.db"
+    db_adapter.DB_PATH = shared
+    db.DB_PATH = shared
+
+
 def pytest_sessionstart(session) -> None:
     """A1: (1) отказ на явный боевой DSN, (2) загрузка .env, (3) пин тестового DSN, (4) sweep."""
     _refuse_foreign_db_keys("до загрузки .env")
@@ -158,6 +184,7 @@ def pytest_sessionstart(session) -> None:
         print(f"[conftest] env_loader недоступен: {type(exc).__name__}: {exc}")
 
     _apply_test_isolation()
+    _redirect_sqlite_fallback()
     _sweep_and_report()
 
 
@@ -238,3 +265,30 @@ def pytest_sessionfinish(session, exitstatus) -> None:
         for v in violations:
             print(f"  - {v['nodeid']} :: {v['reason'][:160]}")
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+    # Уборка сессионного sqlite-каталога — последним, после ledger и skip-budget.
+    if _SESSION_SQLITE_DIR is not None and _SESSION_SQLITE_DIR.exists():
+        try:
+            shutil.rmtree(_SESSION_SQLITE_DIR)
+        except OSError as exc:
+            print(
+                f"[conftest] не удалось удалить {_SESSION_SQLITE_DIR}: {exc}",
+                file=sys.stderr,
+            )
+
+
+@pytest.fixture()
+def sqlite_tmp_db(monkeypatch, tmp_path):
+    """SQLite-ветка db_adapter с БД в tmp_path вместо ./data/roma.db.
+
+    Тесты, форсящие fallback (`PG_DSN` пуст, `_USE_PG=False`), без редиректа пути
+    писали в боевой `data/roma.db` рабочей копии: строки `test-*` оседали в файле,
+    который читает сервис. Путь отдаётся через module-level `db_adapter.DB_PATH`;
+    кеша соединений в модуле нет (`_sqlite_conn()` открывает новое на вызов).
+    """
+    import db_adapter as db
+
+    monkeypatch.delenv("PG_DSN", raising=False)
+    monkeypatch.setattr(db, "_USE_PG", False)
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "roma.db")
+    return db
