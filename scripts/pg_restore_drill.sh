@@ -26,25 +26,20 @@ SNAP_SQL="select (select count(*) from information_schema.tables where table_sch
                  (select count(*) from schema_migrations)"
 
 TMP=""
+DB_CREATED=0
 START=$(date +%s)
 DUMP_AGE=0
 REASON=""
 
 log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 
-# Guard: this script drops a database. Refuse anything that is not a drill DB.
-case "$DRILL_DB" in
-  roma_drill_*)
-    if [ "$DRILL_DB" = "roma_drill_" ]; then
-      log "REFUSING: drill db name is empty after prefix"
-      exit 2
-    fi
-    ;;
-  *)
-    log "REFUSING: drill db name must start with roma_drill_ (got '$DRILL_DB')"
-    exit 2
-    ;;
-esac
+# Guard: this script drops a database. Only a plain identifier after the
+# roma_drill_ prefix passes, so shell/SQL metacharacters can never reach
+# createdb, dropdb, pg_restore or psql.
+if ! [[ "$DRILL_DB" =~ ^roma_drill_[A-Za-z0-9_]+$ ]]; then
+  log "REFUSING: bad DRILL_DB (want ^roma_drill_[A-Za-z0-9_]+$, got '$DRILL_DB')"
+  exit 2
+fi
 if [ "$DRILL_DB" = "$LIVE_DB" ]; then
   log "REFUSING: drill db equals live db"
   exit 2
@@ -52,7 +47,7 @@ fi
 
 write_state() {
   python3 - "$STATE" "$1" "$2" "$3" "$4" <<'PY'
-import json, os, sys, time
+import json, os, sys, tempfile, time
 
 path, result, rto, age, reason = sys.argv[1:6]
 try:
@@ -69,34 +64,52 @@ state = {
     "dump_age_seconds": int(age),
     "reason": reason,
 }
-tmp = path + ".tmp"
-with open(tmp, "w") as fh:
-    json.dump(state, fh)
-    fh.flush()
-    os.fsync(fh.fileno())
-os.replace(tmp, path)
+fd, tmp = tempfile.mkstemp(
+    dir=os.path.dirname(path) or ".", prefix=".drill_state.", suffix=".tmp"
+)
+try:
+    with os.fdopen(fd, "w") as fh:
+        json.dump(state, fh)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+except BaseException:
+    os.unlink(tmp)
+    raise
 PY
-  chmod 600 "$STATE" 2>/dev/null || true
 }
 
 cleanup() {
+  local crc=0
   if [ -n "$TMP" ] && [ -d "$TMP" ]; then
-    rm -rf "$TMP"
+    rm -rf "$TMP" || crc=1
   fi
-  if su postgres -c "dropdb --if-exists $DRILL_DB" >/dev/null 2>&1; then
-    log "cleanup: $DRILL_DB dropped"
+  if [ "$DB_CREATED" = "1" ]; then
+    if runuser -u postgres -- dropdb --if-exists -- "$DRILL_DB" >/dev/null 2>&1; then
+      log "cleanup: $DRILL_DB dropped"
+    else
+      log "cleanup: $DRILL_DB not dropped — check manually"
+      crc=1
+    fi
   else
-    log "cleanup: $DRILL_DB not dropped — check manually"
+    log "cleanup: no db created, nothing to drop"
   fi
+  return "$crc"
 }
 
 finish() {
   rc=$?
-  cleanup
+  local cleanup_rc=0
+  cleanup || cleanup_rc=$?
   rto=$(( $(date +%s) - START ))
-  if [ "$rc" -eq 0 ]; then
+  if [ "$rc" -eq 0 ] && [ "$cleanup_rc" -eq 0 ]; then
     write_state ok "$rto" "$DUMP_AGE" ""
   else
+    if [ "$rc" -eq 0 ]; then
+      rc=$cleanup_rc
+      REASON="cleanup failed (rc=$cleanup_rc)"
+    fi
     write_state fail "$rto" "$DUMP_AGE" "${REASON:-exit $rc}"
   fi
   exit "$rc"
@@ -104,7 +117,7 @@ finish() {
 trap finish EXIT
 
 snapshot() {
-  printf '%s\n' "$SNAP_SQL" | su postgres -c "psql -At -F'|' -d $1"
+  printf '%s\n' "$SNAP_SQL" | runuser -u postgres -- psql -At -F'|' -d "$1"
 }
 
 ge() { python3 -c 'import sys; sys.exit(0 if float(sys.argv[2]) >= float(sys.argv[1]) else 1)' "$1" "$2"; }
@@ -162,12 +175,13 @@ if [ "$remote_sha" != "$local_sha" ]; then
 fi
 log "download ok sha256=$remote_sha size=$(stat -c %s "$TMP/dump")"
 
-if ! su postgres -c "createdb $DRILL_DB"; then
+if ! runuser -u postgres -- createdb -- "$DRILL_DB"; then
   REASON="createdb failed: $DRILL_DB"
   log "$REASON"
   exit 1
 fi
-if ! su postgres -c "pg_restore --no-owner --no-acl -d $DRILL_DB" < "$TMP/dump"; then
+DB_CREATED=1
+if ! runuser -u postgres -- pg_restore --no-owner --no-acl -d "$DRILL_DB" < "$TMP/dump"; then
   REASON="pg_restore failed: $DRILL_DB"
   log "$REASON"
   exit 1
@@ -197,7 +211,7 @@ if [ -z "$fail_reason" ]; then
 fi
 if [ -z "$fail_reason" ] && [ "$d_mig" != "$l_mig" ]; then
   if ! printf '%s\n' "select 1 from schema_migrations where filename = '$d_mig'" \
-      | su postgres -c "psql -At -d $LIVE_DB" | grep -qx 1; then
+      | runuser -u postgres -- psql -At -d "$LIVE_DB" | grep -qx 1; then
     fail_reason="migration $d_mig exists only in drill"
   fi
 fi

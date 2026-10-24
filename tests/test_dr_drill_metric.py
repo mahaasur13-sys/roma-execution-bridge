@@ -56,3 +56,13 @@ def test_bad_json_sets_zero(tmp_path, monkeypatch):
     main._set_dr_drill_metrics()
 
     assert _gauges() == (0.0, 0.0)
+
+
+def test_non_finite_fields_become_zero(tmp_path, monkeypatch):
+    state = tmp_path / "drill_state.json"
+    state.write_text(json.dumps({"last_success_ts": float("nan"), "rto_seconds": float("inf")}))
+    monkeypatch.setenv("ROMA_DR_DRILL_STATE_FILE", str(state))
+
+    main._set_dr_drill_metrics()
+
+    assert _gauges() == (0.0, 0.0)

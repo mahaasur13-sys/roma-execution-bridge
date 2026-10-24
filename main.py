@@ -500,6 +500,7 @@ DR_DRILL_STATE_DEFAULT = "/root/.sealed/pgdump/drill_state.json"
 def _dr_drill_state() -> tuple:
     """(last_success_ts, rto_seconds) of the last pg_restore drill; zeros when unknown."""
     import json
+    import math
     import os
 
     path = os.environ.get("ROMA_DR_DRILL_STATE_FILE", DR_DRILL_STATE_DEFAULT)
@@ -520,6 +521,9 @@ def _dr_drill_state() -> tuple:
         rto = float(state.get("rto_seconds") or 0)
     except (TypeError, ValueError):
         logger.warning("dr drill state has non-numeric fields: %s", path)
+        return 0.0, 0.0
+    if not (math.isfinite(ok_ts) and math.isfinite(rto)):
+        logger.warning("dr drill state has non-finite fields: %s", path)
         return 0.0, 0.0
     return ok_ts, rto
 
