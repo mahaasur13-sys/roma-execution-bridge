@@ -238,3 +238,20 @@ def pytest_sessionfinish(session, exitstatus) -> None:
         for v in violations:
             print(f"  - {v['nodeid']} :: {v['reason'][:160]}")
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+@pytest.fixture()
+def sqlite_tmp_db(monkeypatch, tmp_path):
+    """SQLite-ветка db_adapter с БД в tmp_path вместо ./data/roma.db.
+
+    Тесты, форсящие fallback (`PG_DSN` пуст, `_USE_PG=False`), без редиректа пути
+    писали в боевой `data/roma.db` рабочей копии: строки `test-*` оседали в файле,
+    который читает сервис. Путь отдаётся через module-level `db_adapter.DB_PATH`;
+    кеша соединений в модуле нет (`_sqlite_conn()` открывает новое на вызов).
+    """
+    import db_adapter as db
+
+    monkeypatch.delenv("PG_DSN", raising=False)
+    monkeypatch.setattr(db, "_USE_PG", False)
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "roma.db")
+    return db

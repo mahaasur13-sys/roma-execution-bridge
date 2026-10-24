@@ -22,11 +22,9 @@ import db_adapter as db  # noqa: E402
 
 
 @pytest.fixture()
-def sqlite_mode(monkeypatch):
-    """Форсируем SQLite-ветку: PG_DSN пуст, флаг PG сброшен."""
-    monkeypatch.delenv("PG_DSN", raising=False)
-    monkeypatch.setattr(db, "_USE_PG", False)
-    return db
+def sqlite_mode(sqlite_tmp_db):
+    """Форсируем SQLite-ветку: PG_DSN пуст, флаг PG сброшен, путь к БД — в tmp_path."""
+    return sqlite_tmp_db
 
 
 def _uniq(prefix: str) -> str:

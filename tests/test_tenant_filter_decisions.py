@@ -18,7 +18,6 @@ import os
 import sqlite3
 import sys
 import uuid
-from pathlib import Path
 
 import pytest
 
@@ -28,17 +27,15 @@ import db_adapter as db  # noqa: E402
 
 
 @pytest.fixture()
-def sqlite_mode(monkeypatch):
-    """Форсируем SQLite-ветку (PG_DSN пуст, флаг PG сброшен)."""
-    monkeypatch.delenv("PG_DSN", raising=False)
-    monkeypatch.setattr(db, "_USE_PG", False)
-    return db
+def sqlite_mode(sqlite_tmp_db):
+    """Форсируем SQLite-ветку (PG_DSN пуст, флаг PG сброшен), БД — в tmp_path."""
+    return sqlite_tmp_db
 
 
 @pytest.fixture()
 def decision_table(sqlite_mode):
     """decision_records в SQLite (bootstrap отсутствует — создаём явно, IF NOT EXISTS)."""
-    db_path = Path(db.__file__).parent / "data" / "roma.db"
+    db_path = db.DB_PATH
     conn = sqlite3.connect(str(db_path))
     try:
         conn.execute(
