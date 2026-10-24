@@ -142,6 +142,31 @@ def _sweep_and_report() -> None:
         pytest.exit(message, returncode=_isolation.REFUSED_EXIT_CODE)
 
 
+_SESSION_SQLITE_DIR: Path | None = None
+
+
+def _redirect_sqlite_fallback() -> None:
+    """Увести sqlite-fallback (`db_adapter.DB_PATH`, `db.DB_PATH`) из рабочей копии.
+
+    По умолчанию оба модуля открывают `<repo>/data/roma.db` — тот же файл, что
+    читает сервис. Импорт `main.py` и тесты без фикстуры писали туда строки
+    `test-*` ещё на этапе коллекции, то есть до любой фикстуры; поэтому редирект
+    делается здесь (pytest_sessionstart — раньше collection), а не в фикстуре.
+    """
+    global _SESSION_SQLITE_DIR
+    import tempfile
+
+    import db
+    import db_adapter
+
+    _SESSION_SQLITE_DIR = Path(tempfile.mkdtemp(prefix="roma-test-sqlite-"))
+    # Один файл на оба модуля: раньше они писали в общий ./data/roma.db и
+    # делили схему (db.py — tenants/подписки, db_adapter — execution_jobs).
+    shared = _SESSION_SQLITE_DIR / "roma.db"
+    db_adapter.DB_PATH = shared
+    db.DB_PATH = shared
+
+
 def pytest_sessionstart(session) -> None:
     """A1: (1) отказ на явный боевой DSN, (2) загрузка .env, (3) пин тестового DSN, (4) sweep."""
     _refuse_foreign_db_keys("до загрузки .env")
@@ -158,6 +183,7 @@ def pytest_sessionstart(session) -> None:
         print(f"[conftest] env_loader недоступен: {type(exc).__name__}: {exc}")
 
     _apply_test_isolation()
+    _redirect_sqlite_fallback()
     _sweep_and_report()
 
 
