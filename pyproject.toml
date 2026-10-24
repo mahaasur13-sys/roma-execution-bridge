@@ -105,7 +105,7 @@ markers = [
 # select добавил бы правила, которые CI не прогонял, а exclude спрятал бы целые каталоги
 # (web/, tools/, tests/test_*.py). Контрольная арифметика: 84 = E402×57 + F811×15 + F401×8
 # + E741×3 + F402×1 → 0.
-target-version = "py310"
+target-version = "py311"
 line-length = 120
 
 [tool.ruff.lint]
@@ -124,9 +124,9 @@ skip-string-normalization = true
 # G-BLACK-TARGET-WARNING (2026-09-22): без явного target-version black выводит
 # цель из окружающего интерпретатора и печатает предупреждение
 # «Python 3.12 cannot parse code formatted for Python 3.14 ... set --target-version».
-# Значение то же, что у ruff выше (py310); в pyproject black ждёт СПИСОК:
+# Значение то же, что у ruff выше (py311); в pyproject black ждёт СПИСОК:
 # исчезает, формат файлов не меняется (336 файлов unchanged на py310/py311/py312).
-target-version = ["py310"]
+target-version = ["py311"]
 
 [dependency-groups]
 dev = [
