@@ -79,7 +79,13 @@ def send_telegram(token: str, chat_id: str, text: str) -> tuple[bool, str]:
 
 
 def format_payload(payload: dict) -> str:
-    title = payload.get("title") or "Grafana alert"
+    # Alertmanager v4 posts an object; Grafana's legacy webhook posts a bare list.
+    if isinstance(payload, list):
+        payload = {"alerts": payload}
+    if not isinstance(payload, dict):
+        payload = {}
+    common = payload.get("commonLabels") or {}
+    title = payload.get("title") or common.get("alertname") or "Grafana alert"
     status = payload.get("status") or "?"
     lines = [f"[{status.upper()}] {title}"]
     for alert in (payload.get("alerts") or [])[:5]:
