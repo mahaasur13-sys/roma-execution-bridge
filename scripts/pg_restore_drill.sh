@@ -21,7 +21,9 @@ SNAP_SQL="select (select count(*) from information_schema.tables where table_sch
                  (select count(*) from ledger_entries),
                  (select coalesce(sum(amount),0)::text from ledger_entries),
                  (select coalesce((select filename from schema_migrations
-                                   order by applied_at desc, filename desc limit 1),''))"
+                                   order by nullif(substring(filename from '^[0-9]+'), '')::bigint desc
+                                                  nulls last, filename desc limit 1),'')),
+                 (select count(*) from schema_migrations)"
 
 TMP=""
 START=$(date +%s)
@@ -174,10 +176,10 @@ log "restore ok db=$DRILL_DB"
 
 live=$(snapshot "$LIVE_DB")
 drill=$(snapshot "$DRILL_DB")
-IFS='|' read -r l_tab l_jobs l_cnt l_sum l_mig <<< "$live"
-IFS='|' read -r d_tab d_jobs d_cnt d_sum d_mig <<< "$drill"
-log "live tables=$l_tab jobs=$l_jobs ledger=$l_cnt/$l_sum top=$l_mig"
-log "drill tables=$d_tab jobs=$d_jobs ledger=$d_cnt/$d_sum top=$d_mig"
+IFS='|' read -r l_tab l_jobs l_cnt l_sum l_mig l_mign <<< "$live"
+IFS='|' read -r d_tab d_jobs d_cnt d_sum d_mig d_mign <<< "$drill"
+log "live tables=$l_tab jobs=$l_jobs ledger=$l_cnt/$l_sum top=$l_mig migrations=$l_mign"
+log "drill tables=$d_tab jobs=$d_jobs ledger=$d_cnt/$d_sum top=$d_mig migrations=$d_mign"
 
 fail_reason=""
 ge "$d_tab" "$l_tab" || fail_reason="tables: drill $d_tab > live $l_tab"
@@ -189,6 +191,9 @@ if [ -z "$fail_reason" ]; then
 fi
 if [ -z "$fail_reason" ]; then
   ge "$d_sum" "$l_sum" || fail_reason="ledger_entries sum: drill $d_sum > live $l_sum"
+fi
+if [ -z "$fail_reason" ]; then
+  ge "$d_mign" "$l_mign" || fail_reason="schema_migrations: drill $d_mign > live $l_mign"
 fi
 if [ -z "$fail_reason" ] && [ "$d_mig" != "$l_mig" ]; then
   if ! printf '%s\n' "select 1 from schema_migrations where filename = '$d_mig'" \
