@@ -25,6 +25,7 @@ import db_adapter as db
 # A1 — shared singletons/helpers (re-exported so main.* names stay intact)
 from deps import (
     API_KEYS,
+    admin_keys,
     verify_api_key,
     alert_dispatcher,
     limiter,
@@ -338,10 +339,7 @@ def verify_api_key(x_api_key: str = Header(None)) -> dict:
     tenant["api_key"] = x_api_key
 
     # Check email verification for API endpoints (skip auth endpoints and admin keys)
-    _ADMIN_KEYS = {
-        k.strip() for k in os.getenv("ROMA_ADMIN_KEYS", "").split(",") if k.strip()
-    }
-    if x_api_key not in _ADMIN_KEYS:
+    if x_api_key not in admin_keys():
         verif_status = is_email_verified(x_api_key)
         if not verif_status:
             raise HTTPException(
