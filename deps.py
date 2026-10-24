@@ -88,6 +88,16 @@ def _derive_plans() -> dict:
 PLANS: dict = _derive_plans()
 
 
+def admin_keys() -> set[str]:
+    """Admin API keys, from ``ROMA_ADMIN_KEYS`` only (comma-separated).
+
+    Single source for both ``deps.verify_api_key`` and ``main.verify_api_key``.
+    Absent or empty env means no admin keys: admin bypass is then impossible
+    (fail-closed). There is no built-in default — never reintroduce one.
+    """
+    return {k.strip() for k in os.getenv("ROMA_ADMIN_KEYS", "").split(",") if k.strip()}
+
+
 def verify_api_key(x_api_key: str = Header(None)) -> dict:
     """Validate API key and return tenant info: {tenant_id, name, tier, api_key}."""
     if not x_api_key:
@@ -107,8 +117,7 @@ def verify_api_key(x_api_key: str = Header(None)) -> dict:
     tenant["api_key"] = x_api_key
 
     # Check email verification for API endpoints (skip auth endpoints and admin keys)
-    _ADMIN_KEYS = {'admin-key-beta-2026', 'admin-super-key-xyz'}
-    if x_api_key not in _ADMIN_KEYS:
+    if x_api_key not in admin_keys():
         # Deferred import: is_email_verified lives in main.py (auth cluster, out
         # of scope for this split). Reading main.is_email_verified at call time
         # keeps the existing monkeypatch in tests/test_p0_security.py effective.
