@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime, timezone
 
@@ -22,6 +23,16 @@ _backend_manager = None
 
 
 _INFLIGHT = set()
+
+# Потолок одного задания: _execute_and_bill_impl ждёт до 600s для GPU (vastai)
+# и до 120s для local. Осиротевшим считаем running, провисевший вдвое дольше
+# самого длинного цикла: воркер, который его вёл, уже не вернётся.
+MAX_JOB_TIMEOUT_SECONDS = 600
+JOB_ORPHAN_TIMEOUT_SECONDS = int(
+    os.environ.get("JOB_ORPHAN_TIMEOUT", str(MAX_JOB_TIMEOUT_SECONDS * 2))
+)
+_ORPHAN_SWEEP_INTERVAL_S = 300.0
+_last_orphan_sweep = 0.0
 
 
 def _track(task):
@@ -58,11 +69,32 @@ def init_worker():
     logger.info("execution_worker initialized")
 
 
+def sweep_orphans_once() -> int:
+    """Снять с учёта running-джобы, которые пережили свой воркер."""
+    if _db_adapter is None:
+        return 0
+    n = _db_adapter.sweep_orphan_running_jobs(JOB_ORPHAN_TIMEOUT_SECONDS)
+    if n:
+        logger.warning(
+            "poll_and_execute.orphans_swept count=%s timeout=%ss",
+            n,
+            JOB_ORPHAN_TIMEOUT_SECONDS,
+        )
+    return n
+
+
 async def poll_and_execute():
     """Фоновый цикл: опрашивает БД на наличие queued-джобов и запускает execute_and_bill."""
+    global _last_orphan_sweep
     logger.info("poll_and_execute started")
     while True:
         try:
+            if time.monotonic() - _last_orphan_sweep >= _ORPHAN_SWEEP_INTERVAL_S:
+                _last_orphan_sweep = time.monotonic()
+                try:
+                    sweep_orphans_once()
+                except Exception as e:
+                    logger.warning("poll_and_execute.orphan_sweep_error: %s", e)
             jobs = _db_adapter.get_queued_execution_jobs(limit=5)
             for job in jobs:
                 jid = job["id"]
