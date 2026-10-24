@@ -1979,6 +1979,67 @@ def update_execution_job(
     )
 
 
+def sweep_orphan_running_jobs(timeout_seconds: int) -> int:
+    """Пометить осиротевшие running-джобы как 'timeout'. Возвращает число строк.
+
+    Осиротевший = status='running' и COALESCE(started_at, updated_at) старше
+    timeout_seconds: воркер, запустивший задание, перезапустился/умер, и
+    финализировать его больше некому. updated_at — фолбэк для строк, у которых
+    started_at никогда не проставлялся (задание взято в работу старой версией
+    воркера); без него такие строки висели в running вечно.
+    Биллинг здесь НЕ трогается: finalize для 'timeout' возвращает 'skip'
+    (billing/finalize.py), а резервов/холдов в леджере нет по схеме
+    (ledger_entries.entry_type ∈ {CREDIT, DEBIT}) — списывать и возвращать нечего.
+    Идемпотентно: повторный вызов на тех же данных вернёт 0.
+    """
+    if timeout_seconds <= 0:
+        raise ValueError("timeout_seconds must be > 0")
+    if _pg_enabled():
+        conn = _pg_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE execution_jobs
+                       SET status = 'timeout',
+                           error = 'orphaned: worker restart',
+                           completed_at = now()
+                     WHERE status = 'running'
+                       AND COALESCE(started_at, updated_at)
+                           < now() - (%s * interval '1 second')
+                    """,
+                    (int(timeout_seconds),),
+                )
+                n = cur.rowcount
+            conn.commit()
+            return n
+        finally:
+            _pg_return(conn)
+    c = _sqlite_conn()
+    try:
+        _ensure_execution_jobs_table(c)
+        cur = c.cursor()
+        try:
+            cur.execute(
+                """
+                UPDATE execution_jobs
+                   SET status = 'timeout',
+                       error = 'orphaned: worker restart',
+                       completed_at = datetime('now')
+                 WHERE status = 'running'
+                   AND datetime(COALESCE(started_at, updated_at)) < datetime('now', ?)
+                """,
+                (f"-{int(timeout_seconds)} seconds",),
+            )
+            n = cur.rowcount
+        finally:
+            cur.close()
+        c.commit()
+        return n
+    finally:
+        c.close()
+
+
 async def _update_execution_job_pg(
     job_id,
     status,
