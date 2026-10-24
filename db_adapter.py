@@ -1898,6 +1898,46 @@ def get_queued_execution_jobs(limit: int = 10) -> list[dict]:
         c.close()
 
 
+def list_completed_execution_jobs(limit: int = 1000) -> list[dict]:
+    """Завершённые execution_jobs, свежие первыми: [{'duration_seconds': float}].
+
+    Длительность = duration_seconds, если она > 0, иначе completed_at − started_at.
+    В таблице нет plugin_type, поэтому тип плагина этой выборкой не определяется.
+    Ошибка БД не глушится: исключение уходит вызывающему (он решает, как деградировать).
+    """
+    if _pg_enabled():
+        conn = _pg_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT duration_seconds, EXTRACT(EPOCH FROM (completed_at - started_at)) "
+                    "FROM execution_jobs WHERE status='completed' AND completed_at IS NOT NULL "
+                    "ORDER BY completed_at DESC LIMIT %s",
+                    (limit,),
+                )
+                rows = cur.fetchall()
+        finally:
+            _pg_return(conn)
+    else:
+        c = _sqlite_conn()
+        try:
+            _ensure_execution_jobs_table(c)
+            rows = c.execute(
+                "SELECT duration_seconds, "
+                "(julianday(completed_at) - julianday(started_at)) * 86400.0 "
+                "FROM execution_jobs WHERE status='completed' AND completed_at IS NOT NULL "
+                "ORDER BY datetime(completed_at) DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        finally:
+            c.close()
+    out = []
+    for duration, derived in rows:
+        seconds = duration if duration and duration > 0 else (derived or 0)
+        out.append({"duration_seconds": float(seconds)})
+    return out
+
+
 def update_execution_job(
     job_id: str,
     status: str | None = None,
