@@ -268,7 +268,13 @@ def pytest_sessionfinish(session, exitstatus) -> None:
 
     # Уборка сессионного sqlite-каталога — последним, после ledger и skip-budget.
     if _SESSION_SQLITE_DIR is not None and _SESSION_SQLITE_DIR.exists():
-        shutil.rmtree(_SESSION_SQLITE_DIR, ignore_errors=True)
+        try:
+            shutil.rmtree(_SESSION_SQLITE_DIR)
+        except OSError as exc:
+            print(
+                f"[conftest] не удалось удалить {_SESSION_SQLITE_DIR}: {exc}",
+                file=sys.stderr,
+            )
 
 
 @pytest.fixture()
