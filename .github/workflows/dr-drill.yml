@@ -1,9 +1,11 @@
+# Синтетический k8s/Velero-дрилл. Никогда не проходил (27/27 failure, v1.29 → 404 на dl.k8s.io).
+# Известные дефекты: KUBERNETES_VERSION, MinIO labels, пустые креды, бакет, пустой артефакт.
+# Прод — Zo+PG, реальный DR — pg_dump restore drill (отдельно).
+# Включён только ручной запуск: schedule снят до починки шагов.
 name: DR Drill (Velero Restore)
 
 on:
   workflow_dispatch:        # ручной запуск
-  schedule:
-    - cron: '0 4 * * 1'     # каждую неделю в понедельник в 4:00 UTC
 
 env:
   KUBERNETES_VERSION: v1.29
