@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import types
 from pathlib import Path
@@ -264,6 +265,10 @@ def pytest_sessionfinish(session, exitstatus) -> None:
         for v in violations:
             print(f"  - {v['nodeid']} :: {v['reason'][:160]}")
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+    # Уборка сессионного sqlite-каталога — последним, после ledger и skip-budget.
+    if _SESSION_SQLITE_DIR is not None and _SESSION_SQLITE_DIR.exists():
+        shutil.rmtree(_SESSION_SQLITE_DIR, ignore_errors=True)
 
 
 @pytest.fixture()
