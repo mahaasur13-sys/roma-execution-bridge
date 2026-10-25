@@ -13,6 +13,9 @@ ENDPOINT=${B2_ENDPOINT:-https://s3.us-east-005.backblazeb2.com}
 REGION=${B2_REGION:-us-east-005}
 RCLONE=${RCLONE:-/usr/local/bin/rclone}
 LIVE_DB=${LIVE_DB:-roma}
+# 26h: one missed daily 03:30Z dump plus margin. A staler dump means the drill
+# would "verify" a restore that says nothing about today's backups.
+MAX_DUMP_AGE=${MAX_DUMP_AGE_S:-93600}
 
 TS=$(date -u +%Y%m%dT%H%M%SZ)
 DRILL_DB=${DRILL_DB:-roma_drill_$TS}
@@ -147,6 +150,12 @@ fi
 DUMP_AGE=$(( $(date +%s) - $(stat -c %Y "$local_dump") ))
 local_sha=$(sha256sum "$local_dump" | cut -d' ' -f1)
 log "start object=$object local=$(basename "$local_dump") sha256=$local_sha dump_age_s=$DUMP_AGE db=$DRILL_DB"
+
+if [ "$DUMP_AGE" -gt "$MAX_DUMP_AGE" ]; then
+  REASON="dump too old: ${DUMP_AGE}s > ${MAX_DUMP_AGE}s"
+  log "REFUSING: $REASON"
+  exit 1
+fi
 
 if [ ! -r "$CREDS" ]; then
   REASON="creds file not readable: $CREDS"
