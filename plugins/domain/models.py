@@ -36,26 +36,16 @@ class PluginModel(Base):
     __tablename__ = "plugins"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    name: Mapped[str] = mapped_column(
-        String(128), unique=True, nullable=False, index=True
-    )
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
     version: Mapped[str] = mapped_column(String(32), nullable=False, default="1.0.0")
     display_name: Mapped[str] = mapped_column(String(256), nullable=False)
     description: Mapped[str] = mapped_column(String(1024), default="")
     author: Mapped[str] = mapped_column(String(256), default="ROMA Community")
-    category: Mapped[str] = mapped_column(
-        String(64), nullable=False, default="custom", index=True
-    )
+    category: Mapped[str] = mapped_column(String(64), nullable=False, default="custom", index=True)
     entry_point: Mapped[str] = mapped_column(String(512), nullable=False)
-    state: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="registered", index=True
-    )
-    minimum_tier: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="free"
-    )
-    sandbox_policy: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="restricted"
-    )
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="registered", index=True)
+    minimum_tier: Mapped[str] = mapped_column(String(32), nullable=False, default="free")
+    sandbox_policy: Mapped[str] = mapped_column(String(32), nullable=False, default="restricted")
 
     dependencies_json: Mapped[str] = mapped_column(Text, default="[]")
     permissions_json: Mapped[str] = mapped_column(Text, default="[]")
@@ -64,16 +54,10 @@ class PluginModel(Base):
 
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    loaded_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    enabled_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    loaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -105,9 +89,7 @@ class PluginModel(Base):
 
 class PluginConfigModel(Base):
     __tablename__ = "plugin_configs"
-    __table_args__ = (
-        UniqueConstraint("plugin_id", "tenant_id", name="uq_plugin_tenant_config"),
-    )
+    __table_args__ = (UniqueConstraint("plugin_id", "tenant_id", name="uq_plugin_tenant_config"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     plugin_id: Mapped[str] = mapped_column(
@@ -148,9 +130,7 @@ class ThoughtTraceModel(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    trace_id: Mapped[str] = mapped_column(
-        String(36), unique=True, nullable=False, index=True
-    )
+    trace_id: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, index=True)
     plugin_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     session_id: Mapped[str] = mapped_column(String(128), nullable=False)
     tenant_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
@@ -158,9 +138,7 @@ class ThoughtTraceModel(Base):
     final_decision_json: Mapped[str] = mapped_column(Text, default="{}")
     total_duration_ms: Mapped[float] = mapped_column(Float, default=0.0)
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     def get_steps(self) -> list[dict[str, Any]]:
         return json.loads(self.steps_json)
@@ -178,9 +156,7 @@ class MarketplaceListingModel(Base):
     __tablename__ = "marketplace_listings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    slug: Mapped[str] = mapped_column(
-        String(128), unique=True, nullable=False, index=True
-    )
+    slug: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
     plugin_name: Mapped[str] = mapped_column(
         String(128),
         ForeignKey("plugins.name", ondelete="CASCADE"),
@@ -194,6 +170,4 @@ class MarketplaceListingModel(Base):
     verified: Mapped[bool] = mapped_column(Boolean, default=False)
     featured: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

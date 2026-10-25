@@ -102,10 +102,7 @@ def test_pg_lookup_never_issues_plaintext_sql(monkeypatch):
     joined = " ".join(cur.executed).lower()
     assert "api_key_hash" in joined
     assert "where api_key =" not in joined.replace("api_key_hash", "hash")
-    assert not any(
-        "where api_key =" in sql.lower() and "api_key_hash" not in sql.lower()
-        for sql in cur.executed
-    )
+    assert not any("where api_key =" in sql.lower() and "api_key_hash" not in sql.lower() for sql in cur.executed)
 
 
 def test_pg_hash_key_is_authenticated(monkeypatch):
@@ -113,9 +110,7 @@ def test_pg_hash_key_is_authenticated(monkeypatch):
 
     T1: курсор отдаёт строку ТОЛЬКО если в SQL ушёл хеш ключа, а не сам ключ.
     """
-    cur = _install_pg(
-        monkeypatch, ("tenant-1", "Tenant One", "pro"), keyed_on=_sha256("valid-key")
-    )
+    cur = _install_pg(monkeypatch, ("tenant-1", "Tenant One", "pro"), keyed_on=_sha256("valid-key"))
 
     result = dba._find_tenant_by_key_pg("valid-key")
 
@@ -131,9 +126,7 @@ def test_pg_hash_key_is_authenticated(monkeypatch):
 
 def test_pg_wrong_key_is_not_authenticated(monkeypatch):
     """T1 negative: при неверном ключе (другой хеш в параметре) tenant не находится."""
-    _install_pg(
-        monkeypatch, ("tenant-1", "Tenant One", "pro"), keyed_on=_sha256("valid-key")
-    )
+    _install_pg(monkeypatch, ("tenant-1", "Tenant One", "pro"), keyed_on=_sha256("valid-key"))
 
     assert dba._find_tenant_by_key_pg("wrong-key") is None
 
@@ -147,9 +140,7 @@ def test_sqlite_seed_stores_hash_not_plaintext(tmp_path, monkeypatch):
 
     conn = sqlite3.connect(str(romadb.DB_PATH))
     conn.row_factory = sqlite3.Row
-    row = conn.execute(
-        "SELECT api_key, api_key_hash FROM tenants WHERE id = 'tenant-x'"
-    ).fetchone()
+    row = conn.execute("SELECT api_key, api_key_hash FROM tenants WHERE id = 'tenant-x'").fetchone()
     conn.close()
 
     assert row is not None
@@ -164,16 +155,13 @@ def test_sqlite_find_uses_hash_and_rejects_wrong_key(tmp_path, monkeypatch):
 
     conn = sqlite3.connect(str(romadb.DB_PATH))
     conn.execute(
-        "INSERT INTO tenants (id, api_key, api_key_hash, name, plan)"
-        " VALUES (?, '', ?, ?, ?)",
+        "INSERT INTO tenants (id, api_key, api_key_hash, name, plan) VALUES (?, '', ?, ?, ?)",
         ("tenant-y", _sha256("good-key"), "Y", "free"),
     )
     conn.commit()
     conn.close()
 
-    monkeypatch.setattr(
-        dba, "_sqlite_conn", lambda: sqlite3.connect(str(romadb.DB_PATH))
-    )
+    monkeypatch.setattr(dba, "_sqlite_conn", lambda: sqlite3.connect(str(romadb.DB_PATH)))
 
     found = dba._find_tenant_by_key_sqlite("good-key")
     assert found == {"tenant_id": "tenant-y", "name": "Y", "plan": "free"}

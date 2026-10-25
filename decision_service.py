@@ -23,15 +23,11 @@ def create_decision(
     max_cost: float = 0,
 ) -> dict:
     request_id = str(uuid.uuid4())
-    db.insert_decision_request(
-        request_id, tenant_id, request_type, payload, idempotency_key or ""
-    )
+    db.insert_decision_request(request_id, tenant_id, request_type, payload, idempotency_key or "")
 
     gate = EnterpriseDecisionGate()
     decision = gate.evaluate(tenant_id, payload)
-    quota_remaining = max(
-        decision.job_limit - db.count_jobs_for_tenant_total(tenant_id), 0
-    )
+    quota_remaining = max(decision.job_limit - db.count_jobs_for_tenant_total(tenant_id), 0)
     estimated_cost_val = estimate_cost(payload)
 
     if decision.result == GateResult.DENIED:
@@ -112,9 +108,7 @@ def evaluate_decision(
 ) -> dict:
     gate = EnterpriseDecisionGate()
     decision = gate.evaluate(tenant_id, payload)
-    quota_remaining = max(
-        decision.job_limit - db.count_jobs_for_tenant_total(tenant_id), 0
-    )
+    quota_remaining = max(decision.job_limit - db.count_jobs_for_tenant_total(tenant_id), 0)
     estimated_cost_val = estimate_cost(payload)
 
     return {
@@ -122,8 +116,7 @@ def evaluate_decision(
         "reason": decision.reason,
         "estimated_cost": estimated_cost_val,
         "quota_remaining": quota_remaining,
-        "would_create_job": decision.result == GateResult.ALLOWED
-        and request_type == "job_submit",
+        "would_create_job": decision.result == GateResult.ALLOWED and request_type == "job_submit",
     }
 
 
@@ -166,9 +159,7 @@ def list_decisions(
     limit: int = 20,
     offset: int = 0,
 ) -> dict:
-    rows, total = db.list_decision_records(
-        tenant_id, result, date_from, date_to, limit, offset
-    )
+    rows, total = db.list_decision_records(tenant_id, result, date_from, date_to, limit, offset)
     items = [
         {
             "decision_id": r["id"],

@@ -36,11 +36,7 @@ def _migration_files() -> list[Path]:
 
 def _strip_txn_wrappers(sql: str) -> str:
     """Remove standalone BEGIN;/COMMIT; lines so the runner owns the transaction."""
-    return "\n".join(
-        line
-        for line in sql.splitlines()
-        if line.strip().upper() not in ("BEGIN;", "COMMIT;")
-    )
+    return "\n".join(line for line in sql.splitlines() if line.strip().upper() not in ("BEGIN;", "COMMIT;"))
 
 
 LEDGER_DDL = (
@@ -91,9 +87,7 @@ def main() -> int:
             conn.autocommit = False
             try:
                 cur.execute(body)
-                cur.execute(
-                    "INSERT INTO schema_migrations (filename) VALUES (%s)", (name,)
-                )
+                cur.execute("INSERT INTO schema_migrations (filename) VALUES (%s)", (name,))
                 conn.commit()
             except Exception:
                 conn.rollback()

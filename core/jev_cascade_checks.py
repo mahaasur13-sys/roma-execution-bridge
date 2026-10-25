@@ -32,9 +32,7 @@ def test_returns_baseline_on_exception(caplog):
         raise RuntimeError("kaboom")
 
     with caplog.at_level(logging.WARNING, logger="roma.jev.cascade"):
-        assert safe_cascade({"action": "allow"}, _boom, label="policy.cascade_once") == {
-            "action": "allow"
-        }
+        assert safe_cascade({"action": "allow"}, _boom, label="policy.cascade_once") == {"action": "allow"}
     assert "policy.cascade_once" in caplog.text
     assert "RuntimeError" in caplog.text
     assert "kaboom" not in caplog.text  # ни деталей исключения, ни данных запроса

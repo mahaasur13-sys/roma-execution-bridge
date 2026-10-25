@@ -23,9 +23,7 @@ def send_discord_alert(webhook_url: str, message: str) -> bool:
 
     try:
         data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            webhook_url, data=data, headers={"Content-Type": "application/json"}
-        )
+        req = urllib.request.Request(webhook_url, data=data, headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             if resp.status in (200, 204):
                 logger.info("Discord alert sent")

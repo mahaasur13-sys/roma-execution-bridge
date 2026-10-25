@@ -63,13 +63,8 @@ class PluginSandbox:
         violations: list[str] = []
 
         # Enterprise-only: full sandbox
-        if (
-            self.manifest.sandbox_policy == "full"
-            and self.manifest.minimum_tier.value != "enterprise"
-        ):
-            violations.append(
-                "Only enterprise tier plugins can use 'full' sandbox policy"
-            )
+        if self.manifest.sandbox_policy == "full" and self.manifest.minimum_tier.value != "enterprise":
+            violations.append("Only enterprise tier plugins can use 'full' sandbox policy")
 
         # No private keys in manifest
         forbidden_fields = ["private_key", "seed_phrase", "mnemonic", "spend_key"]
@@ -78,10 +73,7 @@ class PluginSandbox:
                 violations.append(f"Config schema must not contain '{field}' field")
 
         # Restricted permissions on sensitive operations
-        if (
-            "subprocess" in self.manifest.permissions
-            and self.manifest.minimum_tier.value != "enterprise"
-        ):
+        if "subprocess" in self.manifest.permissions and self.manifest.minimum_tier.value != "enterprise":
             violations.append("Subprocess permission requires enterprise tier")
 
         return violations
@@ -95,9 +87,7 @@ class PluginSandbox:
                 return func(*args, **kwargs)
             except Exception as e:
                 logger.error("Sandbox violation in '%s': %s", self.manifest.name, e)
-                raise PluginSandboxViolation(
-                    f"Plugin '{self.manifest.name}' sandbox violation: {e}"
-                ) from e
+                raise PluginSandboxViolation(f"Plugin '{self.manifest.name}' sandbox violation: {e}") from e
 
         return wrapper
 
@@ -110,9 +100,7 @@ class PluginSandbox:
             # CPU time: 30 seconds
             resource.setrlimit(resource.RLIMIT_CPU, (30, 30))
             # Memory: 512 MB
-            resource.setrlimit(
-                resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024)
-            )
+            resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
         except (ImportError, ValueError):
             pass
 

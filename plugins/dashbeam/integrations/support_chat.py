@@ -50,9 +50,7 @@ class DashBeamChatIntegration:
             f'</button>'
         )
 
-    def build_chat_event(
-        self, event: DashBeamChatEvent, ticket_id: str, **kwargs: Any
-    ) -> dict[str, Any]:
+    def build_chat_event(self, event: DashBeamChatEvent, ticket_id: str, **kwargs: Any) -> dict[str, Any]:
         """Build a WebSocket event payload."""
         return {
             "type": event.value,

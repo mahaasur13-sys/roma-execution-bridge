@@ -78,8 +78,7 @@ _auth = SupportAuthService()
 # privileged route stays closed. H2a keeps that rule; the privileged routes now
 # accept a dedicated support *session* instead.
 _PRIVILEGED_ROLE_REQUIRED = (
-    "This operation requires a trusted support role; an API key identifies a "
-    "tenant, not a support agent"
+    "This operation requires a trusted support role; an API key identifies a tenant, not a support agent"
 )
 
 
@@ -180,9 +179,7 @@ async def _support_agent(
         try:
             principal = await _auth.authenticate_session(raw_session)
         except SupportAuthError as exc:
-            raise HTTPException(
-                status_code=401, detail="Invalid support session"
-            ) from exc
+            raise HTTPException(status_code=401, detail="Invalid support session") from exc
         _require_allowed_origin(request)
         await _require_csrf(request, principal)
         return principal
@@ -190,9 +187,7 @@ async def _support_agent(
         # The canonical key check already ran (401 missing/invalid, 403 unverified);
         # a tenant key still never grants a support role — refuse before any lookup.
         raise HTTPException(status_code=403, detail=_PRIVILEGED_ROLE_REQUIRED)
-    raise HTTPException(
-        status_code=401, detail="Support session or X-API-Key required"
-    )
+    raise HTTPException(status_code=401, detail="Support session or X-API-Key required")
 
 
 async def _support_agent_read(
@@ -218,21 +213,15 @@ async def _support_agent_read(
         try:
             return await _auth.authenticate_session(raw_session)
         except SupportAuthError as exc:
-            raise HTTPException(
-                status_code=401, detail="Invalid support session"
-            ) from exc
+            raise HTTPException(status_code=401, detail="Invalid support session") from exc
     if tenant_principal is not None:
         # A tenant key identifies a tenant, never a support agent.
         raise HTTPException(status_code=403, detail=_PRIVILEGED_ROLE_REQUIRED)
-    raise HTTPException(
-        status_code=401, detail="Support session or X-API-Key required"
-    )
+    raise HTTPException(status_code=401, detail="Support session or X-API-Key required")
 
 
 @router.post("/tickets", response_model=CreateTicketResponse, status_code=201)
-async def create_ticket(
-    request: CreateTicketRequest, tenant: TenantContext = Depends(_tenant_context)
-):
+async def create_ticket(request: CreateTicketRequest, tenant: TenantContext = Depends(_tenant_context)):
     try:
         return await _service.create_ticket(request, tenant)
     except ValueError as e:
@@ -247,9 +236,7 @@ async def list_tickets(
     page_size: int = 20,
 ):
     ticket_status = TicketStatus(status) if status else None
-    return await _service.list_tickets(
-        tenant, status=ticket_status, page=page, page_size=page_size
-    )
+    return await _service.list_tickets(tenant, status=ticket_status, page=page, page_size=page_size)
 
 
 @router.get("/tickets/{ticket_id}", response_model=TicketDetailResponse)
@@ -334,9 +321,7 @@ async def assign_agent(
     principal's explicit tenant scope and the E-15 status/CAS contract holds.
     """
     try:
-        return await _service.assign_agent_to_self(
-            ticket_id, principal.actor_id, principal.tenant_ids
-        )
+        return await _service.assign_agent_to_self(ticket_id, principal.actor_id, principal.tenant_ids)
     except TicketNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except TicketStatusConflictError as exc:

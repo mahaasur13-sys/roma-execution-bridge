@@ -9,14 +9,10 @@ import db_adapter as db
 logger = logging.getLogger("roma.audit")
 
 
-def write_event(
-    tenant_id: str, event_type: str, entity_type: str, entity_id: str, data: dict
-) -> dict:
+def write_event(tenant_id: str, event_type: str, entity_type: str, entity_id: str, data: dict) -> dict:
     """Write a single audit event. Returns {id, …}."""
     eid = str(uuid.uuid4())
-    return db.insert_audit_event(
-        eid, tenant_id, event_type, entity_type, entity_id, data
-    )
+    return db.insert_audit_event(eid, tenant_id, event_type, entity_type, entity_id, data)
 
 
 def event_exists(tenant_id: str, event_type: str, entity_id: str) -> bool:
@@ -67,9 +63,7 @@ def write_event_once(
     return write_event(tenant_id, event_type, entity_type, entity_id, data)
 
 
-def on_decision_allowed(
-    tenant_id: str, decision_id: str, request_id: str, quota: int, cost: float
-) -> dict:
+def on_decision_allowed(tenant_id: str, decision_id: str, request_id: str, quota: int, cost: float) -> dict:
     """Shortcut: write decision.allowed audit event."""
     return write_event(
         tenant_id,
@@ -80,9 +74,7 @@ def on_decision_allowed(
     )
 
 
-def on_decision_denied(
-    tenant_id: str, decision_id: str, request_id: str, reason: str
-) -> dict:
+def on_decision_denied(tenant_id: str, decision_id: str, request_id: str, reason: str) -> dict:
     """Shortcut: write decision.denied audit event."""
     return write_event(
         tenant_id,

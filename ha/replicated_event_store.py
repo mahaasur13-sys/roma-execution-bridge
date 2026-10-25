@@ -57,7 +57,5 @@ if __name__ == "__main__":
     store = ReplicatedEventStore(3)
     for i in range(3):
         r = store.write({"type": f"event-{i}", "tick": i})
-        print(
-            f"Event {i}: index={r['index']}, commit={r['commit_index']}, quorum={r['quorum']}"
-        )
+        print(f"Event {i}: index={r['index']}, commit={r['commit_index']}, quorum={r['quorum']}")
     print(store.get_state())

@@ -28,15 +28,9 @@ def _init_metrics():
     try:
         from prometheus_client import Gauge, Counter
 
-        _pg_conn_active = Gauge(
-            "roma_pg_connections_active", "Active PG connections", ["pool"]
-        )
-        _pg_reconnects_total = Counter(
-            "roma_pg_reconnects_total", "Total PG reconnection attempts", ["pool"]
-        )
-        _pg_errors_total = Counter(
-            "roma_pg_errors_total", "Total PG query errors", ["pool", "error_type"]
-        )
+        _pg_conn_active = Gauge("roma_pg_connections_active", "Active PG connections", ["pool"])
+        _pg_reconnects_total = Counter("roma_pg_reconnects_total", "Total PG reconnection attempts", ["pool"])
+        _pg_errors_total = Counter("roma_pg_errors_total", "Total PG query errors", ["pool", "error_type"])
     except ImportError:
         pass
 
@@ -129,9 +123,7 @@ class _PgConnection:
             except Exception:
                 # The connection state is not trustworthy — discard it and
                 # keep the original exception as the one the caller sees.
-                logger.warning(
-                    "PG rollback failed while unwinding an exception", exc_info=True
-                )
+                logger.warning("PG rollback failed while unwinding an exception", exc_info=True)
                 self._release(close=True)
                 return
             self._release()
@@ -200,13 +192,9 @@ class PGConnectionManager:
                         self._pool.closeall()
                     except Exception:
                         pass
-                self._pool = psycopg2.pool.ThreadedConnectionPool(
-                    self._pool_min, self._pool_max, dsn
-                )
+                self._pool = psycopg2.pool.ThreadedConnectionPool(self._pool_min, self._pool_max, dsn)
             self._pg_available = True
-            logger.info(
-                "PG pool created: min=%d max=%d", self._pool_min, self._pool_max
-            )
+            logger.info("PG pool created: min=%d max=%d", self._pool_min, self._pool_max)
             return True
         except Exception as e:
             self._pg_available = False
@@ -269,13 +257,9 @@ class PGConnectionManager:
                 last_error = e
                 self._error_count += 1
                 if _pg_errors_total:
-                    _pg_errors_total.labels(
-                        pool="billing", error_type=type(e).__name__
-                    ).inc()
+                    _pg_errors_total.labels(pool="billing", error_type=type(e).__name__).inc()
                 if attempt == PG_RECONNECT_ATTEMPTS:
-                    logger.error(
-                        "PG exhausted after %d attempts: %s", PG_RECONNECT_ATTEMPTS, e
-                    )
+                    logger.error("PG exhausted after %d attempts: %s", PG_RECONNECT_ATTEMPTS, e)
                     break
                 delay = PG_RETRY_BASE_DELAY * (2**attempt)
                 logger.warning(

@@ -179,9 +179,7 @@ class StripeIntegration:
         inv.paid_at = time.time()
         return True
 
-    def estimate_job_cost(
-        self, gpu_seconds: float, gpu_model: str = "A100", tier: str = "pro"
-    ) -> float:
+    def estimate_job_cost(self, gpu_seconds: float, gpu_model: str = "A100", tier: str = "pro") -> float:
         rate = GPU_RATES.get(gpu_model, GPU_RATES["A100"])
         mult = TIER_MULT.get(tier, 1.0)
         if mult == 0:
@@ -221,11 +219,7 @@ class WebhookSimulator:
 
     def get_events(self, org_id: str = "") -> List[Dict]:
         if org_id:
-            return [
-                e
-                for e in self._events
-                if e.get("org_id") == "" or e["org_id"] == org_id
-            ]
+            return [e for e in self._events if e.get("org_id") == "" or e["org_id"] == org_id]
         return self._events
 
 
@@ -252,20 +246,16 @@ if __name__ == "__main__":
     print(f"[3] Usage: {len(s.get_usage('org_acme'))} records")
 
     u = s.get_usage_summary("org_acme")
-    print(
-        f"[4] Summary: {u['total_gpu_seconds']:.0f}s | ${u['total_cost']:.4f} | {u['jobs']} jobs"
-    )
+    print(f"[4] Summary: {u['total_gpu_seconds']:.0f}s | ${u['total_cost']:.4f} | {u['jobs']} jobs")
 
     inv = s.generate_invoice("org_acme")
     print(f"[5] Invoice: {inv.id} | ${inv.total:.4f} | {len(inv.items)} items")
 
     evt = w.simulate_payment_success("org_acme", inv.id, int(inv.total * 100))
-    print(f"[6] Payment: {evt['type']} | ${evt['amount_cents']/100:.4f}")
+    print(f"[6] Payment: {evt['type']} | ${evt['amount_cents'] / 100:.4f}")
 
     print(f"\n[7] Balance: ${s.get_balance('org_acme'):.4f}")
     est = s.estimate_job_cost(36000, "A100", "pro")
     print(f"[8] Estimate 10hr A100 PRO: ${est:.4f}")
     print(f"\nTotal revenue: ${sum(r.cost for r in s.get_usage('org_acme')):.4f}")
-    print(
-        f"Active subs: {sum(1 for x in s._subscriptions.values() if x.status==SubscriptionStatus.ACTIVE)}"
-    )
+    print(f"Active subs: {sum(1 for x in s._subscriptions.values() if x.status == SubscriptionStatus.ACTIVE)}")

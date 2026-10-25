@@ -66,6 +66,4 @@ def reject_nullable_money(table: str, column: str, value: object) -> None:
     if spec is None:
         return
     if spec["reject_none"] and value is None:
-        raise ValueError(
-            f"{table}.{column}: money-колонка NOT NULL по договору — None недопустим"
-        )
+        raise ValueError(f"{table}.{column}: money-колонка NOT NULL по договору — None недопустим")

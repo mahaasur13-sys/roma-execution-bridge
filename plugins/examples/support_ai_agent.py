@@ -24,9 +24,7 @@ class SupportAIAgentPlugin:
 
     def on_enable(self, config: dict[str, Any]) -> None:
         self._config = config
-        self._models = config.get(
-            "models", ["ollama:llama3", "openrouter:claude-haiku"]
-        )
+        self._models = config.get("models", ["ollama:llama3", "openrouter:claude-haiku"])
 
     async def run(self, action: str, **kwargs: Any) -> dict[str, Any]:
         if action == "chat":

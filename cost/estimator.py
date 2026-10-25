@@ -80,16 +80,12 @@ class RuntimeEstimator:
 
         # Model-specific adjustments
         model_size = kwargs.get("model_size", "medium")
-        model_factor = {"small": 0.6, "medium": 1.0, "large": 2.0, "xlarge": 4.0}.get(
-            model_size, 1.0
-        )
+        model_factor = {"small": 0.6, "medium": 1.0, "large": 2.0, "xlarge": 4.0}.get(model_size, 1.0)
 
         # Data size adjustment
         data_scale = kwargs.get("data_scale_gb", 10) / 10.0
 
-        estimated_seconds = int(
-            base * gpu_factor * batch_factor * model_factor * data_scale
-        )
+        estimated_seconds = int(base * gpu_factor * batch_factor * model_factor * data_scale)
 
         # Historical adjustment
         if self.historical_events:
@@ -119,11 +115,7 @@ class RuntimeEstimator:
 
         Фильтр по типу плагина невозможен: в `execution_jobs` нет plugin_type.
         """
-        durations = [
-            e["duration_seconds"]
-            for e in self.historical_events
-            if e.get("duration_seconds", 0) > 0
-        ]
+        durations = [e["duration_seconds"] for e in self.historical_events if e.get("duration_seconds", 0) > 0]
         if not durations:
             return 0.0
         return sum(durations) / len(durations)
@@ -139,7 +131,5 @@ if __name__ == "__main__":
         data_scale_gb=50,
     )
     print(f"ML Training estimate: {r['estimated_seconds']}s ({r['estimated_hours']}h)")
-    print(
-        f"  Confidence range: {r['confidence_range']['min_seconds']}s - {r['confidence_range']['max_seconds']}s"
-    )
+    print(f"  Confidence range: {r['confidence_range']['min_seconds']}s - {r['confidence_range']['max_seconds']}s")
     print(f"  Factors: {r['factors']}")

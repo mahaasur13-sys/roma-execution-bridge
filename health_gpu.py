@@ -17,9 +17,7 @@ def check_gpu_available() -> Dict[str, object]:
     try:
         if os.path.exists("/dev/nvidia0"):
             try:
-                subprocess.run(
-                    ["nvidia-smi"], capture_output=True, timeout=5, check=True
-                )
+                subprocess.run(["nvidia-smi"], capture_output=True, timeout=5, check=True)
                 result["gpu_available"] = True
                 result["gpu_check_reason"] = ""
             except FileNotFoundError:

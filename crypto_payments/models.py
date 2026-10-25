@@ -99,9 +99,7 @@ class CryptoInvoice(BaseModel):
     def _must_match_tier(cls, v: Decimal, info: Any) -> Decimal:
         tier = (info.data or {}).get("tier")
         if tier and tier in TIER_PRICES_USD and v != TIER_PRICES_USD[tier]:
-            raise ValueError(
-                f"Amount {v} does not match tier price {TIER_PRICES_USD[tier]}"
-            )
+            raise ValueError(f"Amount {v} does not match tier price {TIER_PRICES_USD[tier]}")
         return v
 
 

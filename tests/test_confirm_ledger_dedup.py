@@ -35,9 +35,7 @@ _FORCED_VERDICT = {
 
 
 def _patch_tenant(monkeypatch, plan: str = PRO) -> None:
-    monkeypatch.setattr(
-        db, "get_tenant", lambda tenant_id: {"tenant_id": tenant_id, "plan": plan}
-    )
+    monkeypatch.setattr(db, "get_tenant", lambda tenant_id: {"tenant_id": tenant_id, "plan": plan})
     monkeypatch.setattr(
         db,
         "get_tenant_usage_db",
@@ -54,9 +52,7 @@ def _scheduler():
     sched.gate_unavailable_reason = None
     sched.gpu_connector = SimpleNamespace(is_available=lambda: False)
     sched.cost_gate = SimpleNamespace(
-        evaluate=lambda tenant_id, payload: SimpleNamespace(
-            result="allowed", reason="gate allowed"
-        )
+        evaluate=lambda tenant_id, payload: SimpleNamespace(result="allowed", reason="gate allowed")
     )
     sched.predictor = SimpleNamespace(predict=lambda **kwargs: dict(_FORCED_VERDICT))
     calls: list = []
@@ -233,16 +229,12 @@ def test_cross_tenant_isolation_negative(monkeypatch, tmp_path):
     monkeypatch.setattr(db, "_sqlite_conn", factory)
 
     tenant_a, tenant_b, job_id = "tenant-a", "tenant-b", "x-shared-job"
-    db.insert_audit_event(
-        "e-a", tenant_a, "job.user_confirmed", "job", job_id, {"user_confirmed": True}
-    )
+    db.insert_audit_event("e-a", tenant_a, "job.user_confirmed", "job", job_id, {"user_confirmed": True})
 
     assert db.audit_event_exists(tenant_a, "job.user_confirmed", job_id) is True
     assert db.audit_event_exists(tenant_b, "job.user_confirmed", job_id) is False
 
-    db.insert_audit_event(
-        "e-b", tenant_b, "job.user_confirmed", "job", job_id, {"user_confirmed": True}
-    )
+    db.insert_audit_event("e-b", tenant_b, "job.user_confirmed", "job", job_id, {"user_confirmed": True})
 
     assert db.audit_event_exists(tenant_b, "job.user_confirmed", job_id) is True
     conn = factory()
@@ -286,8 +278,7 @@ def _count_audit_rows(factory, tenant_id, event_type, entity_id) -> int:
     conn = factory()
     try:
         row = conn.execute(
-            "SELECT COUNT(*) AS n FROM audit_events"
-            " WHERE tenant_id=? AND event_type=? AND entity_id=?",
+            "SELECT COUNT(*) AS n FROM audit_events WHERE tenant_id=? AND event_type=? AND entity_id=?",
             (tenant_id, event_type, entity_id),
         ).fetchone()
         return row["n"]
@@ -299,12 +290,8 @@ def test_write_event_once_idempotent_on_real_sqlite(monkeypatch, tmp_path):
     """Два вызова write_event_once с одним ключом → ровно одна строка (реальный SQL)."""
     factory, _ = _real_sqlite(monkeypatch, tmp_path, "dedup-idem.db")
 
-    first = audit_store.write_event_once(
-        TENANT, "job.user_confirmed", "job", "j-idem", {"user_confirmed": True}
-    )
-    second = audit_store.write_event_once(
-        TENANT, "job.user_confirmed", "job", "j-idem", {"user_confirmed": True}
-    )
+    first = audit_store.write_event_once(TENANT, "job.user_confirmed", "job", "j-idem", {"user_confirmed": True})
+    second = audit_store.write_event_once(TENANT, "job.user_confirmed", "job", "j-idem", {"user_confirmed": True})
 
     assert first.get("skipped") is not True, first
     assert second == {"id": None, "skipped": True}, second
@@ -320,12 +307,8 @@ def test_insert_audit_event_dedupes_at_db_level(monkeypatch, tmp_path):
     """
     factory, _ = _real_sqlite(monkeypatch, tmp_path, "dedup-atomic.db")
 
-    first = db.insert_audit_event(
-        "e-1", TENANT, "job.user_confirmed", "job", "j-atomic", {"user_confirmed": True}
-    )
-    second = db.insert_audit_event(
-        "e-2", TENANT, "job.user_confirmed", "job", "j-atomic", {"user_confirmed": True}
-    )
+    first = db.insert_audit_event("e-1", TENANT, "job.user_confirmed", "job", "j-atomic", {"user_confirmed": True})
+    second = db.insert_audit_event("e-2", TENANT, "job.user_confirmed", "job", "j-atomic", {"user_confirmed": True})
 
     assert first == {"id": "e-1"}
     assert second == {"id": None, "skipped": True}
@@ -342,13 +325,9 @@ def test_insert_audit_event_foreign_conflict_raises(monkeypatch, tmp_path):
 
     factory, _ = _real_sqlite(monkeypatch, tmp_path, "dedup-foreign.db")
 
-    db.insert_audit_event(
-        "dup-id", TENANT, "job.created", "job", "job-A", {"user_confirmed": True}
-    )
+    db.insert_audit_event("dup-id", TENANT, "job.created", "job", "job-A", {"user_confirmed": True})
     with pytest.raises(sqlite3.IntegrityError):
-        db.insert_audit_event(
-            "dup-id", TENANT, "job.created", "job", "job-B", {"user_confirmed": True}
-        )
+        db.insert_audit_event("dup-id", TENANT, "job.created", "job", "job-B", {"user_confirmed": True})
 
 
 def test_both_writers_share_table_and_dedupe(monkeypatch, tmp_path):
@@ -358,13 +337,9 @@ def test_both_writers_share_table_and_dedupe(monkeypatch, tmp_path):
     factory, _ = _real_sqlite(monkeypatch, tmp_path, "dedup-unified.db")
 
     # корневой писатель (обёртка) → audit.event_store.write_event → audit_events
-    root_events.write_audit_event(
-        TENANT, "job.created", "job", "j-u1", {"decision_id": "d1"}
-    )
+    root_events.write_audit_event(TENANT, "job.created", "job", "j-u1", {"decision_id": "d1"})
     # внутренний идемпотентный писатель с тем же ключом → пропуск, дубля нет
-    audit_store.write_event_once(
-        TENANT, "job.created", "job", "j-u1", {"decision_id": "d1"}
-    )
+    audit_store.write_event_once(TENANT, "job.created", "job", "j-u1", {"decision_id": "d1"})
 
     assert _count_audit_rows(factory, TENANT, "job.created", "j-u1") == 1
 
@@ -410,9 +385,7 @@ def test_write_event_once_reports_skip_structurally(monkeypatch):
         lambda *a, **k: written.append(a) or {"id": "must-not-happen"},
     )
 
-    result = audit_store.write_event_once(
-        TENANT, "job.user_confirmed", "job", "j-dedup-skip", {"user_confirmed": True}
-    )
+    result = audit_store.write_event_once(TENANT, "job.user_confirmed", "job", "j-dedup-skip", {"user_confirmed": True})
 
     assert result == {"id": None, "skipped": True}, result
     assert written == [], written

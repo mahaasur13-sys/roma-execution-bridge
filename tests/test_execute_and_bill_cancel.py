@@ -28,17 +28,11 @@ async def test_cancelled_execute_and_bill_sets_terminal_and_cleans(monkeypatch):
         },
     )
 
-    task = asyncio.create_task(
-        ew.execute_and_bill(
-            "job-test", "tenant-test", {"task": "echo hi", "backend": "local"}
-        )
-    )
+    task = asyncio.create_task(ew.execute_and_bill("job-test", "tenant-test", {"task": "echo hi", "backend": "local"}))
     await asyncio.sleep(0.05)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
 
-    assert any(
-        k.get("status") == "cancelled" for _, k in updated
-    ), "terminal status не выставлен"
+    assert any(k.get("status") == "cancelled" for _, k in updated), "terminal status не выставлен"
     assert cleaned, "backend cancel не вызван"

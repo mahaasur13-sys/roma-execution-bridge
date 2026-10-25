@@ -95,7 +95,9 @@ def build_state(message: str) -> dict[str, Any]:
 # ── Observation (fail-closed) ────────────────────────────────────────────
 
 
-def _ask(message: str, *, client: Any = None, timeout: float | None = None) -> tuple[str, float | None, dict[str, float]] | None:
+def _ask(
+    message: str, *, client: Any = None, timeout: float | None = None
+) -> tuple[str, float | None, dict[str, float]] | None:
     """One Jev call + parse. Returns (choice, confidence, probabilities) or None (fail-closed).
 
     Import, конструктор клиента (включая пин модели) и разбор ответа — внутри try:

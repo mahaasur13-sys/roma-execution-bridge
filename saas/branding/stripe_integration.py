@@ -6,9 +6,7 @@ from typing import Optional
 from .models import TenantBranding
 
 
-def build_stripe_metadata(
-    branding: TenantBranding, extra: Optional[dict] = None
-) -> dict:
+def build_stripe_metadata(branding: TenantBranding, extra: Optional[dict] = None) -> dict:
     """Merge branding metadata into Stripe invoice/charge metadata."""
     base = {
         "brand": branding.metadata.get("brand", branding.tenant_id),

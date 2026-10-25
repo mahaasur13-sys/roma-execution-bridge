@@ -41,9 +41,7 @@ class CryptoWalletService:
         if request.wallet_type == WalletType.MONERO and not request.monero_config:
             raise ValueError("Monero wallet requires monero_config")
         if request.mode == WalletMode.HOT:
-            raise ValueError(
-                "HOT mode not allowed — DecisionOS never stores private keys"
-            )
+            raise ValueError("HOT mode not allowed — DecisionOS never stores private keys")
 
         wallet = CryptoWallet(
             tenant_id=request.tenant_id,
@@ -54,9 +52,7 @@ class CryptoWalletService:
             public_address=request.public_address,
             rpc_endpoint=request.rpc_endpoint,
             view_key=request.view_key,
-            metadata=(
-                request.monero_config.model_dump() if request.monero_config else {}
-            ),
+            metadata=(request.monero_config.model_dump() if request.monero_config else {}),
         )
         wallet_id = str(wallet.wallet_id)
         self._wallets[wallet_id] = wallet
@@ -88,9 +84,7 @@ class CryptoWalletService:
             created_at=wallet.created_at,
         )
 
-    async def generate_address(
-        self, wallet_id: str, request: GenerateAddressRequest
-    ) -> GenerateAddressResponse:
+    async def generate_address(self, wallet_id: str, request: GenerateAddressRequest) -> GenerateAddressResponse:
         wallet = self._wallets.get(wallet_id)
         if not wallet:
             raise ValueError(f"Wallet {wallet_id} not found")
@@ -142,9 +136,7 @@ class CryptoWalletService:
             wallet_id=wallet.wallet_id,
         )
 
-    async def rotate_wallet(
-        self, wallet_id: str, request: RotateWalletRequest
-    ) -> RotateWalletResponse:
+    async def rotate_wallet(self, wallet_id: str, request: RotateWalletRequest) -> RotateWalletResponse:
         wallet = self._wallets.get(wallet_id)
         if not wallet:
             raise ValueError(f"Wallet {wallet_id} not found")

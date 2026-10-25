@@ -32,9 +32,7 @@ schema["info"]["description"] = (
 
 # Add security scheme
 schema["components"] = schema.get("components", {})
-schema["components"]["securitySchemes"] = {
-    "ApiKeyAuth": {"type": "apiKey", "in": "header", "name": "X-API-Key"}
-}
+schema["components"]["securitySchemes"] = {"ApiKeyAuth": {"type": "apiKey", "in": "header", "name": "X-API-Key"}}
 schema["security"] = [{"ApiKeyAuth": []}]
 
 # Add tags

@@ -36,12 +36,8 @@ PLAN_TIER_MAP = {
 
 UNKNOWN_TENANT = "UNKNOWN_TENANT"
 UNKNOWN_PLAN = "UNKNOWN_PLAN"
-NO_TENANT_REASON = (
-    "tenant_id не задан: тариф не может быть установлен из записи клиента"
-)
-UNKNOWN_TENANT_REASON = (
-    "клиент не найден в записях: тариф не установлен (не FREE по умолчанию)"
-)
+NO_TENANT_REASON = "tenant_id не задан: тариф не может быть установлен из записи клиента"
+UNKNOWN_TENANT_REASON = "клиент не найден в записях: тариф не установлен (не FREE по умолчанию)"
 
 
 class UnknownPlanError(ValueError):
@@ -84,9 +80,7 @@ class CostPredictor:
         key = (label or "").strip().upper()
         if key in self.tier_map:
             return self.tier_map[key]
-        raise UnknownPlanError(
-            f"тариф {label!r} не объявлен — служебный канал тоже fail-closed"
-        )
+        raise UnknownPlanError(f"тариф {label!r} не объявлен — служебный канал тоже fail-closed")
 
     def _resolve_tier(
         self, tenant_id: str | None, tenant_tier: str | None, admin_override: bool
@@ -142,9 +136,7 @@ class CostPredictor:
         tenant_id: str | None = None,
         admin_override: bool = False,
     ) -> dict:
-        tier_enum, tier_source, refusal, plan_name = self._resolve_tier(
-            tenant_id, tenant_tier, admin_override
-        )
+        tier_enum, tier_source, refusal, plan_name = self._resolve_tier(tenant_id, tenant_tier, admin_override)
 
         # Оцениваем длительность (в секундах)
         if custom_duration:
@@ -203,9 +195,7 @@ class CostPredictor:
                 "decision_reason": reason,
             }
 
-        cost = self.pricing.calculate(
-            tier_enum, gpu_s=gpu_seconds, cpu_s=cpu_seconds, gb_s=storage_sec
-        )
+        cost = self.pricing.calculate(tier_enum, gpu_s=gpu_seconds, cpu_s=cpu_seconds, gb_s=storage_sec)
         total_cost = cost["total"]
 
         # G-FREE-DECISION-HEURISTIC: FREE решается квотой (джобы/мес и GPU-секунды
@@ -310,9 +300,7 @@ class CostPredictor:
             base += 0.10
         return min(base, 0.98)
 
-    def _quota_verdict(
-        self, plan_name: str, estimate_gpu_s: int, tenant_id: str | None
-    ) -> dict:
+    def _quota_verdict(self, plan_name: str, estimate_gpu_s: int, tenant_id: str | None) -> dict:
         """Вердикт FREE-тира — двумерный предикат по квоте, с основанием.
 
         Счётчики потребления берутся только из леджера usage (обе ветки леджера —
@@ -339,9 +327,7 @@ class CostPredictor:
             )
         return plan_source.free_quota_verdict(limits, consumption, estimate_gpu_s)
 
-    def _gate_unavailable(
-        self, scope: str, plan_name: str, tenant_id: str | None, reason: str
-    ) -> dict:
+    def _gate_unavailable(self, scope: str, plan_name: str, tenant_id: str | None, reason: str) -> dict:
         """Fail-closed отказ гейта: отдельный код, громкий лог, метрика наружу."""
         gate_metrics.track_gate_unavailable(scope)
         logger.error(

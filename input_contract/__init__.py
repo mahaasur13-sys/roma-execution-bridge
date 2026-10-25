@@ -128,7 +128,5 @@ class InputContractValidator:
         """
         result = cls.validate(user_task)
         if not result.valid:
-            raise ROMAValidationError(
-                code=result.code, message=result.message, severity=result.severity
-            )
+            raise ROMAValidationError(code=result.code, message=result.message, severity=result.severity)
         return user_task.strip()

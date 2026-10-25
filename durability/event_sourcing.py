@@ -73,9 +73,7 @@ class Event:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     @staticmethod
-    def create(
-        event_type: EventType, aggregate_id: str, tick: int, payload: Dict
-    ) -> 'Event':
+    def create(event_type: EventType, aggregate_id: str, tick: int, payload: Dict) -> 'Event':
         return Event(
             event_id=str(uuid.uuid4()),
             event_type=event_type,
@@ -154,15 +152,9 @@ class EventStore:
                     created_at REAL DEFAULT (julianday('now'))
                 )
             """)
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_events_aggregate ON events(aggregate_id)"
-            )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_events_tick ON events(tick)"
-            )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type)"
-            )
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_events_aggregate ON events(aggregate_id)")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_events_tick ON events(tick)")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type)")
             self._conn.commit()
 
     def next_tick(self) -> int:
@@ -339,9 +331,7 @@ class JobAggregate:
     def __init__(self, event_store: EventStore):
         self.event_store = event_store
 
-    def submit_job(
-        self, job_id: str, priority: int, vram_gb: float, gpu_required: bool
-    ) -> Event:
+    def submit_job(self, job_id: str, priority: int, vram_gb: float, gpu_required: bool) -> Event:
         tick = self.event_store.next_tick()
         event = Event.create(
             EventType.JOB_SUBMITTED,
@@ -384,9 +374,7 @@ class JobAggregate:
 
     def allocate_gpu(self, job_id: str, node: str, vram_gb: float) -> Event:
         tick = self.event_store.next_tick()
-        event = Event.create(
-            EventType.GPU_ALLOCATED, job_id, tick, {'node': node, 'vram_gb': vram_gb}
-        )
+        event = Event.create(EventType.GPU_ALLOCATED, job_id, tick, {'node': node, 'vram_gb': vram_gb})
         self.event_store.append(event)
         return event
 
@@ -408,9 +396,7 @@ class DeterministicReplay:
     def __init__(self, event_store: EventStore):
         self.event_store = event_store
 
-    def replay_and_verify(
-        self, start_tick: int, apply_fn: Callable[[Event], None]
-    ) -> Dict[str, Any]:
+    def replay_and_verify(self, start_tick: int, apply_fn: Callable[[Event], None]) -> Dict[str, Any]:
         """
         Replay from start_tick using apply_fn.
         Returns verification report.
@@ -463,9 +449,7 @@ if __name__ == '__main__':
 
     # Rebuild state from event log
     state = proj.build_state('job-001')
-    print(
-        f"Job state: status={state.status}, gpu_node={state.gpu_node}, priority={state.priority}"
-    )
+    print(f"Job state: status={state.status}, gpu_node={state.gpu_node}, priority={state.priority}")
 
     # Deterministic replay test
     replay = DeterministicReplay(store)

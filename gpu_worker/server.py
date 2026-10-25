@@ -301,11 +301,7 @@ def job_status(job_id: str):
 def metrics():
     """Worker metrics for ROMA observability."""
     total_jobs = len(state.jobs)
-    completed = sum(
-        1
-        for j in state.jobs.values()
-        if j.get("status") in ("success", "failed", "timeout")
-    )
+    completed = sum(1 for j in state.jobs.values() if j.get("status") in ("success", "failed", "timeout"))
 
     return {
         "worker_id": WORKER_ID,

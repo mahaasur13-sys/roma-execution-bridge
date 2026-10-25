@@ -33,9 +33,7 @@ class JobStore:
 
     def _save(self):
         with open(self._path, "w") as f:
-            json.dump(
-                {"seq": self._seq, "jobs": [asdict(j) for j in self._jobs.values()]}, f
-            )
+            json.dump({"seq": self._seq, "jobs": [asdict(j) for j in self._jobs.values()]}, f)
 
     def submit(
         self,
@@ -135,9 +133,7 @@ class JobStore:
 
     def advance_pending(self) -> List[Job]:
         with self._lock:
-            ready = [
-                j for j in self._jobs.values() if j.status == JobStatus.PENDING_RETRY
-            ]
+            ready = [j for j in self._jobs.values() if j.status == JobStatus.PENDING_RETRY]
             for j in ready:
                 j.status = JobStatus.SUBMITTED
             if ready:
@@ -162,7 +158,4 @@ class JobStore:
 
     def stats(self) -> Dict[str, int]:
         with self._lock:
-            return {
-                s.value: sum(1 for j in self._jobs.values() if j.status == s)
-                for s in JobStatus
-            }
+            return {s.value: sum(1 for j in self._jobs.values() if j.status == s) for s in JobStatus}

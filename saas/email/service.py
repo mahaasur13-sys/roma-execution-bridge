@@ -174,9 +174,7 @@ class EmailService:
                     default=True,
                 )
             )
-            self._templates = {
-                name: self._env.from_string(src) for name, src in TEMPLATES.items()
-            }
+            self._templates = {name: self._env.from_string(src) for name, src in TEMPLATES.items()}
         else:
             self._env = None
             self._templates = {}
@@ -186,9 +184,7 @@ class EmailService:
             raise ValueError(f"Unknown template: {template_name}")
         return str(self._templates[template_name].render(**kwargs))
 
-    def _build_smtp_message(
-        self, to_email: str, subject: str, html_body: str
-    ) -> MIMEMultipart:
+    def _build_smtp_message(self, to_email: str, subject: str, html_body: str) -> MIMEMultipart:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
         msg["From"] = f"{self.cfg.from_name} <{self.cfg.from_email}>"
@@ -257,13 +253,11 @@ class EmailService:
     def send(self, to_email: str, subject: str, html_body: str) -> bool:
         if self.cfg.provider == EmailProvider.CONSOLE:
             print(
-                f"\n{'='*60}\n[EmailService] CONSOLE — would send:\n  To: {to_email}\n  Subject: {subject}\n  Body: {html_body[:200]}...\n{'='*60}\n"
+                f"\n{'=' * 60}\n[EmailService] CONSOLE — would send:\n  To: {to_email}\n  Subject: {subject}\n  Body: {html_body[:200]}...\n{'=' * 60}\n"
             )
             return True
         if self.cfg.provider == EmailProvider.SMTP:
-            return self._send_smtp(
-                to_email, self._build_smtp_message(to_email, subject, html_body)
-            )
+            return self._send_smtp(to_email, self._build_smtp_message(to_email, subject, html_body))
         if self.cfg.provider == EmailProvider.SENDGRID:
             return self._send_sendgrid(to_email, subject, html_body)
         if self.cfg.provider == EmailProvider.RESEND:
@@ -285,7 +279,7 @@ class EmailService:
             brand=brand,
             dashboard_url=dashboard_url,
         )
-        return self.send(to_email, f"Welcome to {brand.get('app_name','ROMA')}!", html)
+        return self.send(to_email, f"Welcome to {brand.get('app_name', 'ROMA')}!", html)
 
     def send_usage_alert(
         self,
@@ -346,9 +340,7 @@ class EmailService:
             brand=brand,
             dashboard_url=dashboard_url,
         )
-        return self.send(
-            to_email, f"🔴 Low Balance — {brand.get('app_name','ROMA')}", html
-        )
+        return self.send(to_email, f"🔴 Low Balance — {brand.get('app_name', 'ROMA')}", html)
 
 
 if __name__ == "__main__":

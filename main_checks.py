@@ -160,9 +160,7 @@ def test_backoff_is_exponential_and_capped(monkeypatch) -> None:
 def test_logs_only_exception_type(monkeypatch) -> None:
     recorder = _Recorder()
     monkeypatch.setattr(main, "logger", recorder)
-    monkeypatch.setattr(
-        main.db, "init_db", _fail_with(RuntimeError("PG_DSN=postgresql://user:secret@host/db"))
-    )
+    monkeypatch.setattr(main.db, "init_db", _fail_with(RuntimeError("PG_DSN=postgresql://user:secret@host/db")))
     monkeypatch.setattr(main.time, "sleep", lambda _seconds: None)
 
     with pytest.raises(RuntimeError):

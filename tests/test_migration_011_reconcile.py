@@ -37,13 +37,14 @@ CREATE TABLE audit_events (
 """
 
 DUP_ROWS = [
-    ("a1", "tA", "job.user_confirmed", "job", "job-A"),   # (a) дубль одной задачи
+    ("a1", "tA", "job.user_confirmed", "job", "job-A"),  # (a) дубль одной задачи
     ("a2", "tA", "job.user_confirmed", "job", "job-A"),
     ("u1", "tA", "job.user_confirmed", "job", "unknown"),  # (b) два unknown одной задачи
     ("u2", "tA", "job.user_confirmed", "job", "unknown"),
-    ("x1", "tA", "job.user_confirmed", "job", "job-X"),   # (c) один job_id у разных tenant
+    ("x1", "tA", "job.user_confirmed", "job", "job-X"),  # (c) один job_id у разных tenant
     ("x2", "tB", "job.user_confirmed", "job", "job-X"),
 ]
+
 
 def _pg_dsn() -> str | None:
     return os.environ.get("PG_DSN") or os.environ.get("DATABASE_URL")
@@ -143,9 +144,7 @@ def test_011_reconciles_prod_form_with_duplicates(prod_form):
     cur.execute("SELECT id FROM audit_events_dedupe_backup")
     assert [r[0] for r in cur.fetchall()] == ["a2"]
 
-    cur.execute(
-        "SELECT 1 FROM pg_indexes WHERE tablename='audit_events' AND indexname='audit_events_dedupe_uidx'"
-    )
+    cur.execute("SELECT 1 FROM pg_indexes WHERE tablename='audit_events' AND indexname='audit_events_dedupe_uidx'")
     assert cur.fetchone() is not None
 
 
@@ -251,21 +250,15 @@ def test_011_null_keys_not_deduped():
         _reset_tables(conn)
         cur = conn.cursor()
         cur.execute(PROD_FORM_SCHEMA)
-        cur.execute(
-            "INSERT INTO audit_events VALUES ('n1',NULL,'job.user_confirmed','job','job-N','{}'::jsonb)"
-        )
-        cur.execute(
-            "INSERT INTO audit_events VALUES ('n2',NULL,'job.user_confirmed','job','job-N','{}'::jsonb)"
-        )
+        cur.execute("INSERT INTO audit_events VALUES ('n1',NULL,'job.user_confirmed','job','job-N','{}'::jsonb)")
+        cur.execute("INSERT INTO audit_events VALUES ('n2',NULL,'job.user_confirmed','job','job-N','{}'::jsonb)")
         _apply_011(conn)
 
         conn.autocommit = True
         cur = conn.cursor()
         cur.execute("SELECT count(*) FROM audit_events WHERE entity_id='job-N'")
         assert cur.fetchone()[0] == 2  # NULL-ключи не склеены дедупом
-        cur.execute(
-            "SELECT 1 FROM pg_indexes WHERE tablename='audit_events' AND indexname='audit_events_dedupe_uidx'"
-        )
+        cur.execute("SELECT 1 FROM pg_indexes WHERE tablename='audit_events' AND indexname='audit_events_dedupe_uidx'")
         assert cur.fetchone() is not None
     finally:
         _cleanup(conn)
@@ -291,12 +284,8 @@ def test_011_lock_blocks_concurrent_write():
         _reset_tables(conn)
         cur = conn.cursor()
         cur.execute(PROD_FORM_SCHEMA)
-        cur.execute(
-            "INSERT INTO audit_events VALUES ('a1','tA','job.user_confirmed','job','job-A','{}'::jsonb)"
-        )
-        cur.execute(
-            "INSERT INTO audit_events VALUES ('a2','tA','job.user_confirmed','job','job-A','{}'::jsonb)"
-        )
+        cur.execute("INSERT INTO audit_events VALUES ('a1','tA','job.user_confirmed','job','job-A','{}'::jsonb)")
+        cur.execute("INSERT INTO audit_events VALUES ('a2','tA','job.user_confirmed','job','job-A','{}'::jsonb)")
 
         pre, index_stmt = _split_migration(MIGRATION_011.read_text())
 
@@ -311,9 +300,7 @@ def test_011_lock_blocks_concurrent_write():
         wcur.execute("SET statement_timeout = 700")
         blocked = False
         try:
-            wcur.execute(
-                "INSERT INTO audit_events VALUES ('a3','tA','job.user_confirmed','job','job-A','{}'::jsonb)"
-            )
+            wcur.execute("INSERT INTO audit_events VALUES ('a3','tA','job.user_confirmed','job','job-A','{}'::jsonb)")
         except psycopg2.errors.QueryCanceled:
             blocked = True
 

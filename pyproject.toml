@@ -108,6 +108,13 @@ markers = [
 target-version = "py311"
 line-length = 120
 
+[tool.ruff.format]
+# N-RUFF-FORMAT (2026-10-25): конвенция дерева — ruff format без строковой нормализации,
+# та же, что зафиксирована ниже в [tool.black] (skip-string-normalization). Смена кавычек
+# в сотнях файлов — шум в истории, а не гигиена. Без этой строки `ruff format` даёт 249
+# файлов дрифта, с ней — 246: разница ровно в трёх файлах с преобладанием двойных кавычек.
+quote-style = "preserve"
+
 [tool.ruff.lint]
 ignore = ["E402", "E741", "F402", "F811"]
 

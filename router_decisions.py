@@ -151,9 +151,7 @@ async def evaluate_decision(payload: dict, x_api_key: str = Header(None)):
     tenant_id = _tenant_from_key(x_api_key)
     pay = payload.get("payload", {})
     request_type = payload.get("request_type", "job_submit")
-    pol = shadow_policy(
-        tenant_id, "decision.evaluate", {"request_type": request_type}
-    )
+    pol = shadow_policy(tenant_id, "decision.evaluate", {"request_type": request_type})
     if pol["result"] != "allowed":
         raise HTTPException(403, pol["reason"])
     decision = gate.evaluate(tenant_id, pay)
@@ -162,6 +160,5 @@ async def evaluate_decision(payload: dict, x_api_key: str = Header(None)):
         "reason": decision.reason,
         "estimated_cost": decision.cost_estimated,
         "quota_remaining": decision.job_limit,
-        "would_create_job": decision.result.value == "allowed"
-        and request_type == "job_submit",
+        "would_create_job": decision.result.value == "allowed" and request_type == "job_submit",
     }

@@ -49,9 +49,7 @@ class CryptoPaymentsPlugin:
         else:
             return {"error": f"Unknown action: {action}"}
 
-    async def _create_invoice(
-        self, amount: float, currency: str, description: str
-    ) -> dict[str, Any]:
+    async def _create_invoice(self, amount: float, currency: str, description: str) -> dict[str, Any]:
         """Create a NOWPayments invoice."""
         if currency not in SUPPORTED_CURRENCIES:
             return {"error": f"Unsupported currency: {currency}"}
@@ -62,9 +60,7 @@ class CryptoPaymentsPlugin:
             hashlib.sha256,
         ).hexdigest()[:16]
 
-        logger.info(
-            "Invoice created: %s %s %s → %s", amount, currency, description, invoice_id
-        )
+        logger.info("Invoice created: %s %s %s → %s", amount, currency, description, invoice_id)
 
         return {
             "invoice_id": invoice_id,
@@ -89,9 +85,7 @@ class CryptoPaymentsPlugin:
     def _add_monero_wallet(self, address: str, view_key: str) -> dict[str, Any]:
         """Register a Monero view-only wallet. NEVER store spend_key."""
         if "spend" in view_key.lower():
-            return {
-                "error": "SPEND KEY DETECTED. View-only wallets only. Spend key rejected automatically."
-            }
+            return {"error": "SPEND KEY DETECTED. View-only wallets only. Spend key rejected automatically."}
 
         if not address.startswith("4") and not address.startswith("8"):
             return {"error": "Invalid Monero address format"}

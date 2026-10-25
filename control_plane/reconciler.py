@@ -53,16 +53,11 @@ class Reconciler:
         if ready:
             log.info(f"AdvancePending: {len(ready)} jobs back to SUBMITTED")
 
-        log.debug(
-            f"[Tick {self._tick_count}] recovered={recovered} "
-            f"healthy={len(self.reg.list_healthy())}"
-        )
+        log.debug(f"[Tick {self._tick_count}] recovered={recovered} healthy={len(self.reg.list_healthy())}")
 
     def start(self, interval: float = 5.0):
         self._running = True
-        self._thread = threading.Thread(
-            target=self._loop, args=(interval,), daemon=True
-        )
+        self._thread = threading.Thread(target=self._loop, args=(interval,), daemon=True)
         self._thread.start()
         log.info(f"Reconciler started (interval={interval}s)")
 

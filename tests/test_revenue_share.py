@@ -23,9 +23,7 @@ def test_tiered_rates():
     ]
     for partner_id, gross, exp_rate in test_cases:
         r = calc.calculate(gross, partner_id)
-        assert (
-            r["rate_used"] == exp_rate
-        ), f"{partner_id}: got {r['rate_used']}, want {exp_rate}"
+        assert r["rate_used"] == exp_rate, f"{partner_id}: got {r['rate_used']}, want {exp_rate}"
         assert r["romas_share"] == round(gross * exp_rate, 6)
         assert r["partner_payout"] == gross - r["romas_share"]
     print("PASS: tiered_rates")

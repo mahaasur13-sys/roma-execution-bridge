@@ -59,9 +59,7 @@ class IPlugin(ABC):
     async def on_init(self, config: Dict[str, Any]) -> None: ...
 
     @abstractmethod
-    async def on_execute(
-        self, task: 'ROMATask', context: 'IExecutionContext'
-    ) -> 'PluginResult': ...
+    async def on_execute(self, task: 'ROMATask', context: 'IExecutionContext') -> 'PluginResult': ...
 
     @abstractmethod
     async def on_validate(self, task: 'ROMATask') -> 'ValidationResult': ...
@@ -96,9 +94,7 @@ class ROMATask:
         self.payload = payload
         self.metadata = metadata
         self._created_at = time.time()
-        self._hash = hashlib.sha256(
-            json.dumps(payload, sort_keys=True).encode()
-        ).hexdigest()[:16]
+        self._hash = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
 
     @property
     def fingerprint(self) -> str:
@@ -108,9 +104,7 @@ class ROMATask:
 class PluginResult:
     """Immutable result — plugin returns this."""
 
-    def __init__(
-        self, success: bool, output: Any = None, error: str = None, metrics: Dict = None
-    ):
+    def __init__(self, success: bool, output: Any = None, error: str = None, metrics: Dict = None):
         self.success = success
         self.output = output
         self.error = error
@@ -160,9 +154,7 @@ class MLTrainingPlugin(IPlugin):
     async def on_init(self, config: Dict[str, Any]) -> None:
         self.config = config
 
-    async def on_execute(
-        self, task: ROMATask, context: IExecutionContext
-    ) -> PluginResult:
+    async def on_execute(self, task: ROMATask, context: IExecutionContext) -> PluginResult:
         # Simulate GPU training execution
         batch_size = task.payload.get("batch_size", 8)
         epochs = task.payload.get("epochs", 10)
@@ -210,9 +202,7 @@ class InferencePlugin(IPlugin):
     def priority(self) -> PluginPriority:
         return PluginPriority.CRITICAL
 
-    async def on_execute(
-        self, task: ROMATask, context: IExecutionContext
-    ) -> PluginResult:
+    async def on_execute(self, task: ROMATask, context: IExecutionContext) -> PluginResult:
         model = task.payload.get("model", "unknown")
         return PluginResult(
             success=True,
@@ -252,12 +242,8 @@ class ETLPipelinePlugin(IPlugin):
     def priority(self) -> PluginPriority:
         return PluginPriority.NORMAL
 
-    async def on_execute(
-        self, task: ROMATask, context: IExecutionContext
-    ) -> PluginResult:
-        return PluginResult(
-            success=True, output={"pipeline_id": task.task_id, "stage": "completed"}
-        )
+    async def on_execute(self, task: ROMATask, context: IExecutionContext) -> PluginResult:
+        return PluginResult(success=True, output={"pipeline_id": task.task_id, "stage": "completed"})
 
     async def on_init(self, config: Dict[str, Any]) -> None:
         pass
@@ -288,9 +274,7 @@ class SimulationPlugin(IPlugin):
     def priority(self) -> PluginPriority:
         return PluginPriority.LOW
 
-    async def on_execute(
-        self, task: ROMATask, context: IExecutionContext
-    ) -> PluginResult:
+    async def on_execute(self, task: ROMATask, context: IExecutionContext) -> PluginResult:
         return PluginResult(success=True, output={"sim_id": task.task_id})
 
     async def on_init(self, config: Dict[str, Any]) -> None:

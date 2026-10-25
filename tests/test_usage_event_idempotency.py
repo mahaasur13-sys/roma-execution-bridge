@@ -25,8 +25,7 @@ def test_usage_event_idempotency():
     dsn = _pg_dsn()
     if not dsn:
         pytest.skip(
-            "PG not reachable — usage-event idempotency requires a live PG; "
-            "issue: RaaS-01 · expiry: 2026-12-31"
+            "PG not reachable — usage-event idempotency requires a live PG; issue: RaaS-01 · expiry: 2026-12-31"
         )
     subprocess.run(
         [sys.executable, str(REPO_ROOT / "scripts" / "run_migrations.py")],
@@ -43,38 +42,31 @@ def test_usage_event_idempotency():
     job = f"job-{uuid.uuid4().hex[:8]}"
 
     # 1. same (tenant, job, event_type) twice -> ONE row; repeat does not update.
-    engine.record("gpu_usage", tenant=tenant, gpu_seconds=10.0, job_id=job,
-                  cost_usd=0.0001, billed=True)
-    engine.record("gpu_usage", tenant=tenant, gpu_seconds=99.0, job_id=job,
-                  cost_usd=9.99, billed=False)
+    engine.record("gpu_usage", tenant=tenant, gpu_seconds=10.0, job_id=job, cost_usd=0.0001, billed=True)
+    engine.record("gpu_usage", tenant=tenant, gpu_seconds=99.0, job_id=job, cost_usd=9.99, billed=False)
 
     # 2. gpu_usage + token_usage on the same job -> TWO rows.
-    engine.record("token_usage", tenant=tenant, job_id=job, value=100.0,
-                  cost_usd=0.1, billed=True)
+    engine.record("token_usage", tenant=tenant, job_id=job, value=100.0, cost_usd=0.1, billed=True)
 
     # 3. manual job_id twice -> TWO rows (not collapsed).
-    engine.record("gpu_usage", tenant=tenant, gpu_seconds=5.0, job_id="manual",
-                  billed=False)
-    engine.record("gpu_usage", tenant=tenant, gpu_seconds=5.0, job_id="manual",
-                  billed=False)
+    engine.record("gpu_usage", tenant=tenant, gpu_seconds=5.0, job_id="manual", billed=False)
+    engine.record("gpu_usage", tenant=tenant, gpu_seconds=5.0, job_id="manual", billed=False)
 
     conn = psycopg2.connect(dsn)
     cur = conn.cursor()
     cur.execute(
-        "SELECT COUNT(*) FROM usage_events "
-        "WHERE tenant_id=%s AND job_id=%s AND event_type='gpu_usage'",
+        "SELECT COUNT(*) FROM usage_events WHERE tenant_id=%s AND job_id=%s AND event_type='gpu_usage'",
         (tenant, job),
     )
     assert cur.fetchone()[0] == 1
 
     cur.execute(
-        "SELECT cost_usd, billed FROM usage_events "
-        "WHERE tenant_id=%s AND job_id=%s AND event_type='gpu_usage'",
+        "SELECT cost_usd, billed FROM usage_events WHERE tenant_id=%s AND job_id=%s AND event_type='gpu_usage'",
         (tenant, job),
     )
     cost_usd, billed = cur.fetchone()
     assert cost_usd == 0.0001  # repeat did NOT overwrite
-    assert billed is True       # repeat did NOT overwrite
+    assert billed is True  # repeat did NOT overwrite
 
     cur.execute(
         "SELECT COUNT(*) FROM usage_events WHERE tenant_id=%s AND job_id=%s",
@@ -83,8 +75,7 @@ def test_usage_event_idempotency():
     assert cur.fetchone()[0] == 2  # gpu + token
 
     cur.execute(
-        "SELECT COUNT(*) FROM usage_events "
-        "WHERE tenant_id=%s AND job_id='manual' AND event_type='gpu_usage'",
+        "SELECT COUNT(*) FROM usage_events WHERE tenant_id=%s AND job_id='manual' AND event_type='gpu_usage'",
         (tenant,),
     )
     assert cur.fetchone()[0] == 2  # manual NOT collapsed

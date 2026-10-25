@@ -48,9 +48,7 @@ def gpu_timeout() -> int:
     try:
         value = int(raw)
     except ValueError:
-        raise ConnectorConfigError(
-            f"ROMA_GPU_TIMEOUT must be an integer number of seconds, got {raw!r}"
-        ) from None
+        raise ConnectorConfigError(f"ROMA_GPU_TIMEOUT must be an integer number of seconds, got {raw!r}") from None
     if value <= 0:
         raise ConnectorConfigError(f"ROMA_GPU_TIMEOUT must be > 0, got {value}")
     return value
@@ -141,9 +139,7 @@ class GPUWorkerPool:
             loop = asyncio.get_event_loop()
             resp = await loop.run_in_executor(
                 None,
-                lambda: requests.post(
-                    f"{worker['url']}/execute", json=payload, timeout=gpu_timeout()
-                ),
+                lambda: requests.post(f"{worker['url']}/execute", json=payload, timeout=gpu_timeout()),
             )
 
             if resp.status_code == 200:

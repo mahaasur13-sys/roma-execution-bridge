@@ -41,9 +41,7 @@ def _run_cycles(wd, tmp_path, monkeypatch, *, recent_minutes: tuple[int, ...]) -
     state_path = tmp_path / "state.json"
     now = datetime.datetime.now(datetime.timezone.utc)
     recent = [
-        (now - datetime.timedelta(minutes=m))
-        .isoformat(timespec="seconds")
-        .replace("+00:00", "Z")
+        (now - datetime.timedelta(minutes=m)).isoformat(timespec="seconds").replace("+00:00", "Z")
         for m in recent_minutes
     ]
     state_path.write_text(
@@ -85,9 +83,7 @@ def _run_cycles(wd, tmp_path, monkeypatch, *, recent_minutes: tuple[int, ...]) -
         with pytest.raises(SystemExit):
             wd.main()
 
-    events = [
-        json.loads(line) for line in buf.getvalue().splitlines() if line.startswith("{")
-    ]
+    events = [json.loads(line) for line in buf.getvalue().splitlines() if line.startswith("{")]
     log_path = tmp_path / "watchdog.log"
     return {
         "events": events,
@@ -120,7 +116,5 @@ def test_restart_budget_gate(tmp_path, monkeypatch) -> None:
     available_dir = tmp_path / "available"
     available_dir.mkdir()
     ok = _run_cycles(wd, available_dir, monkeypatch, recent_minutes=(90,))
-    assert ok["calls"] == [
-        "start_cluster"
-    ], f"ожидался подъём кластера, вызовы={ok['calls']}"
+    assert ok["calls"] == ["start_cluster"], f"ожидался подъём кластера, вызовы={ok['calls']}"
     assert not ok["state"].get("budget_exceeded")

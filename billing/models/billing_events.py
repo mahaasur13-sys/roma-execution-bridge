@@ -58,12 +58,8 @@ class BillingEventStore:
     def get_for_tenant(self, tenant_id: str) -> list[BillingEvent]:
         return self._by_tenant.get(tenant_id, [])
 
-    def get_in_range(
-        self, tenant_id: str, start: float, end: float
-    ) -> list[BillingEvent]:
-        return [
-            e for e in self.get_for_tenant(tenant_id) if start <= e.timestamp <= end
-        ]
+    def get_in_range(self, tenant_id: str, start: float, end: float) -> list[BillingEvent]:
+        return [e for e in self.get_for_tenant(tenant_id) if start <= e.timestamp <= end]
 
     def last_event(self, tenant_id: str) -> Optional[BillingEvent]:
         tenant_events = self.get_for_tenant(tenant_id)

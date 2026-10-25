@@ -139,19 +139,14 @@ def init_db() -> None:
     # OperationalError is raised instead of being silently swallowed.
     cols = {row[1] for row in c.execute("PRAGMA table_info(tenants)").fetchall()}
     if "api_key_hash" not in cols:
-        c.execute(
-            "ALTER TABLE tenants ADD COLUMN api_key_hash TEXT NOT NULL DEFAULT ''"
-        )
+        c.execute("ALTER TABLE tenants ADD COLUMN api_key_hash TEXT NOT NULL DEFAULT ''")
     # G-SEC4/M1+M3: every legacy row that still carries a plaintext key is visited —
     # the hash is computed only when missing, but the plaintext is cleared in all of
     # them (a row with both fields kept its plaintext before this fix).
     # Idempotent: a re-run matches no rows.
     import hashlib
 
-    legacy = c.execute(
-        "SELECT id, api_key, api_key_hash FROM tenants "
-        "WHERE coalesce(api_key, '') <> ''"
-    ).fetchall()
+    legacy = c.execute("SELECT id, api_key, api_key_hash FROM tenants WHERE coalesce(api_key, '') <> ''").fetchall()
     for row in legacy:
         digest = row[2] or hashlib.sha256((row[1] or "").encode("utf-8")).hexdigest()
         c.execute(
@@ -230,9 +225,7 @@ def set_tenant_inactive(tenant_id: str) -> None:
     c.close()
 
 
-def record_webhook_event(
-    stripe_event_id: str, event_type: str, tenant_id: str, payload: str
-) -> None:
+def record_webhook_event(stripe_event_id: str, event_type: str, tenant_id: str, payload: str) -> None:
     c = _conn()
     c.execute(
         "INSERT OR IGNORE INTO webhook_events(stripe_event_id, event_type, tenant_id, payload) VALUES (?,?,?,?)",
@@ -244,16 +237,12 @@ def record_webhook_event(
 
 def list_webhook_events(limit: int = 20) -> list[dict]:
     c = _conn()
-    rows = c.execute(
-        "SELECT * FROM webhook_events ORDER BY received_at DESC LIMIT ?", (limit,)
-    ).fetchall()
+    rows = c.execute("SELECT * FROM webhook_events ORDER BY received_at DESC LIMIT ?", (limit,)).fetchall()
     c.close()
     return [dict(r) for r in rows]
 
 
-def add_lead(
-    email: str, company: str = "", role: str = "", use_case: str = "", source: str = ""
-) -> int:
+def add_lead(email: str, company: str = "", role: str = "", use_case: str = "", source: str = "") -> int:
     c = _conn()
     cur = c.execute(
         "INSERT INTO leads (email, company, role, use_case, source) VALUES (?, ?, ?, ?, ?)",
@@ -268,9 +257,7 @@ def add_lead(
 def list_leads(status: str = "") -> list[dict]:
     c = _conn()
     if status:
-        rows = c.execute(
-            "SELECT * FROM leads WHERE status = ? ORDER BY created_at DESC", (status,)
-        ).fetchall()
+        rows = c.execute("SELECT * FROM leads WHERE status = ? ORDER BY created_at DESC", (status,)).fetchall()
     else:
         rows = c.execute("SELECT * FROM leads ORDER BY created_at DESC").fetchall()
     c.close()
@@ -287,9 +274,7 @@ def update_lead_status(lead_id: int, status: str, notes: str = "") -> None:
     c.close()
 
 
-def upsert_oauth_user(
-    user_id: str, email: str, name: str, provider: str, tenant_id: str, api_key: str
-) -> dict:
+def upsert_oauth_user(user_id: str, email: str, name: str, provider: str, tenant_id: str, api_key: str) -> dict:
     c = _conn()
     now = datetime.now(timezone.utc).isoformat()
     existing = c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
@@ -330,9 +315,7 @@ def get_user_by_api_key(api_key: str) -> dict | None:
     return dict(row) if row else None
 
 
-def log_email_sent(
-    recipient_email: str, recipient_name: str, tenant_id: str, invitation_link: str
-) -> int:
+def log_email_sent(recipient_email: str, recipient_name: str, tenant_id: str, invitation_link: str) -> int:
     c = _conn()
     cur = c.execute(
         "INSERT INTO email_logs (recipient_email, recipient_name, tenant_id, invitation_link, status) VALUES (?, ?, ?, ?, 'sent')",
@@ -386,18 +369,10 @@ def update_email_event(recipient_email: str, event_type: str) -> None:
 def get_email_stats() -> dict:
     c = _conn()
     total = c.execute("SELECT COUNT(*) FROM email_logs").fetchone()[0]
-    sent = c.execute(
-        "SELECT COUNT(*) FROM email_logs WHERE status != 'pending'"
-    ).fetchone()[0]
-    opened = c.execute(
-        "SELECT COUNT(*) FROM email_logs WHERE opened_at IS NOT NULL"
-    ).fetchone()[0]
-    clicked = c.execute(
-        "SELECT COUNT(*) FROM email_logs WHERE clicked_at IS NOT NULL"
-    ).fetchone()[0]
-    bounced = c.execute(
-        "SELECT COUNT(*) FROM email_logs WHERE status = 'bounced'"
-    ).fetchone()[0]
+    sent = c.execute("SELECT COUNT(*) FROM email_logs WHERE status != 'pending'").fetchone()[0]
+    opened = c.execute("SELECT COUNT(*) FROM email_logs WHERE opened_at IS NOT NULL").fetchone()[0]
+    clicked = c.execute("SELECT COUNT(*) FROM email_logs WHERE clicked_at IS NOT NULL").fetchone()[0]
+    bounced = c.execute("SELECT COUNT(*) FROM email_logs WHERE status = 'bounced'").fetchone()[0]
     c.close()
     return {
         "total": total,
@@ -434,9 +409,7 @@ def get_analytics_overview(days: int = 30) -> dict:
     c = _conn()
     cutoff = f"datetime('now', '-{days} days')"
 
-    total_users = c.execute(
-        "SELECT COUNT(DISTINCT tenant_id) FROM user_events"
-    ).fetchone()[0]
+    total_users = c.execute("SELECT COUNT(DISTINCT tenant_id) FROM user_events").fetchone()[0]
     active_today = c.execute(
         "SELECT COUNT(DISTINCT tenant_id) FROM user_events WHERE created_at >= datetime('now', '-1 day')"
     ).fetchone()[0]
@@ -447,30 +420,20 @@ def get_analytics_overview(days: int = 30) -> dict:
         "SELECT COUNT(DISTINCT tenant_id) FROM user_events WHERE created_at >= datetime('now', '-30 days')"
     ).fetchone()[0]
 
-    login_users = c.execute(
-        "SELECT COUNT(DISTINCT tenant_id) FROM user_events WHERE event_type='login'"
-    ).fetchone()[0]
+    login_users = c.execute("SELECT COUNT(DISTINCT tenant_id) FROM user_events WHERE event_type='login'").fetchone()[0]
     submit_users = c.execute(
         "SELECT COUNT(DISTINCT tenant_id) FROM user_events WHERE event_type='job_submit'"
     ).fetchone()[0]
     login_to_submit = round(submit_users / login_users, 2) if login_users > 0 else 0
-    total_submits = c.execute(
-        "SELECT COUNT(*) FROM user_events WHERE event_type='job_submit'"
-    ).fetchone()[0]
-    total_completes = c.execute(
-        "SELECT COUNT(*) FROM user_events WHERE event_type='job_complete'"
-    ).fetchone()[0]
-    submit_to_complete = (
-        round(total_completes / total_submits, 2) if total_submits > 0 else 0
-    )
+    total_submits = c.execute("SELECT COUNT(*) FROM user_events WHERE event_type='job_submit'").fetchone()[0]
+    total_completes = c.execute("SELECT COUNT(*) FROM user_events WHERE event_type='job_complete'").fetchone()[0]
+    submit_to_complete = round(total_completes / total_submits, 2) if total_submits > 0 else 0
 
     total_jobs = c.execute(
         "SELECT COUNT(*) FROM user_events WHERE event_type IN ('job_submit', 'job_complete', 'job_failed')"
     ).fetchone()[0]
     by_backend = {}
-    for row in c.execute(
-        "SELECT event_data FROM user_events WHERE event_type='job_submit'"
-    ).fetchall():
+    for row in c.execute("SELECT event_data FROM user_events WHERE event_type='job_submit'").fetchall():
         try:
             d = json.loads(row[0])
             be = d.get("backend", "local")
@@ -519,9 +482,7 @@ def get_analytics_overview(days: int = 30) -> dict:
     }
 
 
-def get_analytics_users(
-    start_date: str = "", end_date: str = "", sort_by: str = "last_seen"
-) -> list[dict]:
+def get_analytics_users(start_date: str = "", end_date: str = "", sort_by: str = "last_seen") -> list[dict]:
     c = _conn()
     query = """SELECT tenant_id, MAX(created_at) as last_seen, MIN(created_at) as first_seen,
                COUNT(*) as total_events,
@@ -535,9 +496,7 @@ def get_analytics_users(
     if end_date:
         query += " AND created_at <= ?"
         params.append(end_date)
-    query += " GROUP BY tenant_id ORDER BY " + (
-        "last_seen DESC" if sort_by == "last_seen" else "total_events DESC"
-    )
+    query += " GROUP BY tenant_id ORDER BY " + ("last_seen DESC" if sort_by == "last_seen" else "total_events DESC")
     rows = c.execute(query, params).fetchall()
     c.close()
     return [
@@ -577,9 +536,7 @@ def get_analytics_events(
         where.append("created_at <= ?")
         params.append(to_date)
     wh = " AND ".join(where)
-    total = c.execute(
-        f"SELECT COUNT(*) FROM user_events WHERE {wh}", params
-    ).fetchone()[0]
+    total = c.execute(f"SELECT COUNT(*) FROM user_events WHERE {wh}", params).fetchone()[0]
     rows = c.execute(
         f"SELECT * FROM user_events WHERE {wh} ORDER BY created_at DESC LIMIT ? OFFSET ?",
         params + [limit, offset],
@@ -680,8 +637,7 @@ def is_invoice_processed(invoice_id: str, tenant_id: str = "") -> bool:
     c = _conn()
     try:
         c.execute(
-            "SELECT 1 FROM processed_invoices WHERE invoice_id = ? "
-            "AND (? = '' OR tenant_id = ?) LIMIT 1",
+            "SELECT 1 FROM processed_invoices WHERE invoice_id = ? AND (? = '' OR tenant_id = ?) LIMIT 1",
             (invoice_id, tenant_id, tenant_id),
         )
         return c.fetchone() is not None
@@ -689,9 +645,7 @@ def is_invoice_processed(invoice_id: str, tenant_id: str = "") -> bool:
         c.close()
 
 
-def mark_invoice_processed(
-    invoice_id: str, event_type: str = "", tenant_id: str = ""
-) -> None:
+def mark_invoice_processed(invoice_id: str, event_type: str = "", tenant_id: str = "") -> None:
     """Помечает InvoiceId как обработанный (идемпотентность)."""
     if not invoice_id:
         return

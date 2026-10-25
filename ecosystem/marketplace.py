@@ -40,11 +40,7 @@ class PluginMarketplace:
         return listing
 
     def verify_signature(self, listing: MarketplaceListing) -> bool:
-        expected = (
-            hashlib.sha256(f"{listing.plugin_name}:{listing.version}".encode())
-            .hexdigest()[:16]
-            .upper()
-        )
+        expected = hashlib.sha256(f"{listing.plugin_name}:{listing.version}".encode()).hexdigest()[:16].upper()
         return listing.signature == f"SHA256:{expected}"
 
 

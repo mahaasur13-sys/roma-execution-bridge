@@ -38,9 +38,7 @@ class JobRetryManager:
     Job is only considered done after COMMITTED state (event store commit).
     """
 
-    def __init__(
-        self, max_retries: int = 3, base_backoff: float = 2.0, max_backoff: float = 60.0
-    ):
+    def __init__(self, max_retries: int = 3, base_backoff: float = 2.0, max_backoff: float = 60.0):
         self.max_retries = max_retries
         self.base_backoff = base_backoff
         self.max_backoff = max_backoff
@@ -165,9 +163,7 @@ class JobRetryManager:
                 "total_jobs": total,
                 "by_state": by_state,
                 "retry_queue_depth": len(self._retry_queue),
-                "success_rate": (
-                    by_state[JobState.COMMITTED.value] / total * 100 if total > 0 else 0
-                ),
+                "success_rate": (by_state[JobState.COMMITTED.value] / total * 100 if total > 0 else 0),
             }
 
     def on_retry(self, cb: Callable):

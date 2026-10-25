@@ -41,9 +41,7 @@ def run_job(task_cmd):
         argv, err = _argv_from_command(task_cmd)
         if err:
             return {"success": False, "error": err}
-        result = subprocess.run(
-            argv, shell=False, capture_output=True, text=True, timeout=300
-        )
+        result = subprocess.run(argv, shell=False, capture_output=True, text=True, timeout=300)
         return {
             "success": result.returncode == 0,
             "stdout": result.stdout,
@@ -76,7 +74,7 @@ def main():
             print(f"\nJob {job_id} | task: {task[:80]}")
             result = run_job(task)
             status_icon = "OK" if result["success"] else "FAIL"
-            print(f"   {status_icon}: {result.get('stdout','')[:150]}")
+            print(f"   {status_icon}: {result.get('stdout', '')[:150]}")
         except urllib.error.URLError as e:
             print(f"API error: {e.reason}")
         except Exception as e:

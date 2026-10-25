@@ -96,10 +96,7 @@ def _cleanup(conn) -> None:
 def prod_form():
     """audit_events в прод-форме (с created_at) + дубли с ПЕРЕВЁРНУТЫМ порядком вставки."""
     if not _pg_reachable():
-        pytest.skip(
-            "PG not reachable — reconciling audit requires live PG; "
-            "issue: P1-C · expiry: 2026-12-31"
-        )
+        pytest.skip("PG not reachable — reconciling audit requires live PG; issue: P1-C · expiry: 2026-12-31")
     import psycopg2
 
     conn = psycopg2.connect(_pg_dsn())
@@ -125,10 +122,7 @@ def prod_form():
 def clean_form():
     """audit_events в прод-форме БЕЗ дублей — база для «повторный накат = noop»."""
     if not _pg_reachable():
-        pytest.skip(
-            "PG not reachable — reconciling audit requires live PG; "
-            "issue: P1-C · expiry: 2026-12-31"
-        )
+        pytest.skip("PG not reachable — reconciling audit requires live PG; issue: P1-C · expiry: 2026-12-31")
     import psycopg2
 
     conn = psycopg2.connect(_pg_dsn())
@@ -191,10 +185,7 @@ def test_012_reapply_is_noop(clean_form):
 def test_012_ignores_identity_column():
     """Авто-колонка (GENERATED ALWAYS AS IDENTITY) не вставляется явно — 012 не падает."""
     if not _pg_reachable():
-        pytest.skip(
-            "PG not reachable — reconciling audit requires live PG; "
-            "issue: P1-C · expiry: 2026-12-31"
-        )
+        pytest.skip("PG not reachable — reconciling audit requires live PG; issue: P1-C · expiry: 2026-12-31")
     import psycopg2
 
     conn = psycopg2.connect(_pg_dsn())
@@ -229,10 +220,7 @@ def test_012_no_dups_unknown_and_null_variants():
     поэтому «грязный» по ключам набор не трогается.
     """
     if not _pg_reachable():
-        pytest.skip(
-            "PG not reachable — reconciling audit requires live PG; "
-            "issue: P1-C · expiry: 2026-12-31"
-        )
+        pytest.skip("PG not reachable — reconciling audit requires live PG; issue: P1-C · expiry: 2026-12-31")
     import psycopg2
 
     conn = psycopg2.connect(_pg_dsn())

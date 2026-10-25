@@ -55,18 +55,10 @@ def cp(monkeypatch):
     monkeypatch.setattr(main, "CLOUDPAYMENTS_ENABLED", True)
     monkeypatch.setattr(main, "cloudpayments_client", fake)
     monkeypatch.setattr(main.db, "get_tenant", lambda tid: {"id": tid})
-    monkeypatch.setattr(
-        main.db, "update_tenant_subscription", lambda *a, **k: calls["sub"].append(a)
-    )
-    monkeypatch.setattr(
-        main.db, "mark_invoice_processed", lambda *a, **k: calls["mark"].append(a)
-    )
-    monkeypatch.setattr(
-        main.db, "set_tenant_inactive", lambda *a, **k: calls["inactive"].append(a)
-    )
-    monkeypatch.setattr(
-        main.db, "is_invoice_processed", lambda invoice_id, tenant_id="": False
-    )
+    monkeypatch.setattr(main.db, "update_tenant_subscription", lambda *a, **k: calls["sub"].append(a))
+    monkeypatch.setattr(main.db, "mark_invoice_processed", lambda *a, **k: calls["mark"].append(a))
+    monkeypatch.setattr(main.db, "set_tenant_inactive", lambda *a, **k: calls["inactive"].append(a))
+    monkeypatch.setattr(main.db, "is_invoice_processed", lambda invoice_id, tenant_id="": False)
     return {"calls": calls}
 
 

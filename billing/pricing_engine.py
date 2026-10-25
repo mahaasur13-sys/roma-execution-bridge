@@ -47,9 +47,7 @@ class PricingEngine:
         self.utilization = util
         self.multiplier = 1.0 + (util * 0.5)
 
-    def calculate(
-        self, tier: PricingTier, gpu_s: float = 0, cpu_s: float = 0, gb_s: float = 0
-    ) -> dict:
+    def calculate(self, tier: PricingTier, gpu_s: float = 0, cpu_s: float = 0, gb_s: float = 0) -> dict:
         rates = {
             PricingTier.FREE: (0.0, 0.0, 0.0),
             PricingTier.PRO: (0.005, 0.001, 0.00001),
@@ -92,11 +90,7 @@ class PricingEngine:
         return base * multiplier
 
 
-def estimate_cost(
-    tenant_id: str, gpu_seconds: float, cpu_seconds: float, gb_seconds: float
-) -> float:
+def estimate_cost(tenant_id: str, gpu_seconds: float, cpu_seconds: float, gb_seconds: float) -> float:
     pe = PricingEngine()
-    result = pe.calculate(
-        PricingTier.PRO, gpu_s=gpu_seconds, cpu_s=cpu_seconds, gb_s=gb_seconds
-    )
+    result = pe.calculate(PricingTier.PRO, gpu_s=gpu_seconds, cpu_s=cpu_seconds, gb_s=gb_seconds)
     return result["total"]

@@ -54,12 +54,7 @@ class RBACEngine:
         role = self._orgs[org_id][user_id]
         allowed = ROLE_PERMISSIONS.get(role, set())
         for p in allowed:
-            if (
-                p == "*"
-                or p == permission
-                or p.endswith(":*")
-                and permission.startswith(p[:-2])
-            ):
+            if p == "*" or p == permission or p.endswith(":*") and permission.startswith(p[:-2]):
                 return True
         return False
 

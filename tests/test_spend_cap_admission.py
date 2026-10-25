@@ -52,9 +52,7 @@ def _setup(monkeypatch, cap, ledger):
     monkeypatch.setattr(main, "billing_ledger", ledger)
     monkeypatch.setattr(main, "track_spend_cap", lambda *a, **k: None)
     monkeypatch.setattr(main, "track_spend_cap_blocked", lambda *a, **k: None)
-    monkeypatch.setattr(
-        main, "alert_dispatcher", types.SimpleNamespace(send=lambda *a, **k: None)
-    )
+    monkeypatch.setattr(main, "alert_dispatcher", types.SimpleNamespace(send=lambda *a, **k: None))
 
 
 def test_cap_zero_blocks_paid_work(monkeypatch):

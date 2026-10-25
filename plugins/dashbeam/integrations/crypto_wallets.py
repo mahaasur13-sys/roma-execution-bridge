@@ -41,10 +41,7 @@ class MoneroSharingValidator:
         for key, value in d.items():
             full_path = f"{path}.{key}"
             if key.lower() in FORBIDDEN_KEYS:
-                raise ValueError(
-                    f"SPEND KEY BLOCKED at '{full_path}'. "
-                    f"DashBeam never transfers spend keys."
-                )
+                raise ValueError(f"SPEND KEY BLOCKED at '{full_path}'. DashBeam never transfers spend keys.")
             if isinstance(value, dict):
                 self._scan_dict(value, full_path)
             elif isinstance(value, list):
@@ -86,8 +83,4 @@ class MoneroSharingValidator:
 
     def is_monero_data(self, data: dict[str, Any]) -> bool:
         """Check if the shared data appears to be Monero wallet data."""
-        return (
-            data.get("type") == "monero_view_only_share"
-            or "address" in data
-            and "view_key" in data
-        )
+        return data.get("type") == "monero_view_only_share" or "address" in data and "view_key" in data

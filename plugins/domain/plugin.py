@@ -66,30 +66,18 @@ class PluginManifest(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    name: str = Field(
-        ..., min_length=1, max_length=128, description="Unique plugin slug (kebab-case)"
-    )
+    name: str = Field(..., min_length=1, max_length=128, description="Unique plugin slug (kebab-case)")
     version: str = Field(default="1.0.0", pattern=r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$")
     display_name: str = Field(..., max_length=256)
     description: str = Field(default="", max_length=1024)
     author: str = Field(default="ROMA Community")
     category: PluginCategory = PluginCategory.CUSTOM
-    entry_point: str = Field(
-        ..., description="Fully qualified Python path: pkg.module:Class"
-    )
-    dependencies: tuple[str, ...] = Field(
-        default_factory=tuple, description="Other plugin names required"
-    )
+    entry_point: str = Field(..., description="Fully qualified Python path: pkg.module:Class")
+    dependencies: tuple[str, ...] = Field(default_factory=tuple, description="Other plugin names required")
     minimum_tier: PluginTier = PluginTier.FREE
-    config_schema: dict[str, Any] = Field(
-        default_factory=dict, description="JSON Schema for plugin config"
-    )
-    permissions: tuple[str, ...] = Field(
-        default_factory=tuple, description="Requested permissions: db,network,fs"
-    )
-    sandbox_policy: str = Field(
-        default="restricted", description="sandbox profile: restricted | network | full"
-    )
+    config_schema: dict[str, Any] = Field(default_factory=dict, description="JSON Schema for plugin config")
+    permissions: tuple[str, ...] = Field(default_factory=tuple, description="Requested permissions: db,network,fs")
+    sandbox_policy: str = Field(default="restricted", description="sandbox profile: restricted | network | full")
     tags: tuple[str, ...] = Field(default_factory=tuple)
 
 
@@ -118,9 +106,7 @@ class PluginInstance(BaseModel):
     def is_available(self, tier: str) -> bool:
         """Check if plugin is visible to given tier."""
         tier_order = {"free": 0, "pro": 1, "enterprise": 2}
-        return tier_order.get(tier, 0) >= tier_order.get(
-            self.manifest.minimum_tier.value, 0
-        )
+        return tier_order.get(tier, 0) >= tier_order.get(self.manifest.minimum_tier.value, 0)
 
 
 # ────────────────────────────────────────
@@ -137,9 +123,7 @@ class ThoughtStep(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     agent: str = Field(..., description="Plugin/agent name")
     thought: str = Field(..., description="Natural language reasoning step")
-    data: dict[str, Any] = Field(
-        default_factory=dict, description="Structured data for this step"
-    )
+    data: dict[str, Any] = Field(default_factory=dict, description="Structured data for this step")
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     parent_step_id: str | None = None
 

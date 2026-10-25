@@ -71,7 +71,8 @@ def test_no_secret_returns_503(monkeypatch):
     monkeypatch.setattr(mod, "STRIPE_SECRET", "")
     client = TestClient(mod.app, raise_server_exceptions=False)
     resp = client.post(
-        "/webhook/stripe", content="{}",
+        "/webhook/stripe",
+        content="{}",
         headers={"Stripe-Signature": "t=1,v1=x"},
     )
     assert resp.status_code == 503
@@ -90,7 +91,8 @@ def test_wrong_signature_returns_400(monkeypatch):
     monkeypatch.setattr(mod, "_redis", None)
     client = TestClient(mod.app, raise_server_exceptions=False)
     resp = client.post(
-        "/webhook/stripe", content="{}",
+        "/webhook/stripe",
+        content="{}",
         headers={"Stripe-Signature": "t=1,v1=deadbeef"},
     )
     assert resp.status_code == 400
@@ -122,17 +124,12 @@ def test_duplicate_event_processed_once(monkeypatch):
 
     monkeypatch.setattr(mod, "_sync_tenant", _noop)
 
-    body = (
-        b'{"id":"evt_dup","type":"invoice.paid",'
-        b'"data":{"object":{"metadata":{"tenant_id":"t-pro"}}}}'
-    )
+    body = b'{"id":"evt_dup","type":"invoice.paid","data":{"object":{"metadata":{"tenant_id":"t-pro"}}}}'
     sig = _stripe_sig(SECRET, body)
 
     client = TestClient(mod.app, raise_server_exceptions=False)
-    r1 = client.post("/webhook/stripe", content=body,
-                     headers={"Stripe-Signature": sig})
-    r2 = client.post("/webhook/stripe", content=body,
-                     headers={"Stripe-Signature": sig})
+    r1 = client.post("/webhook/stripe", content=body, headers={"Stripe-Signature": sig})
+    r2 = client.post("/webhook/stripe", content=body, headers={"Stripe-Signature": sig})
 
     assert r1.status_code == 200
     assert r1.json()["processed"] is True
@@ -148,7 +145,8 @@ def test_old_timestamp_returns_400(monkeypatch):
     body = b'{"id":"evt_old"}'
     sig = _stripe_sig(SECRET, body, t=int(time.time()) - 600)
     resp = client.post(
-        "/webhook/stripe", content=body,
+        "/webhook/stripe",
+        content=body,
         headers={"Stripe-Signature": sig},
     )
     assert resp.status_code == 400

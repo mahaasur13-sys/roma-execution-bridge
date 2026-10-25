@@ -13,9 +13,7 @@ def tenant_config():
         "acme": TenantGatewayConfig(
             tenant_id="acme",
             display_name="ACME Corp",
-            branding=BrandingConfig(
-                inject_headers=True, logo_url="https://acme.com/logo.png"
-            ),
+            branding=BrandingConfig(inject_headers=True, logo_url="https://acme.com/logo.png"),
         ),
         "beta": TenantGatewayConfig(
             tenant_id="beta",

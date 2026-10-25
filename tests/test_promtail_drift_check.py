@@ -58,9 +58,7 @@ def _run(manifest: pathlib.Path) -> subprocess.CompletedProcess:
     )
 
 
-def _fixture(
-    tmp_path: pathlib.Path, *, live: str, canon: str, fingerprint: str
-) -> pathlib.Path:
+def _fixture(tmp_path: pathlib.Path, *, live: str, canon: str, fingerprint: str) -> pathlib.Path:
     """Фикстура изолирует одну причину: живой конфиг, снапшот-канон и записанный фингерпринт
     задаются независимо; пути в манифесте абсолютные, поэтому реальные файлы ноды не участвуют.
     """
@@ -69,9 +67,7 @@ def _fixture(
     sha_path = tmp_path / "canon-promtail-config.sha256"
     live_path.write_text(live, encoding="utf-8")
     canon_path.write_text(canon, encoding="utf-8")
-    sha_path.write_text(
-        f"{fingerprint}  canon-promtail-config.yaml\n", encoding="utf-8"
-    )
+    sha_path.write_text(f"{fingerprint}  canon-promtail-config.yaml\n", encoding="utf-8")
     manifest = tmp_path / "executed_paths.json"
     manifest.write_text(
         json.dumps(
@@ -114,9 +110,7 @@ def test_pre_fix_config_without_job_is_caught(tmp_path: pathlib.Path) -> None:
     """Сработавший негатив: конфиг без джобы (ровно сегодняшний дефект) — проверка падает."""
     without = _config_without_job(CANON.read_text(encoding="utf-8"))
     assert JOB not in without, "фикстура не удалила джобу"
-    manifest = _fixture(
-        tmp_path, live=without, canon=without, fingerprint=_sha(without)
-    )
+    manifest = _fixture(tmp_path, live=without, canon=without, fingerprint=_sha(without))
     result = _run(manifest)
     assert result.returncode == 1, f"дефект без джобы не пойман:\n{result.stdout}"
     assert "JOB-MISSING" in result.stdout
@@ -134,13 +128,9 @@ def test_fingerprint_drift_is_caught(tmp_path: pathlib.Path) -> None:
 
 def test_label_substitution_is_caught(tmp_path: pathlib.Path) -> None:
     """Сработавший негатив: джоба есть, но label в Loki подменён — поток не тот."""
-    substituted = CANON.read_text(encoding="utf-8").replace(
-        f"job: {LABEL}\n", "job: pg_watchdog_x\n"
-    )
+    substituted = CANON.read_text(encoding="utf-8").replace(f"job: {LABEL}\n", "job: pg_watchdog_x\n")
     assert substituted != CANON.read_text(encoding="utf-8")
-    manifest = _fixture(
-        tmp_path, live=substituted, canon=substituted, fingerprint=_sha(substituted)
-    )
+    manifest = _fixture(tmp_path, live=substituted, canon=substituted, fingerprint=_sha(substituted))
     result = _run(manifest)
     assert result.returncode == 1, f"подмена label не поймана:\n{result.stdout}"
     assert "JOB-LABEL-DRIFT" in result.stdout
@@ -153,9 +143,7 @@ def test_live_config_matching_fingerprint_and_snapshot_passes(
     text = CANON.read_text(encoding="utf-8")
     manifest = _fixture(tmp_path, live=text, canon=text, fingerprint=_sha(text))
     result = _run(manifest)
-    assert (
-        result.returncode == 0
-    ), f"положительный контроль ложно краснеет:\n{result.stdout}"
+    assert result.returncode == 0, f"положительный контроль ложно краснеет:\n{result.stdout}"
     assert "DRIFT-CHECK: PASSED" in result.stdout
     assert JOB in result.stdout
 
@@ -163,13 +151,9 @@ def test_live_config_matching_fingerprint_and_snapshot_passes(
 def test_node_live_config_matches_committed_snapshot() -> None:
     """Инвариант ноды: живой платформенный конфиг совпадает с фингерпринтом и снапшотом в git."""
     if not LIVE.exists():
-        pytest.skip(
-            "issue: R6 · expiry: 2026-12-31 · платформенного promtail-конфига нет вне ноды (CI-раннер)"
-        )
+        pytest.skip("issue: R6 · expiry: 2026-12-31 · платформенного promtail-конфига нет вне ноды (CI-раннер)")
     result = _run(REPO_ROOT / "deploy" / "ops" / "executed_paths.json")
-    assert (
-        result.returncode == 0
-    ), f"живой конфиг разошёлся с фингерпринтом/снапшотом:\n{result.stdout}"
+    assert result.returncode == 0, f"живой конфиг разошёлся с фингерпринтом/снапшотом:\n{result.stdout}"
     assert "promtail-pg-watchdog" in result.stdout
 
 

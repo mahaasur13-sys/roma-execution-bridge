@@ -57,7 +57,9 @@ SKIP_REASONS = (
 )
 
 
-def _verdict(decision: str, reason: str, evidence: dict[str, Any], latency_ms: float, model: str = DEFAULT_MODEL) -> dict[str, Any]:
+def _verdict(
+    decision: str, reason: str, evidence: dict[str, Any], latency_ms: float, model: str = DEFAULT_MODEL
+) -> dict[str, Any]:
     return {
         "decision": decision,
         "reason": reason,
@@ -152,7 +154,9 @@ class JevAdapter:
             )
 
         if self._client.attempts > int(LIMITS["max_calls_per_run"]) + int(LIMITS["retries"]):
-            return _verdict("skip", "call_limit", {**evidence, "attempts": self._client.attempts}, elapsed_ms(), self._client.model)
+            return _verdict(
+                "skip", "call_limit", {**evidence, "attempts": self._client.attempts}, elapsed_ms(), self._client.model
+            )
 
         answers = normalize_answers(payload)
         evidence["answered"] = sorted(answers)
@@ -170,16 +174,22 @@ class JevAdapter:
 
         confidence = next_answer.get("confidence")
         if not isinstance(confidence, (int, float)):
-            return _verdict("skip", "bad_answer", {**evidence, "reason": "confidence"}, elapsed_ms(), self._client.model)
+            return _verdict(
+                "skip", "bad_answer", {**evidence, "reason": "confidence"}, elapsed_ms(), self._client.model
+            )
         if confidence < THRESHOLDS["confidence_floor"]:
-            return _verdict("skip", "low_confidence", {**evidence, "confidence": confidence}, elapsed_ms(), self._client.model)
+            return _verdict(
+                "skip", "low_confidence", {**evidence, "confidence": confidence}, elapsed_ms(), self._client.model
+            )
 
         probability = float(gate["value"])
         choice = str(next_answer["value"])
         run_probability = _probability(next_answer.get("probabilities"), choice)
         risk_value = _risk_value(risk.get("value"))
         if risk_value is None:
-            return _verdict("skip", "bad_answer", {**evidence, "reason": "risk_scale"}, elapsed_ms(), self._client.model)
+            return _verdict(
+                "skip", "bad_answer", {**evidence, "reason": "risk_scale"}, elapsed_ms(), self._client.model
+            )
 
         evidence.update(
             {
@@ -202,7 +212,11 @@ class JevAdapter:
         ):
             return _verdict("execute", "gate_and_choice", evidence, elapsed_ms(), self._client.model)
 
-        if probability >= THRESHOLDS["gate_confirm"] or choice == "ask" or (run_probability or 0) >= THRESHOLDS["choice_confirm"]:
+        if (
+            probability >= THRESHOLDS["gate_confirm"]
+            or choice == "ask"
+            or (run_probability or 0) >= THRESHOLDS["choice_confirm"]
+        ):
             return _verdict("confirm", "insufficient_signal", evidence, elapsed_ms(), self._client.model)
 
         return _verdict("abort", "gate_below_floor", evidence, elapsed_ms(), self._client.model)

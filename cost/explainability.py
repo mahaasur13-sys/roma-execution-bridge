@@ -40,11 +40,7 @@ class CostExplainabilityEngine:
                 "Storage": round(bd.get("storage", 0.0), 4),
                 "Overhead": round(bd.get("overhead", 0.0), 4),
             },
-            "total_cost": (
-                None
-                if pred["estimated_cost"] is None
-                else round(pred["estimated_cost"], 4)
-            ),
+            "total_cost": (None if pred["estimated_cost"] is None else round(pred["estimated_cost"], 4)),
             "decision": pred.get("decision"),
             "alternatives": alternatives,
             "decision_reasons": reasons,
@@ -52,13 +48,7 @@ class CostExplainabilityEngine:
         }
 
     def _generate_alternatives(self, pred: dict, gpu_cost: float) -> list:
-        base = (
-            gpu_cost
-            + sum(
-                pred["breakdown"].get(k, 0.0) for k in ["queue", "storage", "overhead"]
-            )
-            or 0.01
-        )
+        base = gpu_cost + sum(pred["breakdown"].get(k, 0.0) for k in ["queue", "storage", "overhead"]) or 0.01
         return [
             {
                 "description": "CPU cluster (no GPU)",
@@ -83,14 +73,11 @@ class CostExplainabilityEngine:
             reasons.append(f"Risk flags: {', '.join(pred['risk_flags'])}")
         reasons.append(f"Plugin: {plugin['name']} (GPU_ENABLED capability)")
         reasons.append(
-            f"Cost estimate: ${self._money(pred.get('estimated_cost'))} "
-            f"(tier: {pred.get('tier') or 'не установлен'})"
+            f"Cost estimate: ${self._money(pred.get('estimated_cost'))} (tier: {pred.get('tier') or 'не установлен'})"
         )
         return reasons
 
-    def _plan_steps(
-        self, task: str, plugin: dict, pred: dict, gpu_seconds: float
-    ) -> list:
+    def _plan_steps(self, task: str, plugin: dict, pred: dict, gpu_seconds: float) -> list:
         return [
             {"phase": "validation", "description": "Input contract + security gate"},
             {
@@ -98,7 +85,7 @@ class CostExplainabilityEngine:
                 "description": f"Estimate: ${self._money(pred.get('estimated_cost'))}",
             },
             {"phase": "plugin_load", "description": f"Load {plugin['name']} plugin"},
-            {"phase": "scheduling", "description": f"Duration ~{gpu_seconds/60:.0f}m"},
+            {"phase": "scheduling", "description": f"Duration ~{gpu_seconds / 60:.0f}m"},
             {
                 "phase": "execution",
                 "description": f"GPU node: {pred.get('decision', 'APPROVED')}",

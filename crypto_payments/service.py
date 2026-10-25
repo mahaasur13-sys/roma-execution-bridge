@@ -30,15 +30,11 @@ logger = get_logger(__name__)
 
 
 class CryptoInvoiceService:
-    def __init__(
-        self, provider: CryptoPaymentProvider, settings: CryptoSettings
-    ) -> None:
+    def __init__(self, provider: CryptoPaymentProvider, settings: CryptoSettings) -> None:
         self._provider = provider
         self._settings = settings
 
-    async def create_invoice(
-        self, request: CreateInvoiceRequest
-    ) -> CreateInvoiceResponse:
+    async def create_invoice(self, request: CreateInvoiceRequest) -> CreateInvoiceResponse:
         network = NETWORK_FOR_CURRENCY[request.currency]
         amount_usd = TIER_PRICES_USD[request.tier]
         now = datetime.now(timezone.utc)
@@ -89,9 +85,7 @@ class CryptoInvoiceService:
     async def get_invoice(self, invoice_id: str) -> InvoiceStatusResponse:
         invoice = await self._load_invoice(str(invoice_id))
         try:
-            provider_data = await self._provider.get_invoice(
-                invoice.provider_invoice_id or ""
-            )
+            provider_data = await self._provider.get_invoice(invoice.provider_invoice_id or "")
             status_raw = provider_data.get("payment_status", invoice.status.value)
         except Exception:
             status_raw = invoice.status.value
@@ -153,6 +147,5 @@ class CryptoInvoiceService:
             provider_invoice_id="np_demo",
             status=InvoiceStatus.PENDING,
             created_at=datetime.now(timezone.utc),
-            expires_at=datetime.now(timezone.utc)
-            + timedelta(seconds=PAYMENT_TTL_SECONDS),
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=PAYMENT_TTL_SECONDS),
         )

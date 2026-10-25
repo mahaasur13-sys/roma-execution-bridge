@@ -57,18 +57,10 @@ def cp(monkeypatch):
     )
     monkeypatch.setattr(main, "CLOUDPAYMENTS_ENABLED", True)
     monkeypatch.setattr(main, "cloudpayments_client", fake)
-    monkeypatch.setattr(
-        main.db, "update_tenant_subscription", lambda *a, **k: calls["sub"].append(a)
-    )
-    monkeypatch.setattr(
-        main.db, "mark_invoice_processed", lambda *a, **k: calls["mark"].append(a)
-    )
-    monkeypatch.setattr(
-        main.db, "set_tenant_inactive", lambda *a, **k: calls["inactive"].append(a)
-    )
-    monkeypatch.setattr(
-        main.db, "is_invoice_processed", lambda invoice_id, tenant_id="": False
-    )
+    monkeypatch.setattr(main.db, "update_tenant_subscription", lambda *a, **k: calls["sub"].append(a))
+    monkeypatch.setattr(main.db, "mark_invoice_processed", lambda *a, **k: calls["mark"].append(a))
+    monkeypatch.setattr(main.db, "set_tenant_inactive", lambda *a, **k: calls["inactive"].append(a))
+    monkeypatch.setattr(main.db, "is_invoice_processed", lambda invoice_id, tenant_id="": False)
     monkeypatch.setattr(main.db, "get_tenant", lambda tid: {"id": tid})
     return {"calls": calls, "fake": fake}
 
@@ -111,9 +103,7 @@ def test_overpaid_amount_does_not_credit(cp):
 
 def test_amount_of_other_plan_does_not_credit(cp):
     client = TestClient(main.app, raise_server_exceptions=False)
-    resp = _post(
-        client, _payload(invoice_id="inv-cross", plan="pro", amount=29900.00)
-    )
+    resp = _post(client, _payload(invoice_id="inv-cross", plan="pro", amount=29900.00))
     assert resp.status_code == 200
     assert cp["calls"]["sub"] == []
 
@@ -218,9 +208,7 @@ def test_refusal_still_goes_to_fail_branch_not_amount_gate(cp):
 def test_wrong_currency_fails_closed(cp):
     """A correct amount in the wrong currency must never credit."""
     client = TestClient(main.app, raise_server_exceptions=False)
-    resp = _post(
-        client, _payload(invoice_id="inv-cur-usd", amount=4900.00, currency="USD")
-    )
+    resp = _post(client, _payload(invoice_id="inv-cur-usd", amount=4900.00, currency="USD"))
     assert resp.status_code == 200
     assert cp["calls"]["sub"] == []
     assert cp["calls"]["mark"] == []
@@ -228,18 +216,14 @@ def test_wrong_currency_fails_closed(cp):
 
 def test_currency_is_case_insensitive(cp):
     client = TestClient(main.app, raise_server_exceptions=False)
-    resp = _post(
-        client, _payload(invoice_id="inv-cur-lower", amount=4900.00, currency="rub")
-    )
+    resp = _post(client, _payload(invoice_id="inv-cur-lower", amount=4900.00, currency="rub"))
     assert resp.status_code == 200
     assert len(cp["calls"]["sub"]) == 1
 
 
 def test_missing_currency_fails_closed(cp):
     client = TestClient(main.app, raise_server_exceptions=False)
-    resp = _post(
-        client, _payload(invoice_id="inv-cur-none", amount=4900.00, currency=_MISSING)
-    )
+    resp = _post(client, _payload(invoice_id="inv-cur-none", amount=4900.00, currency=_MISSING))
     assert resp.status_code == 200
     assert cp["calls"]["sub"] == []
     assert cp["calls"]["mark"] == []
@@ -271,9 +255,7 @@ def test_amount_is_compared_exactly_in_minor_units(cp):
     ):
         cp["calls"]["sub"].clear()
         cp["calls"]["mark"].clear()
-        resp = _post(
-            client, _payload(invoice_id=f"inv-exact-{amount}", amount=amount)
-        )
+        resp = _post(client, _payload(invoice_id=f"inv-exact-{amount}", amount=amount))
         assert resp.status_code == 200
         assert bool(cp["calls"]["sub"]) is expected_credit, amount
 

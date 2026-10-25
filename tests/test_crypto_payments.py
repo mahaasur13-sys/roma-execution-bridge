@@ -56,16 +56,12 @@ def mock_provider(settings: CryptoSettings) -> NOWPaymentsProvider:
 
 
 @pytest.fixture
-def service(
-    settings: CryptoSettings, mock_provider: NOWPaymentsProvider
-) -> CryptoInvoiceService:
+def service(settings: CryptoSettings, mock_provider: NOWPaymentsProvider) -> CryptoInvoiceService:
     return CryptoInvoiceService(provider=mock_provider, settings=settings)
 
 
 @pytest.fixture
-def webhook_handler(
-    settings: CryptoSettings, mock_provider: NOWPaymentsProvider
-) -> CryptoWebhookHandler:
+def webhook_handler(settings: CryptoSettings, mock_provider: NOWPaymentsProvider) -> CryptoWebhookHandler:
     svc = CryptoInvoiceService(provider=mock_provider, settings=settings)
     return CryptoWebhookHandler(provider=mock_provider, service=svc)
 
@@ -81,9 +77,7 @@ class TestCreateInvoice:
         assert result.invoice_id is not None
         assert result.invoice_id is not None
 
-    async def test_assigns_unique_invoice_id(
-        self, service: CryptoInvoiceService
-    ) -> None:
+    async def test_assigns_unique_invoice_id(self, service: CryptoInvoiceService) -> None:
         request = CreateInvoiceRequest(
             tenant_id="t1",
             tier=TierName.START,
@@ -107,9 +101,7 @@ class TestGetInvoice:
 
 
 class TestWebhook:
-    async def test_processes_paid_webhook(
-        self, webhook_handler: CryptoWebhookHandler
-    ) -> None:
+    async def test_processes_paid_webhook(self, webhook_handler: CryptoWebhookHandler) -> None:
         inv_id = str(uuid4())
         result = await webhook_handler.handle(
             payload=json.dumps(
@@ -175,10 +167,7 @@ class TestPricingLogic:
         assert TIER_PRICES_USD[request.tier] == TIER_PRICES_USD[TierName.START]
 
     def test_network_from_currency(self) -> None:
-        assert (
-            CryptoNetwork.from_currency(CryptoCurrency.USDT_TRC20)
-            == CryptoNetwork.TRC20
-        )
+        assert CryptoNetwork.from_currency(CryptoCurrency.USDT_TRC20) == CryptoNetwork.TRC20
         assert CryptoNetwork.from_currency(CryptoCurrency.BTC) == CryptoNetwork.BTC
 
     def test_status_transitions(self) -> None:

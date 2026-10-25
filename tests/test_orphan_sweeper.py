@@ -142,9 +142,7 @@ def test_worker_default_timeout_is_twice_max_job_timeout():
 def test_worker_sweep_uses_adapter_and_logs(sqlite_db, monkeypatch):
     _insert(sqlite_db, "orphan-worker", "running", _ago(3))
     logged: list[str] = []
-    monkeypatch.setattr(
-        ew.logger, "warning", lambda msg, *args, **kw: logged.append(msg % args)
-    )
+    monkeypatch.setattr(ew.logger, "warning", lambda msg, *args, **kw: logged.append(msg % args))
 
     swept = ew.sweep_orphans_once()
 

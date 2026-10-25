@@ -27,20 +27,12 @@ class Alert:
     level: AlertLevel
     title: str
     body: str
-    timestamp: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"
-        )
-    )
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
     tags: dict | None = None
 
     def format_markdown(self) -> str:
-        emoji = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}.get(
-            self.level.value, "📢"
-        )
-        return (
-            f"{emoji} *{self.title}*\n\n{self.body}\n\n`{self.timestamp}` — ROMA v2.1.0"
-        )
+        emoji = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}.get(self.level.value, "📢")
+        return f"{emoji} *{self.title}*\n\n{self.body}\n\n`{self.timestamp}` — ROMA v2.1.0"
 
     def format_plain(self) -> str:
         prefix = {
@@ -83,9 +75,7 @@ class AlertDispatcher:
         self._smtp_port = int(os.getenv("ALERT_EMAIL_SMTP_PORT", "587"))
         self._smtp_user = os.getenv("ALERT_EMAIL_SMTP_USER", "")
         self._smtp_password = os.getenv("ALERT_EMAIL_SMTP_PASSWORD", "")
-        self._email_from = os.getenv(
-            "ALERT_EMAIL_FROM", "alerts@roma-execution-bridge.io"
-        )
+        self._email_from = os.getenv("ALERT_EMAIL_FROM", "alerts@roma-execution-bridge.io")
         self._email_to = os.getenv("ALERT_EMAIL_TO", "")
 
         channels = []
@@ -99,15 +89,11 @@ class AlertDispatcher:
         if channels:
             logger.info("AlertDispatcher initialized: channels=%s", ", ".join(channels))
         else:
-            logger.info(
-                "AlertDispatcher initialized: no channels enabled (alerts are silent)"
-            )
+            logger.info("AlertDispatcher initialized: no channels enabled (alerts are silent)")
 
     def send(self, alert: Alert) -> None:
         """Fire-and-forget: dispatch alert to all enabled channels in background thread."""
-        if not any(
-            [self._telegram_enabled, self._discord_enabled, self._email_enabled]
-        ):
+        if not any([self._telegram_enabled, self._discord_enabled, self._email_enabled]):
             return
 
         def _dispatch():

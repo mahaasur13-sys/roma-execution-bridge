@@ -41,9 +41,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
                 return JSONResponse({"detail": "Tenant ID required"}, status_code=400)
 
             request.state.tenant_id = tenant_id or self.DEFAULT_TENANT
-            request.state.tenant_config = self.tenant_config.get(
-                request.state.tenant_id, {}
-            )
+            request.state.tenant_config = self.tenant_config.get(request.state.tenant_id, {})
 
             response = await call_next(request)
 

@@ -52,9 +52,7 @@ def _bare_scheduler():
     sched.local_mode = "local"
     sched.gpu_connector = SimpleNamespace(is_available=lambda: False)
     sched.cost_gate = SimpleNamespace(
-        evaluate=lambda tenant_id, payload: SimpleNamespace(
-            result="allowed", reason="quota ok"
-        )
+        evaluate=lambda tenant_id, payload: SimpleNamespace(result="allowed", reason="quota ok")
     )
     return sched
 
@@ -65,9 +63,7 @@ def _bare_scheduler():
 def test_pro_tenant_is_priced_by_his_record_not_free(monkeypatch):
     """RED→GREEN: план `pro` в записи → цена PRO; free-цена (0.0) — исторический дефект."""
     _patch_tenant(monkeypatch, _record("pro", "t-pro"))
-    pred = CostPredictor().predict(
-        "train yolov8", True, "ml_training", tenant_id="t-pro"
-    )
+    pred = CostPredictor().predict("train yolov8", True, "ml_training", tenant_id="t-pro")
 
     assert pred["tier"] == "pro"
     assert pred["tier_source"] == "tenant-record:pro"
@@ -77,9 +73,7 @@ def test_pro_tenant_is_priced_by_his_record_not_free(monkeypatch):
 
 def test_enterprise_tenant_is_not_priced_as_free(monkeypatch):
     _patch_tenant(monkeypatch, _record("enterprise", "t-ent"))
-    pred = CostPredictor().predict(
-        "batch inference", True, "inference", tenant_id="t-ent"
-    )
+    pred = CostPredictor().predict("batch inference", True, "inference", tenant_id="t-ent")
 
     assert pred["tier"] == "enterprise"
     assert pred["estimated_cost"] > 0
@@ -88,9 +82,7 @@ def test_enterprise_tenant_is_not_priced_as_free(monkeypatch):
 def test_paid_tenant_gets_no_free_tier_risk_flags(monkeypatch):
     """Риск-оценка и вердикт строятся на разрешённом тарифе, а не на free-ярлыке."""
     _patch_tenant(monkeypatch, _record("pro", "t-pro"))
-    pred = CostPredictor().predict(
-        "train yolov8", True, "ml_training", tenant_id="t-pro"
-    )
+    pred = CostPredictor().predict("train yolov8", True, "ml_training", tenant_id="t-pro")
 
     assert "FREE_TIER_LIMIT_RISK" not in pred["risk_flags"], pred["risk_flags"]
     assert pred["decision"] == "APPROVED", pred["decision"]
@@ -153,9 +145,7 @@ def test_payload_tier_attempt_is_logged(monkeypatch):
     CostPredictor().predict("task", False, tenant_id="t-free", tenant_tier="PRO")
     # вниз: pro-клиент с payload FREE — попытка опустить тариф
     _patch_tenant(monkeypatch, _record("pro", "t-pro"))
-    CostPredictor().predict(
-        "train yolov8", True, "ml_training", tenant_id="t-pro", tenant_tier="FREE"
-    )
+    CostPredictor().predict("train yolov8", True, "ml_training", tenant_id="t-pro", tenant_tier="FREE")
     # дефолт вызывающего совпал с записью → это не попытка подмены: записи нет
     _patch_tenant(monkeypatch, _record("free", "t-free"))
     CostPredictor().predict("task", False, tenant_id="t-free")
@@ -167,9 +157,7 @@ def test_payload_tier_attempt_is_logged(monkeypatch):
 def test_payload_tier_cannot_lower_paid_customer(monkeypatch):
     """payload tenant_tier=FREE у pro-клиента не опускает тариф до free-цены."""
     _patch_tenant(monkeypatch, _record("pro", "t-pro"))
-    pred = CostPredictor().predict(
-        "train yolov8", True, "ml_training", tenant_id="t-pro", tenant_tier="FREE"
-    )
+    pred = CostPredictor().predict("train yolov8", True, "ml_training", tenant_id="t-pro", tenant_tier="FREE")
 
     assert pred["tier"] == "pro"
     assert pred["estimated_cost"] > 0
@@ -186,9 +174,7 @@ def test_client_without_record_is_refused(monkeypatch):
     assert pred["decision"] == UNKNOWN_TENANT
     assert pred["estimated_cost"] is None, "цена не считается по выдуманному тарифу"
     assert pred["tier"] is None and pred["tier_source"] is None
-    assert pred["decision_reason"] == (
-        "клиент не найден в записях: тариф не установлен (не FREE по умолчанию)"
-    )
+    assert pred["decision_reason"] == ("клиент не найден в записях: тариф не установлен (не FREE по умолчанию)")
 
 
 def test_missing_tenant_id_is_refused():
@@ -226,18 +212,14 @@ def test_tenant_plan_requires_a_tenant_id(monkeypatch):
 
 def test_service_channel_needs_an_explicit_admin_right(monkeypatch):
     """Служебный канал: тариф задаётся явно и подписывается источником."""
-    pred = CostPredictor().predict(
-        "task", False, tenant_tier="PRO", admin_override=True
-    )
+    pred = CostPredictor().predict("task", False, tenant_tier="PRO", admin_override=True)
 
     assert pred["tier"] == "pro"
     assert pred["tier_source"] == "admin-override:PRO"
 
 
 def test_service_channel_is_fail_closed_too():
-    pred = CostPredictor().predict(
-        "task", False, tenant_tier="GOLD", admin_override=True
-    )
+    pred = CostPredictor().predict("task", False, tenant_tier="GOLD", admin_override=True)
 
     assert pred["decision"] == UNKNOWN_PLAN
     assert pred["estimated_cost"] is None

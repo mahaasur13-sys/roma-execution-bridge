@@ -52,15 +52,9 @@ class DashBeamTransferService:
         """Called when plugin is enabled."""
         if config:
             if "relay_url" in config:
-                self._iroh.configure_relay(
-                    DashBeamRelayConfig(relay_url=config["relay_url"])
-                )
-            self._max_file_size_mb = config.get(
-                "max_file_size_mb", self._max_file_size_mb
-            )
-            self._ticket_ttl_minutes = config.get(
-                "ticket_ttl_minutes", self._ticket_ttl_minutes
-            )
+                self._iroh.configure_relay(DashBeamRelayConfig(relay_url=config["relay_url"]))
+            self._max_file_size_mb = config.get("max_file_size_mb", self._max_file_size_mb)
+            self._ticket_ttl_minutes = config.get("ticket_ttl_minutes", self._ticket_ttl_minutes)
 
     async def on_disable(self) -> None:
         """Called when plugin is disabled."""
@@ -151,15 +145,11 @@ class DashBeamTransferService:
         tier: str = "free",
         discovery_nodes: Optional[list[str]] = None,
     ) -> DashBeamRelayConfig:
-        return self._relay_mgr.set_config(
-            tenant_id, relay_url, tier=tier, discovery_nodes=discovery_nodes
-        )
+        return self._relay_mgr.set_config(tenant_id, relay_url, tier=tier, discovery_nodes=discovery_nodes)
 
     # ─── Device Pairing ───
 
-    async def pair_device(
-        self, tenant_id: str, device_name: str, fingerprint: str
-    ) -> PairedDevice:
+    async def pair_device(self, tenant_id: str, device_name: str, fingerprint: str) -> PairedDevice:
         device = await self._iroh.pair_device(device_name, fingerprint)
         device.tenant_id = tenant_id
         self._devices[device.device_id] = device
@@ -192,9 +182,7 @@ class DashBeamTransferService:
                 raise ValueError(f"Blocked: spend key detected in field '{key}'")
         return True
 
-    def share_monero_config(
-        self, tenant_id: str, address: str, view_key: str
-    ) -> dict[str, Any]:
+    def share_monero_config(self, tenant_id: str, address: str, view_key: str) -> dict[str, Any]:
         """Create a shareable view-only Monero config (NEVER includes spend key)."""
         if self._block_spend_keys:
             # Double-check: no spend key in any form

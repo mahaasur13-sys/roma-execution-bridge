@@ -47,9 +47,7 @@ class PGMeteringEngine:
         self.events: List[UsageEvent] = []
         self.tenant_totals: Dict[str, Dict[str, float]] = {}
 
-    def _pg_execute(
-        self, operation: str, query: str, params: tuple = None, fetch: bool = False
-    ) -> list | None:
+    def _pg_execute(self, operation: str, query: str, params: tuple = None, fetch: bool = False) -> list | None:
         if not self._pg.enabled:
             raise PGUnavailableError("PG not configured or unavailable")
         # NB: do NOT pre-check is_connected — the pool is created lazily by
@@ -81,19 +79,11 @@ class PGMeteringEngine:
         cost_usd=None,
         value=None,
     ) -> UsageEvent:
-        val = (
-            value
-            if value is not None
-            else (gpu_seconds or cpu_seconds or gb_seconds or float(plugin_count))
-        )
-        ev = UsageEvent(
-            tenant_id=tenant, event_type=event_type, value=val, job_id=job_id
-        )
+        val = value if value is not None else (gpu_seconds or cpu_seconds or gb_seconds or float(plugin_count))
+        ev = UsageEvent(tenant_id=tenant, event_type=event_type, value=val, job_id=job_id)
         # F1: пишем авторитетную (уже округлённую) цену, чтобы usage_events.cost_usd
         # совпадал с DEBIT в лэджере (никаких 0.0012003365080902586…).
-        ev.cost_usd = (
-            round(float(cost_usd), 8) if cost_usd is not None else round(ev.cost_usd, 8)
-        )
+        ev.cost_usd = round(float(cost_usd), 8) if cost_usd is not None else round(ev.cost_usd, 8)
 
         try:
             _usage_insert_sql = """INSERT INTO usage_events (tenant_id, event_type, value, cost_usd, job_id, metadata, billed)
@@ -145,8 +135,7 @@ class PGMeteringEngine:
             # Make the failure visible and correlated by tenant/job so upstream
             # (execution_worker) can fail closed on PGUnavailableError.
             logger.error(
-                "MeteringEngine.record NOT persisted (fail-closed): "
-                "tenant=%s job=%s event=%s error=%s",
+                "MeteringEngine.record NOT persisted (fail-closed): tenant=%s job=%s event=%s error=%s",
                 tenant,
                 job_id,
                 event_type,
@@ -178,9 +167,7 @@ class PGMeteringEngine:
                 "SELECT tenant_id, gpu_seconds, cpu_seconds, gb_seconds, total_cost, jobs_completed FROM tenant_usage_totals",
                 fetch=True,
             )
-            cnt_rows = self._pg_execute(
-                "count_events", "SELECT COUNT(*) FROM usage_events", fetch=True
-            )
+            cnt_rows = self._pg_execute("count_events", "SELECT COUNT(*) FROM usage_events", fetch=True)
             total_events = cnt_rows[0][0] if cnt_rows else 0
             tenants = {
                 r[0]: {

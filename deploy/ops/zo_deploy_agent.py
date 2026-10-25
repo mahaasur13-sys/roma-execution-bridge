@@ -93,11 +93,7 @@ def _handle_stop(signum, _frame):  # noqa: ANN001
 
 
 def now_iso() -> str:
-    return (
-        datetime.datetime.now(datetime.timezone.utc)
-        .isoformat(timespec="seconds")
-        .replace("+00:00", "Z")
-    )
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _age_s(iso: str) -> float:
@@ -187,7 +183,19 @@ def remote_sha() -> str:
 def ci_state(sha: str) -> tuple[str, str]:
     """green | pending | red | unknown — состояние workflow CI по конкретному SHA."""
     rc, out, err = run(
-        ["gh", "run", "list", "--workflow", CI_WORKFLOW, "--branch", BRANCH, "--limit", "30", "--json", "headSha,status,conclusion"],
+        [
+            "gh",
+            "run",
+            "list",
+            "--workflow",
+            CI_WORKFLOW,
+            "--branch",
+            BRANCH,
+            "--limit",
+            "30",
+            "--json",
+            "headSha,status,conclusion",
+        ],
         timeout=60,
     )
     if rc != 0:
@@ -200,7 +208,9 @@ def ci_state(sha: str) -> tuple[str, str]:
         if item.get("headSha") == sha:
             if item.get("status") != "completed":
                 return "pending", "run in progress"
-            return ("green", "ci success") if item.get("conclusion") == "success" else ("red", str(item.get("conclusion")))
+            return (
+                ("green", "ci success") if item.get("conclusion") == "success" else ("red", str(item.get("conclusion")))
+            )
     return "pending", "no run for this sha yet"
 
 
@@ -238,8 +248,18 @@ def ff_possible(sha: str) -> tuple[bool, str]:
 def applied_migrations() -> set[str]:
     rc, out, err = run(
         [
-            "/usr/sbin/runuser", "-u", "postgres", "--", "/usr/bin/psql",
-            "-h", "/var/run/postgresql", "-p", "5432", "-d", PG_DSN_DB, "-tAc",
+            "/usr/sbin/runuser",
+            "-u",
+            "postgres",
+            "--",
+            "/usr/bin/psql",
+            "-h",
+            "/var/run/postgresql",
+            "-p",
+            "5432",
+            "-d",
+            PG_DSN_DB,
+            "-tAc",
             "select filename from schema_migrations",
         ],
         timeout=30,
@@ -296,10 +316,17 @@ def post_status(sha: str, state: str, description: str, target_url: str = "") ->
         emit("status_post_skipped", reason="remote_owner_unresolved")
         return
     cmd = [
-        "gh", "api", "-X", "POST", f"/repos/{repo}/statuses/{sha}",
-        "-f", f"state={state}",
-        "-f", f"context={STATUS_CONTEXT}",
-        "-f", f"description={description[:130]}",
+        "gh",
+        "api",
+        "-X",
+        "POST",
+        f"/repos/{repo}/statuses/{sha}",
+        "-f",
+        f"state={state}",
+        "-f",
+        f"context={STATUS_CONTEXT}",
+        "-f",
+        f"description={description[:130]}",
     ]
     if target_url:
         cmd += ["-f", f"target_url={target_url}"]
@@ -454,7 +481,9 @@ def do_deploy(sha: str, state: dict, *, dry_run: bool, rollback_on_unhealthy: bo
 
     pending_before, ledger_ok = pending_migrations()
     if not ledger_ok:
-        fail(state, sha, "migration_ledger_unreadable", "не читается schema_migrations — вердикт по миграциям невозможен")
+        fail(
+            state, sha, "migration_ledger_unreadable", "не читается schema_migrations — вердикт по миграциям невозможен"
+        )
         rollback_tree(previous, state)
         post_status(sha, "error", "ledger миграций не читается")
         return False
@@ -510,7 +539,9 @@ def do_deploy(sha: str, state: dict, *, dry_run: bool, rollback_on_unhealthy: bo
 
     state["deployed_sha"] = sha
     state["last_success"] = now_iso()
-    state.setdefault("history", []).append({"sha": sha, "at": now_iso(), "steps": steps, "commits": ahead_by(previous, sha) if previous else None})
+    state.setdefault("history", []).append(
+        {"sha": sha, "at": now_iso(), "steps": steps, "commits": ahead_by(previous, sha) if previous else None}
+    )
     state["history"] = state["history"][-30:]
     state.get("failed", {}).pop(sha, None)
     save_state(state)
@@ -542,7 +573,14 @@ def cycle(state: dict, *, dry_run: bool, rollback_on_unhealthy: bool, heartbeat_
             )
             save_state(state)
         if heartbeat_due:
-            emit("heartbeat", deployed_sha=deployed[:8], remote_sha=sha[:8], in_sync=False, skipped="failed_memory", reason=state["failed"][sha].get("reason"))
+            emit(
+                "heartbeat",
+                deployed_sha=deployed[:8],
+                remote_sha=sha[:8],
+                in_sync=False,
+                skipped="failed_memory",
+                reason=state["failed"][sha].get("reason"),
+            )
         return state
 
     status, detail = ci_state(sha)
@@ -601,7 +639,19 @@ def main() -> int:
         return 0
     if args.status:
         pending, ledger_ok = pending_migrations()
-        print(json.dumps({**state, "remote_sha": remote_sha(), "pending_migrations": pending, "migration_ledger_readable": ledger_ok}, ensure_ascii=False, indent=2, sort_keys=True))
+        print(
+            json.dumps(
+                {
+                    **state,
+                    "remote_sha": remote_sha(),
+                    "pending_migrations": pending,
+                    "migration_ledger_readable": ledger_ok,
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        )
         return 0
 
     os.makedirs(STATE_DIR, exist_ok=True)
@@ -643,7 +693,12 @@ def main() -> int:
         cycles += 1
         heartbeat_due = cycles % HEARTBEAT_CYCLES == 0
         try:
-            state = cycle(state, dry_run=args.dry_run, rollback_on_unhealthy=args.rollback_on_unhealthy, heartbeat_due=heartbeat_due)
+            state = cycle(
+                state,
+                dry_run=args.dry_run,
+                rollback_on_unhealthy=args.rollback_on_unhealthy,
+                heartbeat_due=heartbeat_due,
+            )
         except Exception as exc:  # цикл не имеет права умереть от одной ошибки
             emit("cycle_error", error=f"{type(exc).__name__}: {exc}")
         if args.once or args.dry_run:

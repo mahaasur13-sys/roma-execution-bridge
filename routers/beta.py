@@ -132,9 +132,7 @@ async def beta_apply(request: Request, payload: dict):
     use_case = payload.get("use_case", "")
     source = payload.get("source", "")
     lead_id = db.add_lead(email, company, role, use_case, source)
-    logger.info(
-        "beta_lead_created", extra={"lead_id": lead_id, "email": email[:3] + "***"}
-    )
+    logger.info("beta_lead_created", extra={"lead_id": lead_id, "email": email[:3] + "***"})
     return {
         "status": "accepted",
         "message": "Thank you! We'll reach out to you soon.",

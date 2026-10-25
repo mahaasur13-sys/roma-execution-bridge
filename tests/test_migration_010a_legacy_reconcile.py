@@ -153,8 +153,7 @@ def legacy_db():
     """Изолированная схема audit_events под тест; PG берётся из PG_DSN (тестовая БД)."""
     if not _pg_reachable():
         pytest.skip(
-            "PG not reachable — reconciling audit requires live PG;"
-            " issue: G-AUDIT-DDL-DRIFT · expiry: 2026-12-31"
+            "PG not reachable — reconciling audit requires live PG; issue: G-AUDIT-DDL-DRIFT · expiry: 2026-12-31"
         )
     import psycopg2
 
@@ -376,9 +375,7 @@ def test_010a_refuses_unexpected_column_type_before_mutation(legacy_db):
 def test_010a_refuses_missing_base_column(legacy_db):
     """Нет базовой колонки (entity_type) — отказ до мутации."""
     legacy_db(
-        "CREATE TABLE audit_events ("
-        " id TEXT PRIMARY KEY, tenant_id TEXT, event_type TEXT,"
-        " entity_id TEXT, data JSONB)",
+        "CREATE TABLE audit_events ( id TEXT PRIMARY KEY, tenant_id TEXT, event_type TEXT, entity_id TEXT, data JSONB)",
         [],
     )
     conn = legacy_db.conn

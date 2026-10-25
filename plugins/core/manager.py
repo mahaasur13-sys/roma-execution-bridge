@@ -90,9 +90,7 @@ class PluginManager:
         """Get a plugin, raising if not enabled."""
         plugin = self.get(name)
         if not plugin.is_enabled():
-            raise PluginError(
-                f"Plugin '{name}' is not enabled (state={plugin.state.value})"
-            )
+            raise PluginError(f"Plugin '{name}' is not enabled (state={plugin.state.value})")
         return plugin
 
     def list_all(self) -> list[PluginInstance]:
@@ -141,9 +139,7 @@ class PluginManager:
                 # Resolve dependencies
                 for dep_name in instance.manifest.dependencies:
                     if not self.exists(dep_name):
-                        raise PluginDependencyError(
-                            f"Plugin '{name}' depends on '{dep_name}' which is not registered"
-                        )
+                        raise PluginDependencyError(f"Plugin '{name}' depends on '{dep_name}' which is not registered")
                     dep = self._registry[dep_name]
                     if dep.state not in (PluginState.LOADED, PluginState.ENABLED):
                         await self.load(dep_name)
@@ -169,9 +165,7 @@ class PluginManager:
                 logger.error("Failed to load plugin '%s': %s", name, exc)
                 raise PluginLoadError(f"Failed to load plugin '{name}': {exc}") from exc
 
-    async def enable(
-        self, name: str, config: dict[str, Any] | None = None
-    ) -> PluginInstance:
+    async def enable(self, name: str, config: dict[str, Any] | None = None) -> PluginInstance:
         """Enable a loaded plugin with optional config."""
         instance = await self.load(name)
 
@@ -238,9 +232,7 @@ class PluginManager:
             for other_name, other in self._registry.items():
                 if other_name != name and name in other.manifest.dependencies:
                     if other.state in (PluginState.LOADED, PluginState.ENABLED):
-                        raise PluginDependencyError(
-                            f"Cannot unload '{name}': '{other_name}' depends on it"
-                        )
+                        raise PluginDependencyError(f"Cannot unload '{name}': '{other_name}' depends on it")
 
             instance._instance = None
             instance.state = PluginState.UNLOADED
@@ -286,13 +278,9 @@ class PluginManager:
         confidence: float = 1.0,
     ) -> ThoughtStep:
         """Add a reasoning step to an active trace."""
-        return self._trace_collector.add_step(
-            trace_id, thought, data=data or {}, confidence=confidence
-        )
+        return self._trace_collector.add_step(trace_id, thought, data=data or {}, confidence=confidence)
 
-    def finish_trace(
-        self, trace_id: str, final_decision: dict[str, Any]
-    ) -> ThoughtTrace:
+    def finish_trace(self, trace_id: str, final_decision: dict[str, Any]) -> ThoughtTrace:
         """Finish a trace and return the complete record."""
         return self._trace_collector.finish(trace_id, final_decision)
 
@@ -305,9 +293,7 @@ class PluginManager:
     # ─── Bulk Operations ───
 
     async def load_all(self, names: list[str]) -> list[PluginInstance]:
-        results = await asyncio.gather(
-            *(self.load(n) for n in names), return_exceptions=True
-        )
+        results = await asyncio.gather(*(self.load(n) for n in names), return_exceptions=True)
         return [
             (
                 r
@@ -330,9 +316,7 @@ class PluginManager:
     def _validate_plugin_class(cls: type, manifest: PluginManifest) -> None:
         """Validate that a plugin class has the required interface."""
         if not inspect.isclass(cls):
-            raise PluginLoadError(
-                f"Entry point '{manifest.entry_point}' is not a class"
-            )
+            raise PluginLoadError(f"Entry point '{manifest.entry_point}' is not a class")
 
         # Check for minimum required methods
         required_methods = ["run"]

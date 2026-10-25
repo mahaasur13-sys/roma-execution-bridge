@@ -73,10 +73,10 @@ def test_submit_semaphore_budget_cycle(monkeypatch):
 
     monkeypatch.setattr(observer, "_get_executor", lambda: _FakeExecutor())
 
-    assert observer.submit_observation(print, 1) is True   # слот занят
+    assert observer.submit_observation(print, 1) is True  # слот занят
     assert observer.submit_observation(print, 2) is False  # бюджет 1 → drop
-    futures[0].complete()                                   # done-callback → release
-    assert observer.submit_observation(print, 3) is True   # слот снова свободен
+    futures[0].complete()  # done-callback → release
+    assert observer.submit_observation(print, 3) is True  # слот снова свободен
 
 
 def test_submit_succeeds_when_slot_available(monkeypatch):

@@ -63,9 +63,7 @@ def test_free_within_quota_is_approved_with_structural_basis(monkeypatch):
 
     from cost.predictor import CostPredictor
 
-    pred = CostPredictor().predict(
-        "batch inference", True, "inference", tenant_id="t-free"
-    )
+    pred = CostPredictor().predict("batch inference", True, "inference", tenant_id="t-free")
 
     assert pred["decision"] == "APPROVED", pred
     assert pred["decision_category"] is None
@@ -86,9 +84,7 @@ def test_free_over_per_job_quota_is_rejected_with_distance(monkeypatch):
     from cost.predictor import CostPredictor
 
     # ml_training: 7200 s × 1.1 (gpu) = 7920 GPU-s > 3600 per-job
-    pred = CostPredictor().predict(
-        "train yolov8", True, "ml_training", tenant_id="t-free"
-    )
+    pred = CostPredictor().predict("train yolov8", True, "ml_training", tenant_id="t-free")
 
     assert pred["decision"] == "REJECTED", pred
     assert pred["decision_category"] == QUOTA_JOB_ESTIMATE_EXCEEDS_PER_JOB
@@ -119,9 +115,7 @@ def test_free_monthly_gpu_exhausted_is_rejected(monkeypatch):
 
     # cpu-джоб: смета GPU = 0, но потребление уже почти на производном пределе;
     # берём gpu-джоб в пределах per-job, чтобы сработало именно месячное измерение
-    pred = CostPredictor().predict(
-        "batch inference", True, "inference", tenant_id="t-free"
-    )
+    pred = CostPredictor().predict("batch inference", True, "inference", tenant_id="t-free")
 
     assert pred["decision"] == "REJECTED", pred
     assert pred["decision_category"] == QUOTA_MONTHLY_GPU_EXHAUSTED
@@ -139,9 +133,7 @@ def test_free_tier_limit_risk_flag_is_gone(monkeypatch):
 
     from cost.predictor import CostPredictor
 
-    pred = CostPredictor().predict(
-        "train yolov8", True, "ml_training", tenant_id="t-free"
-    )
+    pred = CostPredictor().predict("train yolov8", True, "ml_training", tenant_id="t-free")
     assert "FREE_TIER_LIMIT_RISK" not in pred["risk_flags"], pred["risk_flags"]
 
     import inspect
@@ -157,9 +149,7 @@ def test_paid_tier_money_verdict_is_unchanged(monkeypatch):
 
     from cost.predictor import CostPredictor
 
-    pred = CostPredictor().predict(
-        "train yolov8", True, "ml_training", tenant_id="t-pro"
-    )
+    pred = CostPredictor().predict("train yolov8", True, "ml_training", tenant_id="t-pro")
 
     assert pred["tier"] == "pro"
     assert pred["decision"] == "APPROVED", pred
@@ -176,9 +166,7 @@ def test_ledger_unavailable_is_fail_closed_in_predictor(monkeypatch):
 
     from cost.predictor import CostPredictor
 
-    pred = CostPredictor().predict(
-        "batch inference", True, "inference", tenant_id="t-free"
-    )
+    pred = CostPredictor().predict("batch inference", True, "inference", tenant_id="t-free")
 
     assert pred["decision"] == GATE_UNAVAILABLE, pred
     assert pred["decision"] != "APPROVED"
@@ -192,9 +180,7 @@ def test_ledger_unavailable_blocks_scheduler_before_gpu_branch(monkeypatch):
     _patch_ledger_down(monkeypatch)
 
     sched = ROMAGPUScheduler.__new__(ROMAGPUScheduler)
-    sched.predictor = __import__(
-        "cost.predictor", fromlist=["CostPredictor"]
-    ).CostPredictor()
+    sched.predictor = __import__("cost.predictor", fromlist=["CostPredictor"]).CostPredictor()
     sched.policy_engine = None
     sched.local_mode = "local"
     sched.cost_gate = None
@@ -223,9 +209,7 @@ def test_ledger_unavailable_blocks_cli_submission(monkeypatch, capsys):
     monkeypatch.setenv(roma_cli.TENANT_ID_ENV, "t-cli-fc")
 
     sent: list = []
-    monkeypatch.setattr(
-        roma_cli, "_api_post", lambda path, payload: sent.append(payload)
-    )
+    monkeypatch.setattr(roma_cli, "_api_post", lambda path, payload: sent.append(payload))
 
     cli = roma_cli.ROMA_CLI()
     rc = cli.cmd_run("batch inference on gpu")
@@ -309,16 +293,11 @@ def test_the_four_named_sources_derive_from_one_file():
     assert limits_free.gpu_s_per_month == 180_000
 
     assert QuotaEngine.PLAN_QUOTAS["FREE"] == limits_free.gpu_s_per_month
-    assert (
-        QuotaEngine.PLAN_QUOTAS["PRO"] == plan_source.plan_limits("pro").gpu_s_per_month
-    )
+    assert QuotaEngine.PLAN_QUOTAS["PRO"] == plan_source.plan_limits("pro").gpu_s_per_month
     assert QuotaEngine.PLAN_QUOTAS["ENTERPRISE"] == plan_source.UNLIMITED
 
     tm = TenantManager()
-    assert (
-        tm.get_tenant_info("tenant-free")["quota_gpu_seconds"]
-        == limits_free.gpu_s_per_job
-    )
+    assert tm.get_tenant_info("tenant-free")["quota_gpu_seconds"] == limits_free.gpu_s_per_job
     assert tm.get_tenant_info("tenant-pro")["quota_gpu_seconds"] == 3600
 
     db_plans = db._load_plans()
@@ -352,9 +331,7 @@ def test_unlimited_means_unlimited_everywhere(monkeypatch):
 
     from cost.predictor import CostPredictor
 
-    pred = CostPredictor().predict(
-        "train yolov8", True, "ml_training", tenant_id="t-ent"
-    )
+    pred = CostPredictor().predict("train yolov8", True, "ml_training", tenant_id="t-ent")
     assert pred["decision"] == "APPROVED", pred
     assert pred["decision_basis"]["tier_limit_usd"] == 500.0
 

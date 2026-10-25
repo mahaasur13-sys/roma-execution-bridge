@@ -53,9 +53,7 @@ class CustomPolicyPlugin:
 
         # Rule 3: 2FA enforcement for Pro+
         if self._config.get("require_2fa", False):
-            if tenant.get("plan") in ("pro", "enterprise") and not tenant.get(
-                "2fa_enabled"
-            ):
+            if tenant.get("plan") in ("pro", "enterprise") and not tenant.get("2fa_enabled"):
                 results.append(
                     {
                         "rule": "2fa_enforcement",
@@ -67,9 +65,7 @@ class CustomPolicyPlugin:
         return {
             "plugin": self.name,
             "results": results,
-            "overall": (
-                "deny" if any(r["action"] == "block" for r in results) else "allow"
-            ),
+            "overall": ("deny" if any(r["action"] == "block" for r in results) else "allow"),
         }
 
     def _check_geo(self, country: str) -> dict[str, Any] | None:

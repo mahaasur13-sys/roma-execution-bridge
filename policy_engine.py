@@ -148,9 +148,7 @@ def evaluate_policies(tenant_id: str, action: str, context: dict | None = None) 
                 "reason": f"Unsupported network: {network}",
                 "policy_name": "crypto_network_guard",
             }
-        max_invoices = {"start": 5, "pro": 20, "enterprise": 100}.get(
-            context.get("tier", "start"), 5
-        )
+        max_invoices = {"start": 5, "pro": 20, "enterprise": 100}.get(context.get("tier", "start"), 5)
         if context.get("invoice_count_this_month", 0) >= max_invoices:
             return {
                 "result": "denied",

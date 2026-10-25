@@ -97,9 +97,7 @@ def test_rejects_missing_or_empty_header(client):
 def test_fail_closed_when_webhook_secret_absent(monkeypatch):
     """No CLOUDPAYMENTS_WEBHOOK_SECRET -> reject, even with a valid api_secret HMAC."""
     monkeypatch.setattr(cpc.httpx, "Client", _StubHttp)
-    unconfigured = cpc.CloudPaymentsClient(
-        cpc.CloudPaymentsConfig(public_id="pk-test", api_secret=API_SECRET)
-    )
+    unconfigured = cpc.CloudPaymentsClient(cpc.CloudPaymentsConfig(public_id="pk-test", api_secret=API_SECRET))
     assert unconfigured.config.webhook_secret == ""
     assert unconfigured.verify_webhook(BODY, _hex_sig(API_SECRET)) is False
     assert unconfigured.verify_webhook(BODY, _hex_sig("")) is False

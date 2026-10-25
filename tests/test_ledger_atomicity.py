@@ -65,10 +65,7 @@ def test_sql_has_balance_guard_and_same_columns(ledger, monkeypatch):
 
     assert captured["operation"] == "ledger_debit_if_funds"
     insert_sql, insert_params = captured["statements"][1]
-    assert (
-        "INSERT INTO ledger_entries (ledger_id, tenant_id, entry_type, amount, currency, metadata)"
-        in insert_sql
-    )
+    assert "INSERT INTO ledger_entries (ledger_id, tenant_id, entry_type, amount, currency, metadata)" in insert_sql
     assert "WHERE bal.b >= %s" in insert_sql
     assert insert_params[-1] == 0.5
 
@@ -79,9 +76,7 @@ def test_ledger_append_only_trigger():
     import os
 
     if not os.environ.get("PG_DSN"):
-        pytest.skip(
-            "PG_DSN не задан — триггер проверяется вручную (psql); issue: P1-C · expiry: 2026-12-31"
-        )
+        pytest.skip("PG_DSN не задан — триггер проверяется вручную (psql); issue: P1-C · expiry: 2026-12-31")
 
     from billing.pg_connection import get_pg_manager, PGUnavailableError
 
@@ -89,17 +84,13 @@ def test_ledger_append_only_trigger():
     try:
         ctx = mgr.get_connection("test_append_only")
     except PGUnavailableError:
-        pytest.skip(
-            "PG unavailable in this pytest process; issue: P1-C · expiry: 2026-12-31"
-        )
+        pytest.skip("PG unavailable in this pytest process; issue: P1-C · expiry: 2026-12-31")
     with ctx as conn:
         cur = conn.cursor()
         cur.execute("SELECT ledger_id FROM ledger_entries LIMIT 1")
         row = cur.fetchone()
         if not row:
-            pytest.skip(
-                "ledger_entries пуста — нет строки для триггера; issue: P1-C · expiry: 2026-12-31"
-            )
+            pytest.skip("ledger_entries пуста — нет строки для триггера; issue: P1-C · expiry: 2026-12-31")
         lid = row[0]
         with pytest.raises(Exception):
             cur.execute(

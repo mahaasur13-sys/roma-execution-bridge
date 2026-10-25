@@ -29,15 +29,11 @@ class DecisionOSError:
 
     @staticmethod
     def quota_exceeded(msg: str = ""):
-        DecisionOSError.raise_error(
-            "quota_exceeded", msg or "Monthly job limit reached"
-        )
+        DecisionOSError.raise_error("quota_exceeded", msg or "Monthly job limit reached")
 
     @staticmethod
     def cost_over_budget(msg: str = ""):
-        DecisionOSError.raise_error(
-            "cost_over_budget", msg or "Estimated cost exceeds budget"
-        )
+        DecisionOSError.raise_error("cost_over_budget", msg or "Estimated cost exceeds budget")
 
     @staticmethod
     def tenant_not_found(msg: str = ""):
@@ -45,9 +41,7 @@ class DecisionOSError:
 
     @staticmethod
     def transition_denied(msg: str = ""):
-        DecisionOSError.raise_error(
-            "transition_denied", msg or "Invalid status transition"
-        )
+        DecisionOSError.raise_error("transition_denied", msg or "Invalid status transition")
 
 
 CRYPTO_ERROR_CODES: dict[str, tuple[int, str]] = {

@@ -229,9 +229,11 @@ def test_flag_off_no_metrics_and_no_jev_call(monkeypatch):
     monkeypatch.delenv(shadow._ENV_FLAG, raising=False)
     calls: list = []
     monkeypatch.setattr("core.jev_client.JevClient", lambda *a, **k: calls.append(1))
-    with _Delta("roma_jev_shadow_observations_total", point="R1", outcome="ok") as obs_d, _Delta(
-        "roma_jev_shadow_fallback_total", point="R1", reason="jev_error"
-    ) as fb_d, _Delta("roma_jev_shadow_latency_seconds_count", point="R1") as lat_d:
+    with (
+        _Delta("roma_jev_shadow_observations_total", point="R1", outcome="ok") as obs_d,
+        _Delta("roma_jev_shadow_fallback_total", point="R1", reason="jev_error") as fb_d,
+        _Delta("roma_jev_shadow_latency_seconds_count", point="R1") as lat_d,
+    ):
         verdict = shadow.shadow_evaluate(_FakeGate(), "tenant-a", {})
     assert verdict.result.value == "allowed"
     assert calls == []  # Jev не вызывался
@@ -240,9 +242,11 @@ def test_flag_off_no_metrics_and_no_jev_call(monkeypatch):
 
 def test_ok_observation_increments_counters_and_latency():
     client = _FakeClient(payload=_choice_payload("anomaly", 0.9, 0.85))
-    with _Delta("roma_jev_shadow_observations_total", point="R1", outcome="ok") as obs_d, _Delta(
-        "roma_jev_shadow_agreement_total", point="R1", agree="no"
-    ) as agr_d, _Delta("roma_jev_shadow_latency_seconds_count", point="R1") as lat_d:
+    with (
+        _Delta("roma_jev_shadow_observations_total", point="R1", outcome="ok") as obs_d,
+        _Delta("roma_jev_shadow_agreement_total", point="R1", agree="no") as agr_d,
+        _Delta("roma_jev_shadow_latency_seconds_count", point="R1") as lat_d,
+    ):
         obs = shadow.observe_once({"tenant_ref": "t_x"}, "allowed", client=client)
     assert obs is not None
     assert (obs_d.value, agr_d.value, lat_d.value) == (1.0, 1.0, 1.0)
@@ -257,26 +261,30 @@ def test_ok_observation_agreement_yes():
 
 
 def test_timeout_increments_fallback_and_observations():
-    with _Delta("roma_jev_shadow_fallback_total", point="R1", reason="timeout") as fb_d, _Delta(
-        "roma_jev_shadow_observations_total", point="R1", outcome="fallback"
-    ) as obs_d:
+    with (
+        _Delta("roma_jev_shadow_fallback_total", point="R1", reason="timeout") as fb_d,
+        _Delta("roma_jev_shadow_observations_total", point="R1", outcome="fallback") as obs_d,
+    ):
         obs = shadow.observe_once({}, "allowed", client=_FakeClient(error=JevTimeout("slow")))
     assert obs is None
     assert (fb_d.value, obs_d.value) == (1.0, 1.0)
 
 
 def test_rate_limited_and_generic_error_reasons():
-    with _Delta("roma_jev_shadow_fallback_total", point="R1", reason="rate_limited") as rl, _Delta(
-        "roma_jev_shadow_fallback_total", point="R1", reason="jev_error"
-    ) as je:
+    with (
+        _Delta("roma_jev_shadow_fallback_total", point="R1", reason="rate_limited") as rl,
+        _Delta("roma_jev_shadow_fallback_total", point="R1", reason="jev_error") as je,
+    ):
         shadow.observe_once({}, "allowed", client=_FakeClient(error=JevRateLimited("429")))
         shadow.observe_once({}, "allowed", client=_FakeClient(error=JevError("boom")))
     assert (rl.value, je.value) == (1.0, 1.0)
 
+
 def test_disabled_has_own_reason():
-    with _Delta("roma_jev_shadow_fallback_total", point="R1", reason="disabled") as dis, _Delta(
-        "roma_jev_shadow_fallback_total", point="R1", reason="jev_error"
-    ) as je:
+    with (
+        _Delta("roma_jev_shadow_fallback_total", point="R1", reason="disabled") as dis,
+        _Delta("roma_jev_shadow_fallback_total", point="R1", reason="jev_error") as je,
+    ):
         obs = shadow.observe_once({}, "allowed", client=_FakeClient(error=JevDisabled("flag off")))
     assert obs is None
     assert (dis.value, je.value) == (1.0, 0.0)

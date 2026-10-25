@@ -14,11 +14,7 @@ class SplitBrainProtection:
     def register_heartbeat(self, node_id: str) -> bool:
         now = time.time()
         self.node_status[node_id] = {"last_seen": now, "alive": True}
-        self.active_nodes = {
-            n
-            for n, s in self.node_status.items()
-            if s["alive"] and now - s["last_seen"] < 15
-        }
+        self.active_nodes = {n for n, s in self.node_status.items() if s["alive"] and now - s["last_seen"] < 15}
         return len(self.active_nodes) >= self.majority
 
     def is_majority(self) -> bool:

@@ -52,9 +52,7 @@ class AsyncWebhookQueue:
     def enqueue(self, event_id: str, payload: dict):
         if event_id in self._processed:
             return "already_queued"
-        self._queue.append(
-            {"event_id": event_id, "payload": payload, "enqueued_at": time.time()}
-        )
+        self._queue.append({"event_id": event_id, "payload": payload, "enqueued_at": time.time()})
         self._save()
         return "queued"
 

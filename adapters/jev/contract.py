@@ -70,6 +70,7 @@ THRESHOLDS: dict[str, float] = {
     "confidence_floor": 0.50,
 }
 
+
 def redact(value: Any) -> tuple[Any, list[str]]:
     """Снимает имена-секреты и значения-секреты. Возвращает (чистое, [пути])."""
     dropped: list[str] = []

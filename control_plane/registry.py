@@ -28,9 +28,7 @@ class WorkerRegistry:
             log.info(f"Registered {wid} ({gpu} GPU)")
             return w
 
-    def heartbeat(
-        self, wid: str, gpu_used: float = 0.0, active_jobs: int = 0
-    ) -> Optional[Worker]:
+    def heartbeat(self, wid: str, gpu_used: float = 0.0, active_jobs: int = 0) -> Optional[Worker]:
         with self._lock:
             w = self._w.get(wid)
             if w:
@@ -53,11 +51,7 @@ class WorkerRegistry:
 
     def list_healthy(self) -> List[Worker]:
         with self._lock:
-            return [
-                w
-                for w in self._w.values()
-                if w.is_healthy() and (time.time() - w.last_heartbeat) < self._ht
-            ]
+            return [w for w in self._w.values() if w.is_healthy() and (time.time() - w.last_heartbeat) < self._ht]
 
     def list_all(self) -> List[Worker]:
         with self._lock:

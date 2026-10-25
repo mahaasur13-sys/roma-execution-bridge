@@ -16,9 +16,7 @@ class TruthSource(str, Enum):
     Event Store is the historical truth.
     """
 
-    KUBERNETES = (
-        "k8s"  # Physical execution truth (always authoritative for running jobs)
-    )
+    KUBERNETES = "k8s"  # Physical execution truth (always authoritative for running jobs)
     REDIS = "redis"  # Logical state cache (queues, scheduling)
     EVENT_STORE = "event_store"  # Historical truth (append-only log)
     STATE_SNAPSHOT = "snapshot"  # Derived truth (from replay)
@@ -42,9 +40,7 @@ class GlobalStateRecord:
     field: str
     value: Any
     source: TruthSource
-    timestamp: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     sequence: int = 0
     version: int = 0  # Optimistic locking
 
@@ -89,16 +85,12 @@ class GlobalStateModel:
         # 1. Check K8s (physical truth)
         k8s_val = self._get_k8s_field(job_id, field)
         if k8s_val is not None:
-            return GlobalStateRecord(
-                job_id=job_id, field=field, value=k8s_val, source=TruthSource.KUBERNETES
-            )
+            return GlobalStateRecord(job_id=job_id, field=field, value=k8s_val, source=TruthSource.KUBERNETES)
 
         # 2. Check Redis (logical cache)
         redis_val = self._get_redis_field(job_id, field)
         if redis_val is not None:
-            return GlobalStateRecord(
-                job_id=job_id, field=field, value=redis_val, source=TruthSource.REDIS
-            )
+            return GlobalStateRecord(job_id=job_id, field=field, value=redis_val, source=TruthSource.REDIS)
 
         # 3. Reconstruct from Event Store
         event_val = self._reconstruct_from_event_store(job_id, field)
@@ -112,9 +104,7 @@ class GlobalStateModel:
 
         return None
 
-    def resolve_conflict(
-        self, record_a: GlobalStateRecord, record_b: GlobalStateRecord
-    ) -> GlobalStateRecord:
+    def resolve_conflict(self, record_a: GlobalStateRecord, record_b: GlobalStateRecord) -> GlobalStateRecord:
         """
         Resolve conflict between two records using resolution strategy.
         Returns authoritative record.
@@ -172,9 +162,7 @@ class GlobalStateModel:
         # Placeholder — integrate with nvidia-smi or K8s metrics
         return 0.0
 
-    def should_admit_job(
-        self, job_priority: int, estimated_vram_mb: int
-    ) -> tuple[bool, str]:
+    def should_admit_job(self, job_priority: int, estimated_vram_mb: int) -> tuple[bool, str]:
         """
         Queue admission control.
         Returns (admit: bool, reason: str)

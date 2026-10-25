@@ -47,13 +47,9 @@ class MeteringEngine:
         plugin_count: int = 0,
     ) -> UsageEvent:
         val = gpu_seconds or cpu_seconds or gb_seconds or plugin_count
-        ev = UsageEvent(
-            tenant_id=tenant, event_type=event_type, value=val, job_id=job_id
-        )
+        ev = UsageEvent(tenant_id=tenant, event_type=event_type, value=val, job_id=job_id)
         self.events.append(ev)
-        t = self.tenant_totals.setdefault(
-            tenant, {"gpu_s": 0, "cpu_s": 0, "gb_s": 0, "cost": 0.0, "jobs": 0}
-        )
+        t = self.tenant_totals.setdefault(tenant, {"gpu_s": 0, "cpu_s": 0, "gb_s": 0, "cost": 0.0, "jobs": 0})
         if event_type == "gpu_usage":
             t["gpu_s"] += gpu_seconds
         if event_type == "cpu_usage":
@@ -79,9 +75,7 @@ if __name__ == "__main__":
     m = MeteringEngine()
     m.record("gpu_usage", tenant="tenant-abc", gpu_seconds=120.0, job_id="roma-job-1")
     m.record("cpu_usage", tenant="tenant-abc", cpu_seconds=3600.0, job_id="roma-job-1")
-    m.record(
-        "storage_usage", tenant="tenant-abc", gb_seconds=86400.0, job_id="roma-job-1"
-    )
+    m.record("storage_usage", tenant="tenant-abc", gb_seconds=86400.0, job_id="roma-job-1")
     m.record("job_completed", tenant="tenant-xyz", job_id="roma-job-2")
     m.record("plugin_exec", tenant="tenant-abc", plugin_count=5, job_id="roma-job-1")
     s = m.snapshot()

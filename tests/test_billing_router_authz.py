@@ -36,6 +36,7 @@ def _uniq(prefix: str) -> str:
 @pytest.fixture(autouse=True)
 def _disable_background_worker(monkeypatch):
     """Prevent startup from launching the infinite poll_and_execute loop."""
+
     async def _noop():
         return None
 
@@ -51,18 +52,22 @@ def tenants(monkeypatch):
     key_a = _uniq("key-a")
     key_b = _uniq("key-b")
 
-    db.seed_tenants({
-        key_a: {"tenant_id": a_id, "name": "A"},
-        key_b: {"tenant_id": b_id, "name": "B"},
-    })
+    db.seed_tenants(
+        {
+            key_a: {"tenant_id": a_id, "name": "A"},
+            key_b: {"tenant_id": b_id, "name": "B"},
+        }
+    )
     monkeypatch.setattr(main, "is_email_verified", lambda api_key: True)
 
     # _admin_only / verify_api_key read the in-memory API_KEYS registry.
     original = dict(main.API_KEYS)
-    main.API_KEYS.update({
-        key_a: {"tenant_id": a_id},
-        key_b: {"tenant_id": b_id},
-    })
+    main.API_KEYS.update(
+        {
+            key_a: {"tenant_id": a_id},
+            key_b: {"tenant_id": b_id},
+        }
+    )
     main.API_KEYS["hotfix-admin-demo"] = {"tenant_id": "tenant-demo"}
 
     yield {"a_id": a_id, "b_id": b_id, "key_a": key_a, "key_b": key_b}
@@ -128,14 +133,12 @@ def test_ledger_returns_only_caller_entries(tenants):
     assert body["tenant_id"] == tenants["a_id"], "ledger reported another tenant"
 
     amounts = {e["amount"] for e in body["entries"]}
-    assert 123.45 in amounts       # caller's own credit is visible
-    assert 678.90 not in amounts   # other tenant's credit is not leaked
+    assert 123.45 in amounts  # caller's own credit is visible
+    assert 678.90 not in amounts  # other tenant's credit is not leaked
 
     # Entries carry no tenant_id field, so prove ownership through the ledger
     # itself: every returned amount belongs to A, and B is untouched by A's read.
-    a_amounts = {
-        e["amount"] for e in main.billing_ledger.get_tenant_entries(tenants["a_id"])
-    }
+    a_amounts = {e["amount"] for e in main.billing_ledger.get_tenant_entries(tenants["a_id"])}
     after_b = main.billing_ledger.get_tenant_entries(tenants["b_id"])
     assert amounts <= a_amounts, "ledger returned entries not owned by the caller"
     assert after_b == before_b, "tenant B ledger changed during tenant A read"

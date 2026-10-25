@@ -57,9 +57,7 @@ def t_cost_gate():
     from cost.gate import EnterpriseDecisionGate
 
     g = EnterpriseDecisionGate()
-    result = g.evaluate(
-        tenant_id='tp', payload={'task': 'train YOLOv8', 'gpu_required': True}
-    )
+    result = g.evaluate(tenant_id='tp', payload={'task': 'train YOLOv8', 'gpu_required': True})
     assert result.result in ('allowed', 'denied'), f"gate: {result}"
 
 

@@ -195,9 +195,7 @@ class SupportTicketService:
             session.add(_ticket_to_model(ticket))
             session.commit()
 
-    def _add_message_sync(
-        self, ticket_id: str, tenant_id: str
-    ) -> tuple[UUID, bool]:
+    def _add_message_sync(self, ticket_id: str, tenant_id: str) -> tuple[UUID, bool]:
         self._ensure_tables_sync()
         tid = _coerce_uuid(ticket_id)
         status_changed = False
@@ -223,9 +221,7 @@ class SupportTicketService:
             session.commit()
             return model.ticket_id, status_changed
 
-    def _assign_agent_sync(
-        self, ticket_id: str, agent_id: str, tenant_id: str
-    ) -> SupportTicket:
+    def _assign_agent_sync(self, ticket_id: str, agent_id: str, tenant_id: str) -> SupportTicket:
         self._ensure_tables_sync()
         tid = _coerce_uuid(ticket_id)
         with self._factory()() as session:
@@ -237,12 +233,9 @@ class SupportTicketService:
                 raise TicketNotFoundError(f"Ticket {ticket_id} not found")
             current = TicketStatus(model.status)
             allowed = VALID_STATUS_TRANSITIONS.get(current, [])
-            if current is not TicketStatus.IN_PROGRESS and (
-                TicketStatus.IN_PROGRESS not in allowed
-            ):
+            if current is not TicketStatus.IN_PROGRESS and (TicketStatus.IN_PROGRESS not in allowed):
                 raise TicketStatusConflictError(
-                    f"Ticket {ticket_id} is {current.value}; "
-                    "assignment is not allowed from this status"
+                    f"Ticket {ticket_id} is {current.value}; assignment is not allowed from this status"
                 )
             now = datetime.now(timezone.utc)
             # Optimistic status predicate: the read status is re-checked in the
@@ -262,8 +255,7 @@ class SupportTicketService:
             )
             if result.rowcount == 0:
                 raise TicketStatusConflictError(
-                    f"Ticket {ticket_id} status changed concurrently; "
-                    "assignment was not applied"
+                    f"Ticket {ticket_id} status changed concurrently; assignment was not applied"
                 )
             session.commit()
             session.refresh(model)
@@ -296,18 +288,11 @@ class SupportTicketService:
     ) -> TicketListResponse:
         self._ensure_tables_sync()
         with self._factory()() as session:
-            q = session.query(SupportTicketModel).filter(
-                SupportTicketModel.tenant_id == tenant_id
-            )
+            q = session.query(SupportTicketModel).filter(SupportTicketModel.tenant_id == tenant_id)
             if status is not None:
                 q = q.filter(SupportTicketModel.status == status.value)
             total = q.count()
-            rows = (
-                q.order_by(SupportTicketModel.created_at.asc())
-                .offset((page - 1) * page_size)
-                .limit(page_size)
-                .all()
-            )
+            rows = q.order_by(SupportTicketModel.created_at.asc()).offset((page - 1) * page_size).limit(page_size).all()
             tickets = [_model_to_ticket(m) for m in rows]
         return TicketListResponse(
             tickets=[t.model_dump(mode="json") for t in tickets],
@@ -339,9 +324,7 @@ class SupportTicketService:
         if not scopes:
             return TicketListResponse(tickets=[], total=0, page=page, page_size=page_size)
         with self._factory()() as session:
-            q = session.query(SupportTicketModel).filter(
-                SupportTicketModel.tenant_id.in_(scopes)
-            )
+            q = session.query(SupportTicketModel).filter(SupportTicketModel.tenant_id.in_(scopes))
             if status is not None:
                 q = q.filter(SupportTicketModel.status == status.value)
             total = q.count()
@@ -362,9 +345,7 @@ class SupportTicketService:
             page_size=page_size,
         )
 
-    def _get_ticket_for_scopes_sync(
-        self, ticket_id: str, tenant_ids: frozenset[str]
-    ) -> SupportTicket | None:
+    def _get_ticket_for_scopes_sync(self, ticket_id: str, tenant_ids: frozenset[str]) -> SupportTicket | None:
         """H2a-C1: fetch a ticket only inside the caller's membership scopes.
 
         Malformed, unknown and out-of-scope ids are indistinguishable here: all
@@ -390,9 +371,7 @@ class SupportTicketService:
                 return None
             return _model_to_ticket(model)
 
-    def _transition_sync(
-        self, ticket_id: str, new_status: TicketStatus, tenant_id: str
-    ) -> tuple[SupportTicket, str]:
+    def _transition_sync(self, ticket_id: str, new_status: TicketStatus, tenant_id: str) -> tuple[SupportTicket, str]:
         self._ensure_tables_sync()
         tid = _coerce_uuid(ticket_id)
         now = datetime.now(timezone.utc)
@@ -410,9 +389,7 @@ class SupportTicketService:
             current = TicketStatus(model.status)
             allowed = VALID_STATUS_TRANSITIONS.get(current, [])
             if new_status not in allowed:
-                raise ValueError(
-                    f"Cannot transition from {current.value} to {new_status.value}"
-                )
+                raise ValueError(f"Cannot transition from {current.value} to {new_status.value}")
             values: dict = {"status": new_status.value, "updated_at": now}
             if new_status == TicketStatus.RESOLVED:
                 values["resolved_at"] = now
@@ -427,16 +404,13 @@ class SupportTicketService:
             )
             if result.rowcount == 0:
                 raise ValueError(
-                    f"Cannot transition from {current.value} to {new_status.value} "
-                    "(status changed concurrently)"
+                    f"Cannot transition from {current.value} to {new_status.value} (status changed concurrently)"
                 )
             session.commit()
             session.refresh(model)
             return _model_to_ticket(model), current.value
 
-    async def create_ticket(
-        self, request: CreateTicketRequest, tenant: TenantContext
-    ) -> CreateTicketResponse:
+    async def create_ticket(self, request: CreateTicketRequest, tenant: TenantContext) -> CreateTicketResponse:
         # The persisted tenant is the verified principal's tenant only: the
         # request schema no longer carries a tenant_id at all.
         ticket = SupportTicket(
@@ -469,9 +443,7 @@ class SupportTicketService:
             )
             await self._chat.add_message(msg)
 
-        await self._chat.add_system_message(
-            ticket.ticket_id, f"Ticket created by {tenant.actor_id}"
-        )
+        await self._chat.add_system_message(ticket.ticket_id, f"Ticket created by {tenant.actor_id}")
         logger.info(
             "support_ticket_created",
             ticket_id=tid,
@@ -489,19 +461,13 @@ class SupportTicketService:
             context_id=ticket.context_id,
         )
 
-    async def add_message(
-        self, ticket_id: str, request: CreateMessageRequest, tenant: TenantContext
-    ) -> ChatMessage:
+    async def add_message(self, ticket_id: str, request: CreateMessageRequest, tenant: TenantContext) -> ChatMessage:
         # The path ticket id is authoritative; the tenant-scoped helper is the only
         # lookup, so a foreign or missing ticket fails before anything is written.
-        msg_ticket_id, status_changed = await asyncio.to_thread(
-            self._add_message_sync, ticket_id, tenant.tenant_id
-        )
+        msg_ticket_id, status_changed = await asyncio.to_thread(self._add_message_sync, ticket_id, tenant.tenant_id)
 
         if status_changed:
-            await self._chat.add_system_message(
-                msg_ticket_id, "Customer replied — status → in_progress"
-            )
+            await self._chat.add_system_message(msg_ticket_id, "Customer replied — status → in_progress")
 
         msg = ChatMessage(
             ticket_id=msg_ticket_id,
@@ -514,12 +480,8 @@ class SupportTicketService:
         )
         return await self._chat.add_message(msg)
 
-    async def assign_agent(
-        self, ticket_id: str, request: AssignTicketRequest, tenant: TenantContext
-    ) -> SupportTicket:
-        ticket = await asyncio.to_thread(
-            self._assign_agent_sync, ticket_id, request.agent_id, tenant.tenant_id
-        )
+    async def assign_agent(self, ticket_id: str, request: AssignTicketRequest, tenant: TenantContext) -> SupportTicket:
+        ticket = await asyncio.to_thread(self._assign_agent_sync, ticket_id, request.agent_id, tenant.tenant_id)
 
         participant = ChatParticipant(
             ticket_id=ticket.ticket_id,
@@ -528,20 +490,12 @@ class SupportTicketService:
             tenant_id=ticket.tenant_id,
         )
         self._participants.setdefault(ticket_id, []).append(participant)
-        await self._chat.add_system_message(
-            ticket.ticket_id, f"Agent {request.agent_id} assigned"
-        )
-        logger.info(
-            "support_agent_assigned", ticket_id=ticket_id, agent_id=request.agent_id
-        )
+        await self._chat.add_system_message(ticket.ticket_id, f"Agent {request.agent_id} assigned")
+        logger.info("support_agent_assigned", ticket_id=ticket_id, agent_id=request.agent_id)
         return ticket
 
-    async def get_ticket(
-        self, ticket_id: str, tenant: TenantContext
-    ) -> SupportTicket | None:
-        return await asyncio.to_thread(
-            self._get_ticket_sync, ticket_id, tenant.tenant_id
-        )
+    async def get_ticket(self, ticket_id: str, tenant: TenantContext) -> SupportTicket | None:
+        return await asyncio.to_thread(self._get_ticket_sync, ticket_id, tenant.tenant_id)
 
     async def list_tickets(
         self,
@@ -550,21 +504,15 @@ class SupportTicketService:
         page: int = 1,
         page_size: int = 20,
     ) -> TicketListResponse:
-        return await asyncio.to_thread(
-            self._list_tickets_sync, tenant.tenant_id, status, page, page_size
-        )
+        return await asyncio.to_thread(self._list_tickets_sync, tenant.tenant_id, status, page, page_size)
 
-    async def get_ticket_detail(
-        self, ticket_id: str, tenant: TenantContext
-    ) -> TicketDetailResponse | None:
+    async def get_ticket_detail(self, ticket_id: str, tenant: TenantContext) -> TicketDetailResponse | None:
         ticket = await self.get_ticket(ticket_id, tenant)
         if not ticket:
             return None
         # H1: a tenant key carries no trusted role, so visibility is always the
         # tenant-user view — internal notes and internal-note messages stay hidden.
-        messages = self._chat.get_visible_messages(
-            ticket_id, ParticipantRole.TENANT_USER.value
-        )
+        messages = self._chat.get_visible_messages(ticket_id, ParticipantRole.TENANT_USER.value)
         participants = self._participants.get(ticket_id, [])
         attachments = self._attachments.get(ticket_id, [])
         csat = self._csat.get(ticket_id)
@@ -594,23 +542,17 @@ class SupportTicketService:
             page_size,
         )
 
-    async def agent_get_ticket_detail(
-        self, ticket_id: str, tenant_ids: frozenset[str]
-    ) -> TicketDetailResponse | None:
+    async def agent_get_ticket_detail(self, ticket_id: str, tenant_ids: frozenset[str]) -> TicketDetailResponse | None:
         """H2a-C1: membership-scoped detail for a trusted support agent.
 
         Visibility is deliberately the *tenant-user* view even though the caller
         is an agent: C1 is read-only, so internal notes and internal-note
         messages stay hidden until a role-gated H2b path exists.
         """
-        ticket = await asyncio.to_thread(
-            self._get_ticket_for_scopes_sync, ticket_id, tenant_ids
-        )
+        ticket = await asyncio.to_thread(self._get_ticket_for_scopes_sync, ticket_id, tenant_ids)
         if not ticket:
             return None
-        messages = self._chat.get_visible_messages(
-            ticket_id, ParticipantRole.TENANT_USER.value
-        )
+        messages = self._chat.get_visible_messages(ticket_id, ParticipantRole.TENANT_USER.value)
         participants = self._participants.get(ticket_id, [])
         attachments = self._attachments.get(ticket_id, [])
         csat = self._csat.get(ticket_id)
@@ -622,16 +564,10 @@ class SupportTicketService:
             csat=csat.model_dump(mode="json") if csat else None,
         )
 
-    async def transition_status(
-        self, ticket_id: str, new_status: TicketStatus, tenant: TenantContext
-    ) -> SupportTicket:
-        ticket, current = await asyncio.to_thread(
-            self._transition_sync, ticket_id, new_status, tenant.tenant_id
-        )
+    async def transition_status(self, ticket_id: str, new_status: TicketStatus, tenant: TenantContext) -> SupportTicket:
+        ticket, current = await asyncio.to_thread(self._transition_sync, ticket_id, new_status, tenant.tenant_id)
 
-        await self._chat.add_system_message(
-            ticket.ticket_id, f"Status → {new_status.value}"
-        )
+        await self._chat.add_system_message(ticket.ticket_id, f"Status → {new_status.value}")
         logger.info(
             "support_ticket_transition",
             ticket_id=ticket_id,
@@ -640,9 +576,7 @@ class SupportTicketService:
         )
         return ticket
 
-    async def submit_csat(
-        self, ticket_id: str, request: CsatSubmitRequest, tenant: TenantContext
-    ) -> CsatRating:
+    async def submit_csat(self, ticket_id: str, request: CsatSubmitRequest, tenant: TenantContext) -> CsatRating:
         ticket = await self.get_ticket(ticket_id, tenant)
         if not ticket:
             raise ValueError(f"Ticket {ticket_id} not found")
@@ -654,25 +588,22 @@ class SupportTicketService:
             rated_by=tenant.actor_id,
         )
         self._csat[ticket_id] = rating
-        await self._chat.add_system_message(
-            ticket.ticket_id, f"CSAT: {request.score}/5"
-        )
+        await self._chat.add_system_message(ticket.ticket_id, f"CSAT: {request.score}/5")
         logger.info("support_csat_submitted", ticket_id=ticket_id, score=request.score)
         return rating
 
     def add_attachment(self, attachment: TicketAttachment) -> TicketAttachment:
         tid = str(attachment.ticket_id)
         self._attachments.setdefault(tid, []).append(attachment)
-        return attachment    # ── H2a: support-session (agent) paths ──────────────────────────────────
+        return attachment  # ── H2a: support-session (agent) paths ──────────────────────────────────
+
     # These take an explicit *set* of tenant scopes from the trusted principal
     # instead of one tenant id: an agent may hold several explicit memberships.
     # The E-15 semantics are preserved verbatim (PK read, immediate scope check,
     # status-conditional CAS, rowcount==0 → conflict); the only additions are the
     # scope predicate and, for transitions, the assigned-actor predicate.
 
-    def _assign_self_sync(
-        self, ticket_id: str, actor_id: str, tenant_scopes: frozenset[str]
-    ) -> SupportTicket:
+    def _assign_self_sync(self, ticket_id: str, actor_id: str, tenant_scopes: frozenset[str]) -> SupportTicket:
         self._ensure_tables_sync()
         tid = _coerce_uuid(ticket_id)
         with self._factory()() as session:
@@ -685,12 +616,9 @@ class SupportTicketService:
             tenant_id = model.tenant_id
             current = TicketStatus(model.status)
             allowed = VALID_STATUS_TRANSITIONS.get(current, [])
-            if current is not TicketStatus.IN_PROGRESS and (
-                TicketStatus.IN_PROGRESS not in allowed
-            ):
+            if current is not TicketStatus.IN_PROGRESS and (TicketStatus.IN_PROGRESS not in allowed):
                 raise TicketStatusConflictError(
-                    f"Ticket {ticket_id} is {current.value}; "
-                    "assignment is not allowed from this status"
+                    f"Ticket {ticket_id} is {current.value}; assignment is not allowed from this status"
                 )
             now = datetime.now(timezone.utc)
             # Optimistic status predicate: the read status is re-checked in the
@@ -711,8 +639,7 @@ class SupportTicketService:
             )
             if result.rowcount == 0:
                 raise TicketStatusConflictError(
-                    f"Ticket {ticket_id} status changed concurrently; "
-                    "assignment was not applied"
+                    f"Ticket {ticket_id} status changed concurrently; assignment was not applied"
                 )
             session.commit()
             session.refresh(model)
@@ -740,9 +667,7 @@ class SupportTicketService:
             current = TicketStatus(model.status)
             allowed = VALID_STATUS_TRANSITIONS.get(current, [])
             if new_status not in allowed:
-                raise ValueError(
-                    f"Cannot transition from {current.value} to {new_status.value}"
-                )
+                raise ValueError(f"Cannot transition from {current.value} to {new_status.value}")
             values: dict = {"status": new_status.value, "updated_at": now}
             if new_status == TicketStatus.RESOLVED:
                 values["resolved_at"] = now
@@ -758,8 +683,7 @@ class SupportTicketService:
             )
             if result.rowcount == 0:
                 raise ValueError(
-                    f"Cannot transition from {current.value} to {new_status.value} "
-                    "(status changed concurrently)"
+                    f"Cannot transition from {current.value} to {new_status.value} (status changed concurrently)"
                 )
             session.commit()
             session.refresh(model)
@@ -772,9 +696,7 @@ class SupportTicketService:
         tenant_scopes: frozenset[str],
     ) -> SupportTicket:
         """Self-claim: the assignee is always the trusted principal's actor id."""
-        ticket = await asyncio.to_thread(
-            self._assign_self_sync, ticket_id, actor_id, tenant_scopes
-        )
+        ticket = await asyncio.to_thread(self._assign_self_sync, ticket_id, actor_id, tenant_scopes)
         participant = ChatParticipant(
             ticket_id=ticket.ticket_id,
             user_id=actor_id,
@@ -782,9 +704,7 @@ class SupportTicketService:
             tenant_id=ticket.tenant_id,
         )
         self._participants.setdefault(ticket_id, []).append(participant)
-        await self._chat.add_system_message(
-            ticket.ticket_id, f"Agent {actor_id} assigned"
-        )
+        await self._chat.add_system_message(ticket.ticket_id, f"Agent {actor_id} assigned")
         logger.info("support_agent_self_assigned", ticket_id=ticket_id)
         return ticket
 
@@ -803,9 +723,7 @@ class SupportTicketService:
             actor_id,
             tenant_scopes,
         )
-        await self._chat.add_system_message(
-            ticket.ticket_id, f"Status → {new_status.value}"
-        )
+        await self._chat.add_system_message(ticket.ticket_id, f"Status → {new_status.value}")
         logger.info(
             "support_ticket_transition",
             ticket_id=ticket_id,

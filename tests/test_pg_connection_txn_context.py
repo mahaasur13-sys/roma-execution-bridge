@@ -76,9 +76,7 @@ class FakeConn:
     def cursor(self):
         if self._cursor_error is not None:
             raise self._cursor_error
-        cur = FakeCursor(
-            self, fail_execute=self._fail_execute, fail_close=self._fail_cursor_close, row=self._row
-        )
+        cur = FakeCursor(self, fail_execute=self._fail_execute, fail_close=self._fail_cursor_close, row=self._row)
         self.cursors.append(cur)
         return cur
 

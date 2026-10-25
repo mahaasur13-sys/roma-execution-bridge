@@ -155,9 +155,7 @@ if __name__ == "__main__":
     for g, rate in GPU_RATES.items():
         cost = GPU_COST[g]
         m = (rate - cost) / rate * 100
-        print(
-            f"  {g:8s}: sell=${rate*3600:.2f}/hr | cost=${cost*3600:.2f}/hr | GPM={m:.0f}%"
-        )
+        print(f"  {g:8s}: sell=${rate * 3600:.2f}/hr | cost=${cost * 3600:.2f}/hr | GPM={m:.0f}%")
     print("\n-- Tier Impact (RTX4090, 1hr) --")
     for t in ["free", "pro", "enterprise"]:
         q = pe.quote(3600, "RTX4090", t)
@@ -183,9 +181,7 @@ if __name__ == "__main__":
     print("\n-- Full Quote Example (A100 PRO, 2hr, peak load) --")
     q = pe.quote(7200, "A100", "pro", cluster_load=0.85)
     m = pc.margin(q)
-    print(
-        f"  Cost: ${q.total_cost:.4f} | Profit: ${m['profit']:.4f} | GPM={m['GPM']:.1f}%"
-    )
+    print(f"  Cost: ${q.total_cost:.4f} | Profit: ${m['profit']:.4f} | GPM={m['GPM']:.1f}%")
     print(
         f"  Breakdown: ${q.breakdown['gpu_rate']}/s × {q.breakdown['tier_mult']} × {q.breakdown['load_mult']} = ${q.breakdown['gpu_per_hour']:.4f}/hr"
     )

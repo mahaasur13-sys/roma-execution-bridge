@@ -64,15 +64,11 @@ def _scheduler(gate_denied: bool = False, gpu_available: bool = False):
     sched.gpu_connector = SimpleNamespace(is_available=lambda: gpu_available)
     if gate_denied:
         sched.cost_gate = SimpleNamespace(
-            evaluate=lambda tenant_id, payload: SimpleNamespace(
-                result="denied", reason="gate denied by tenant quota"
-            )
+            evaluate=lambda tenant_id, payload: SimpleNamespace(result="denied", reason="gate denied by tenant quota")
         )
     else:
         sched.cost_gate = SimpleNamespace(
-            evaluate=lambda tenant_id, payload: SimpleNamespace(
-                result="allowed", reason="gate allowed"
-            )
+            evaluate=lambda tenant_id, payload: SimpleNamespace(result="allowed", reason="gate allowed")
         )
 
     calls: list = []
@@ -291,9 +287,7 @@ def test_executor_submit_honours_confirmation_contract(monkeypatch):
         sched = _scheduler(gpu_available=False)
         _force_confirmation_verdict(monkeypatch, sched)
         executor.scheduler = sched
-        result = await executor.submit(
-            _job(f"j-sub-{confirmed}", "t-pro", False, confirmed=confirmed)
-        )
+        result = await executor.submit(_job(f"j-sub-{confirmed}", "t-pro", False, confirmed=confirmed))
         return result, sched
 
     rejected, sched_rejected = asyncio.run(scenario(False))

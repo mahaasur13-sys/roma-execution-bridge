@@ -89,9 +89,9 @@ def test_eventstore_fd_stable_over_appends(tmp_path):
     _append_batch(es)
     fd_after_appends = _db_fd_count(db_path)
 
-    assert (
-        fd_after_appends == fd_after_init
-    ), f"fd на файл БД вырос на {fd_after_appends - fd_after_init} за {N_APPENDS} append"
+    assert fd_after_appends == fd_after_init, (
+        f"fd на файл БД вырос на {fd_after_appends - fd_after_init} за {N_APPENDS} append"
+    )
 
 
 def test_eventstore_no_stray_connections(tmp_path):
@@ -100,11 +100,7 @@ def test_eventstore_no_stray_connections(tmp_path):
     _append_batch(es)
 
     gc.collect()
-    stray = [
-        obj
-        for obj in gc.get_objects()
-        if isinstance(obj, sqlite3.Connection) and obj is not es._conn
-    ]
+    stray = [obj for obj in gc.get_objects() if isinstance(obj, sqlite3.Connection) and obj is not es._conn]
     assert stray == [], f"обнаружено {len(stray)} посторонних sqlite3-соединений"
 
 
@@ -127,17 +123,9 @@ def test_eventstore_roundtrip_and_reopen(tmp_path):
     db_path = str(tmp_path / "events.db")
     es = EventStore(db_path=db_path)
 
-    es.append(
-        Event(event_type=EventType.JOB_QUEUED.value, job_id="job-1", payload={"a": 1})
-    )
-    es.append(
-        Event(event_type=EventType.JOB_STARTED.value, job_id="job-1", payload={"a": 2})
-    )
-    es.append(
-        Event(
-            event_type=EventType.JOB_COMPLETED.value, job_id="job-1", payload={"a": 3}
-        )
-    )
+    es.append(Event(event_type=EventType.JOB_QUEUED.value, job_id="job-1", payload={"a": 1}))
+    es.append(Event(event_type=EventType.JOB_STARTED.value, job_id="job-1", payload={"a": 2}))
+    es.append(Event(event_type=EventType.JOB_COMPLETED.value, job_id="job-1", payload={"a": 3}))
 
     assert es.get_latest_sequence() == 3
     all_events = es.replay(0)
@@ -206,9 +194,7 @@ def test_append_commit_failure_rolls_back_and_next_append_clean(tmp_path):
     )
 
     rows = es.replay(0)
-    assert (
-        len(rows) == 1
-    ), f"ожидалось ровно 1 событие (откаченного нет), получено {len(rows)}"
+    assert len(rows) == 1, f"ожидалось ровно 1 событие (откаченного нет), получено {len(rows)}"
     assert rows[0].payload == {"i": "good"}
     assert rows[0].event_type == EventType.JOB_STARTED.value
     # (в) нет дублей: откаченный payload не просочился
@@ -296,17 +282,13 @@ def test_append_event_sequence_assigned_only_after_commit(tmp_path):
 
     # фаза 1: commit падает — event.sequence НЕ присваивается (остаётся default)
     es._conn = _FailingCommitConn(real, fail_times=1)
-    ev_fail = Event(
-        event_type=EventType.JOB_QUEUED.value, job_id="job-1", payload={"i": "bad"}
-    )
+    ev_fail = Event(event_type=EventType.JOB_QUEUED.value, job_id="job-1", payload={"i": "bad"})
     with pytest.raises(sqlite3.OperationalError):
         es.append(ev_fail)
     assert ev_fail.sequence == 0, "несъеденный номер не должен присваиваться объекту"
 
     # фаза 2: успешный append — sequence присваивается (== 1, без дыры)
     es._conn = real
-    ev_ok = Event(
-        event_type=EventType.JOB_STARTED.value, job_id="job-1", payload={"i": "good"}
-    )
+    ev_ok = Event(event_type=EventType.JOB_STARTED.value, job_id="job-1", payload={"i": "good"})
     es.append(ev_ok)
     assert ev_ok.sequence == 1

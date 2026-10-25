@@ -27,9 +27,7 @@ MIGRATIONS_DIR = REPO_ROOT / "migrations"
 
 
 def _load_runner():
-    spec = importlib.util.spec_from_file_location(
-        "run_migrations", str(REPO_ROOT / "scripts" / "run_migrations.py")
-    )
+    spec = importlib.util.spec_from_file_location("run_migrations", str(REPO_ROOT / "scripts" / "run_migrations.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -74,18 +72,14 @@ def test_no_drop_without_if_exists():
         for line in path.read_text().splitlines():
             stripped = line.strip()
             if re.match(r"(?i)^DROP\s+(DATABASE|TABLE)\b", stripped):
-                assert (
-                    "IF EXISTS" in stripped.upper()
-                ), f"{path.name}: DROP without IF EXISTS: {stripped}"
+                assert "IF EXISTS" in stripped.upper(), f"{path.name}: DROP without IF EXISTS: {stripped}"
 
 
 @pytest.mark.pg  # G-CI-PG-CANON: env-skip без живого PG
 def test_runner_reapply_is_idempotent(capsys):
     """Second runner pass applies nothing (all files already tracked)."""
     if not _pg_reachable():
-        pytest.skip(
-            "PG not reachable — migration re-apply contract requires live PG; issue: P1-C · expiry: 2026-12-31"
-        )
+        pytest.skip("PG not reachable — migration re-apply contract requires live PG; issue: P1-C · expiry: 2026-12-31")
     runner = _load_runner()
     assert runner.main() == 0
     capsys.readouterr()  # discard first pass output
@@ -99,9 +93,7 @@ def test_runner_reapply_is_idempotent(capsys):
 def test_migrations_create_expected_tables():
     """After apply, the tables the code reads must exist in PG."""
     if not _pg_reachable():
-        pytest.skip(
-            "PG not reachable — object-existence contract requires live PG; issue: P1-C · expiry: 2026-12-31"
-        )
+        pytest.skip("PG not reachable — object-existence contract requires live PG; issue: P1-C · expiry: 2026-12-31")
     runner = _load_runner()
     runner.main()
 

@@ -37,7 +37,7 @@ class ROMAGPUScheduler:
             worker_count = self.gpu_connector.get_worker_count()
             if worker_count > 0:
                 for i in range(worker_count):
-                    self.policy_engine.register_node(f"gpu-node-{i+1}")
+                    self.policy_engine.register_node(f"gpu-node-{i + 1}")
             else:
                 # Fallback: register default RTX 3060 node
                 self.policy_engine.register_node("gpu-node-1")
@@ -54,8 +54,7 @@ class ROMAGPUScheduler:
             # и метрика наружу; тихого allow нет.
             gate_metrics.track_gate_unavailable("scheduler.init")
             logger.error(
-                "GATE_UNAVAILABLE (scheduler.init): инициализация гейта отказала "
-                "(%s: %s) — исполнение блокируется",
+                "GATE_UNAVAILABLE (scheduler.init): инициализация гейта отказала (%s: %s) — исполнение блокируется",
                 type(e).__name__,
                 e,
             )
@@ -156,12 +155,8 @@ class ROMAGPUScheduler:
                 self.gate_unavailable_reason or "decision gate unavailable",
             )
         else:
-            gate_result = self.cost_gate.evaluate(
-                job.get("tenant_id", "default"), payload
-            )
-            gate_decision = getattr(
-                gate_result.result, "value", str(gate_result.result)
-            )
+            gate_result = self.cost_gate.evaluate(job.get("tenant_id", "default"), payload)
+            gate_decision = getattr(gate_result.result, "value", str(gate_result.result))
             gate_allowed = not plan_source.is_rejection(gate_decision)
             gate_reason = gate_result.reason
 

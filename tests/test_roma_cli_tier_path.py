@@ -103,9 +103,7 @@ def test_cli_gate_gets_the_same_tenant_as_price(monkeypatch, capsys):
         seen["payload"] = payload
         return GateDecision(GateResult.ALLOWED, "quota ok", tenant_id)
 
-    monkeypatch.setattr(
-        roma_cli, "_api_post", lambda path, payload: {"job_id": "job-1"}
-    )
+    monkeypatch.setattr(roma_cli, "_api_post", lambda path, payload: {"job_id": "job-1"})
     cli = _cli(monkeypatch, record["tenant_id"])
     cli.gate = type("G", (), {"evaluate": staticmethod(_evaluate)})()
 
@@ -134,9 +132,7 @@ def test_cli_gate_denial_stops_before_submit(monkeypatch, capsys):
         (),
         {
             "evaluate": staticmethod(
-                lambda tenant_id, payload=None: GateDecision(
-                    GateResult.DENIED, "quota exceeded: 50/50 jobs", tenant_id
-                )
+                lambda tenant_id, payload=None: GateDecision(GateResult.DENIED, "quota exceeded: 50/50 jobs", tenant_id)
             )
         },
     )()

@@ -52,9 +52,7 @@ def test_legacy_plaintext_row_is_hashed_and_cleared(monkeypatch, tmp_path):
     db.init_db()
 
     conn = sqlite3.connect(str(path))
-    row = conn.execute(
-        "SELECT api_key, api_key_hash FROM tenants WHERE id = ?", ("tenant-legacy",)
-    ).fetchone()
+    row = conn.execute("SELECT api_key, api_key_hash FROM tenants WHERE id = ?", ("tenant-legacy",)).fetchone()
     conn.close()
 
     expected = hashlib.sha256(LEGACY_KEY.encode("utf-8")).hexdigest()
@@ -70,9 +68,7 @@ def test_init_db_is_idempotent(monkeypatch, tmp_path):
     db.init_db()
 
     conn = sqlite3.connect(str(path))
-    rows = conn.execute(
-        "SELECT api_key, api_key_hash FROM tenants WHERE id = ?", ("tenant-legacy",)
-    ).fetchall()
+    rows = conn.execute("SELECT api_key, api_key_hash FROM tenants WHERE id = ?", ("tenant-legacy",)).fetchall()
     conn.close()
 
     expected = hashlib.sha256(LEGACY_KEY.encode("utf-8")).hexdigest()
@@ -102,9 +98,7 @@ def _schema_with_hash(path: Path, *, plaintext: str, stored_hash: str) -> None:
     conn.close()
 
 
-def test_row_with_plaintext_and_hash_clears_plaintext_keeps_hash(
-    monkeypatch, tmp_path
-):
+def test_row_with_plaintext_and_hash_clears_plaintext_keeps_hash(monkeypatch, tmp_path):
     """Regression (CodeRabbit #114): a row with both fields must lose the plaintext."""
     path = _use_tmp_db(monkeypatch, tmp_path)
     stored_hash = hashlib.sha256(b"already-hashed-key").hexdigest()
@@ -113,9 +107,7 @@ def test_row_with_plaintext_and_hash_clears_plaintext_keeps_hash(
     db.init_db()
 
     conn = sqlite3.connect(str(path))
-    row = conn.execute(
-        "SELECT api_key, api_key_hash FROM tenants WHERE id = ?", ("tenant-both",)
-    ).fetchone()
+    row = conn.execute("SELECT api_key, api_key_hash FROM tenants WHERE id = ?", ("tenant-both",)).fetchone()
     conn.close()
 
     assert row[0] == "", "plaintext api_key must be cleared even when a hash exists"
@@ -150,9 +142,7 @@ def test_second_init_after_both_fields_row_is_noop(monkeypatch, tmp_path):
     db.init_db()
 
     conn = sqlite3.connect(str(path))
-    rows = conn.execute(
-        "SELECT api_key, api_key_hash FROM tenants WHERE id = ?", ("tenant-both",)
-    ).fetchall()
+    rows = conn.execute("SELECT api_key, api_key_hash FROM tenants WHERE id = ?", ("tenant-both",)).fetchall()
     conn.close()
 
     assert rows == [("", stored_hash)]

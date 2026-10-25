@@ -62,9 +62,7 @@ def _api_post(path: str, payload: dict) -> dict:
     """POST-запрос к API, возвращает JSON-ответ."""
     url = f"{API_BASE}{path}"
     data = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        url, data=data, headers={"Content-Type": "application/json"}
-    )
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             return json.loads(resp.read().decode())
@@ -105,9 +103,7 @@ class ROMA_CLI:
         gpu_required = "gpu" in task.lower() or "train" in task.lower()
 
         # Предсказание стоимости: тариф — из записи клиента (id из окружения)
-        prediction = self.predictor.predict(
-            task, gpu_required=gpu_required, tenant_id=self.tenant_id
-        )
+        prediction = self.predictor.predict(task, gpu_required=gpu_required, tenant_id=self.tenant_id)
         if self._unpriced(prediction):
             self._print_unpriced(prediction)
             return 1
@@ -123,12 +119,8 @@ class ROMA_CLI:
 
         # Вывод базовой информации
         print(f"\n💰 Ожидаемая стоимость: ${prediction['estimated_cost']:.2f}")
-        print(
-            f"⏱  Расчётная длительность: ~{self._format_duration(prediction.get('estimated_duration_minutes', 0))}"
-        )
-        print(
-            f"🖥  GPU: {prediction.get('gpu_node', 'cpu-cluster')} (×{prediction.get('gpu_count', 0)})"
-        )
+        print(f"⏱  Расчётная длительность: ~{self._format_duration(prediction.get('estimated_duration_minutes', 0))}")
+        print(f"🖥  GPU: {prediction.get('gpu_node', 'cpu-cluster')} (×{prediction.get('gpu_count', 0)})")
         print(f"⚠️  Уровень риска: {prediction.get('risk_level', 'LOW')}\n")
         print(self._breakdown_str(prediction.get('breakdown', {})))
 
@@ -146,15 +138,12 @@ class ROMA_CLI:
 
         if action == "REJECTED":
             print(
-                f"\n🚫 ОТКЛОНЕНО [{prediction.get('decision_category')}]: "
-                f"{prediction.get('decision_reason', action)}"
+                f"\n🚫 ОТКЛОНЕНО [{prediction.get('decision_category')}]: {prediction.get('decision_reason', action)}"
             )
             return 1
 
         if action == "REQUIRES_CONFIRMATION":
-            print(
-                f"\n⚠️  Предупреждение: стоимость ${prediction['estimated_cost']:.2f} — подтвердите?"
-            )
+            print(f"\n⚠️  Предупреждение: стоимость ${prediction['estimated_cost']:.2f} — подтвердите?")
             print(self.PROMPT_OPTIONS)
             choice = input("\n> ").strip().lower()
             if choice in ("cancel", "c"):
@@ -194,9 +183,7 @@ class ROMA_CLI:
         if explanation.get('alternatives'):
             print("\n💡 БОЛЕЕ ДЕШЁВЫЕ АЛЬТЕРНАТИВЫ")
             for alt in explanation['alternatives']:
-                print(
-                    f"  • {alt['description']} → ${alt['cost']:.2f} (экономия {alt['savings']}%)"
-                )
+                print(f"  • {alt['description']} → ${alt['cost']:.2f} (экономия {alt['savings']}%)")
         print("\n🔍 ПОЧЕМУ ТАКОЕ РЕШЕНИЕ")
         for reason in explanation['decision_reasons']:
             print(f"  • {reason}")
@@ -281,9 +268,7 @@ class ROMA_CLI:
         print("\n💡 АЛЬТЕРНАТИВЫ:")
         if explanation.get('alternatives'):
             for alt in explanation['alternatives']:
-                print(
-                    f"  • {alt['description']} → ${alt['cost']:.2f} (экономия {alt['savings']}%)"
-                )
+                print(f"  • {alt['description']} → ${alt['cost']:.2f} (экономия {alt['savings']}%)")
         else:
             print("  (дешёвых альтернатив не найдено)")
 
@@ -297,14 +282,8 @@ class ROMA_CLI:
 
     def _print_unpriced(self, prediction: dict) -> None:
         label = self.tenant_id or f"<не задан: {TENANT_ID_ENV}>"
-        print(
-            f"\n🚫 ЦЕНА НЕ УСТАНОВЛЕНА: {prediction.get('decision')} — "
-            f"{prediction.get('decision_reason', '')}"
-        )
-        print(
-            f"   клиент: {label} · тариф берётся из записи клиента, "
-            "подстановки free-тарифа нет."
-        )
+        print(f"\n🚫 ЦЕНА НЕ УСТАНОВЛЕНА: {prediction.get('decision')} — {prediction.get('decision_reason', '')}")
+        print(f"   клиент: {label} · тариф берётся из записи клиента, подстановки free-тарифа нет.")
 
     def _format_duration(self, minutes: float) -> str:
         if not minutes:

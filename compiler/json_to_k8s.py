@@ -27,30 +27,19 @@ class K8sCompiler:
             return self._compile_rayjob(task_id, dag, gpu_required, resources)
         return self._compile_k8s_job(task_id, dag, gpu_required, resources)
 
-    def _compile_k8s_job(
-        self, task_id: str, dag: list, gpu_required: bool, resources: dict
-    ) -> dict:
+    def _compile_k8s_job(self, task_id: str, dag: list, gpu_required: bool, resources: dict) -> dict:
         steps = []
         _dependencies = []
         _init_containers = []
 
         for i, node in enumerate(dag):
             step_name = f"step-{i}-{node['id']}"
-            deps = [
-                f"step-{j}-{d}"
-                for j, n in enumerate(dag)
-                for d in node.get("depends_on", [])
-                if d == n["id"]
-            ]
+            deps = [f"step-{j}-{d}" for j, n in enumerate(dag) for d in node.get("depends_on", []) if d == n["id"]]
 
             container = {
                 "name": step_name,
                 "image": node.get("image", "python:3.11-slim"),
-                "command": (
-                    node.get("command", "").split()
-                    if node.get("command")
-                    else ["echo", "no command"]
-                ),
+                "command": (node.get("command", "").split() if node.get("command") else ["echo", "no command"]),
             }
 
             # GPU handling
@@ -80,9 +69,7 @@ class K8sCompiler:
         job = self._build_job_manifest(task_id, steps, gpu_required)
         return job
 
-    def _build_job_manifest(
-        self, task_id: str, steps: list, gpu_required: bool
-    ) -> dict:
+    def _build_job_manifest(self, task_id: str, steps: list, gpu_required: bool) -> dict:
         containers = []
         init_containers = []
 
@@ -115,27 +102,21 @@ class K8sCompiler:
             "spec": {
                 "backoffLimit": 2,
                 "template": {
-                    "metadata": {
-                        "labels": {"app": "roma-executor", "task_id": task_id}
-                    },
+                    "metadata": {"labels": {"app": "roma-executor", "task_id": task_id}},
                     "spec": pod_spec,
                 },
             },
         }
 
         if gpu_required:
-            job_manifest["spec"]["template"]["spec"][
-                "nodeSelector"
-            ] = self.GPU_NODE_SELECTOR
+            job_manifest["spec"]["template"]["spec"]["nodeSelector"] = self.GPU_NODE_SELECTOR
             job_manifest["spec"]["template"]["spec"]["tolerations"] = [
                 {"key": "gpu", "operator": "Exists", "effect": "NoSchedule"}
             ]
 
         return job_manifest
 
-    def _compile_rayjob(
-        self, task_id: str, dag: list, gpu_required: bool, resources: dict
-    ) -> dict:
+    def _compile_rayjob(self, task_id: str, dag: list, gpu_required: bool, resources: dict) -> dict:
         """Fallback to RayJob if cluster uses Ray operator."""
         ray_job = {
             "apiVersion": "ray.io/v1alpha1",
@@ -154,9 +135,7 @@ class K8sCompiler:
                                         "name": "ray-head",
                                         "image": "rayproject/ray:latest-gpu",
                                         "resources": {
-                                            "limits": {
-                                                "gpu": "1" if gpu_required else "0"
-                                            },
+                                            "limits": {"gpu": "1" if gpu_required else "0"},
                                             "memory": "8Gi",
                                         },
                                     }

@@ -21,9 +21,7 @@ def full_gateway_app():
             tenant_id="acme",
             display_name="ACME Corp",
             rate_limit=RateLimitConfig(requests_per_minute=120, burst_size=20),
-            branding=BrandingConfig(
-                inject_headers=True, logo_url="https://acme.com/logo.png"
-            ),
+            branding=BrandingConfig(inject_headers=True, logo_url="https://acme.com/logo.png"),
             auth=AuthConfig(require_api_key=True),
         ),
         "free": TenantGatewayConfig(
@@ -98,9 +96,7 @@ class TestGatewayIntegration:
         """Негатив к освобождению: «похожий» путь освобождения не получает."""
         client = TestClient(full_gateway_app, raise_server_exceptions=False)
         resp = client.get("/gateway/healthz", headers={"X-Tenant-ID": "acme"})
-        assert (
-            resp.status_code == 401
-        ), "освобождение сработало по префиксу — это обход auth"
+        assert resp.status_code == 401, "освобождение сработало по префиксу — это обход auth"
 
     def test_protected_route_with_short_api_key_returns_401(self, full_gateway_app):
         """ACME tenant requires API key — short key rejected (len < 16)."""
