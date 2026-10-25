@@ -25,6 +25,7 @@ permissions:
 
 jobs:
   verdict:
+    # health проверяется pull-агентом (шаг health) и вердиктом deploy/zo — публичного эндпоинта у сервиса нет.
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -64,9 +65,3 @@ jobs:
           done
           echo "::error::за 15 минут вердикт deploy/zo не появился — машина Zo выкат не подтвердила (журнал: /var/lib/roma-deploy-agent/deploy-agent.log)"
           exit 1
-
-      - name: Public health probe
-        if: steps.gate.outputs.superseded != 'true'
-        run: |
-          curl -sf --max-time 15 https://roma-execution-bridge-asurdev.zocomputer.io/health | head -c 400
-          echo
