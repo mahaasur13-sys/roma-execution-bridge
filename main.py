@@ -494,10 +494,55 @@ def _backup_last_success_ts() -> float:
         return 0.0
 
 
+DR_DRILL_STATE_DEFAULT = "/root/.sealed/pgdump/drill_state.json"
+
+
+def _dr_drill_state() -> tuple:
+    """(last_success_ts, rto_seconds) of the last pg_restore drill; zeros when unknown."""
+    import json
+    import math
+    import os
+
+    path = os.environ.get("ROMA_DR_DRILL_STATE_FILE", DR_DRILL_STATE_DEFAULT)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            state = json.load(fh)
+    except FileNotFoundError:
+        logger.warning("dr drill state file missing: %s", path)
+        return 0.0, 0.0
+    except (OSError, ValueError) as e:
+        logger.warning("dr drill state unreadable path=%s: %s", path, e)
+        return 0.0, 0.0
+    if not isinstance(state, dict):
+        logger.warning("dr drill state is not an object: %s", path)
+        return 0.0, 0.0
+    try:
+        ok_ts = float(state.get("last_success_ts") or 0)
+        rto = float(state.get("rto_seconds") or 0)
+    except (TypeError, ValueError):
+        logger.warning("dr drill state has non-numeric fields: %s", path)
+        return 0.0, 0.0
+    if not (math.isfinite(ok_ts) and math.isfinite(rto)):
+        logger.warning("dr drill state has non-finite fields: %s", path)
+        return 0.0, 0.0
+    return ok_ts, rto
+
+
 def _set_backup_metric() -> None:
     from monitoring.metrics import roma_backup_last_success_timestamp
 
     roma_backup_last_success_timestamp.set(_backup_last_success_ts())
+
+
+def _set_dr_drill_metrics() -> None:
+    from monitoring.metrics import (
+        roma_dr_drill_last_success_timestamp,
+        roma_dr_drill_rto_seconds,
+    )
+
+    ok_ts, rto = _dr_drill_state()
+    roma_dr_drill_last_success_timestamp.set(ok_ts)
+    roma_dr_drill_rto_seconds.set(rto)
 
 
 async def _reconciliation_loop():
@@ -529,6 +574,7 @@ async def _reconciliation_loop():
                 except Exception as e:
                     logger.warning("reconciliation failed tenant=%s: %s", tenant_id, e)
             _set_backup_metric()
+            _set_dr_drill_metrics()
         except Exception as e:
             logger.warning("reconciliation loop error: %s", e)
         await asyncio.sleep(900)
