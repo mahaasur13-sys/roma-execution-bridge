@@ -104,6 +104,12 @@ jobs:
         run: pip install ruff==0.15.20
       - name: Lint
         run: ruff check . --output-format=concise
+      - name: Format check
+        # N-RUFF-FORMAT: без этого шага дрейф форматирования невидим — `ruff check`
+        # не смотрит на переносы строк, поэтому дерево может разъехаться с
+        # конвенцией и оставаться «зелёным». Версия ruff та же, что у Lint выше:
+        # форматтер между версиями меняет вывод, и рассинхрон даёт ложный красный.
+        run: ruff format --check .
 
   helm-validate:
     runs-on: ubuntu-latest
