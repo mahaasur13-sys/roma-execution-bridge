@@ -33,6 +33,9 @@ env:
   REGISTRY: ghcr.io/${{ github.actor }}
   IMAGE_PREFIX: ${{ github.repository }}
 
+permissions:
+  contents: read
+
 jobs:
   signing:
     runs-on: ubuntu-latest
