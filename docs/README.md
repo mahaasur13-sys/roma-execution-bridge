@@ -13,6 +13,7 @@
 | [authentication.md](./authentication.md) | Работа с API-ключами, ошибки 401 |
 | [architecture.md](./architecture.md) | Архитектура сервиса и компоненты |
 | [metrics.md](./metrics.md) | Prometheus-метрики и JSON-логирование |
+| [RESTORE-DRILL-RUNBOOK.md](./RESTORE-DRILL-RUNBOOK.md) | Еженедельный restore-дрилл: расписание, проверка, откат |
 | [phase-0-pre-launch.md](./phase-0-pre-launch.md) | План развития: Фаза 0 (Pre-Launch, 0–2 мес) |
 | [competitive-analysis.md](./competitive-analysis.md) | Конкурентный анализ: TCO, Time-to-Value, риски |
 | [WHITE-LABEL-QUICKSTART.md](./WHITE-LABEL-QUICKSTART.md) | White-label / брендирование SaaS |

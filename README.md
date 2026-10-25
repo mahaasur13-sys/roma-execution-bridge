@@ -161,6 +161,13 @@ CLI → Input Contract → ROMA Planner → Event Sourcing
 
 ---
 
+## 🧯 Backup & Restore Drill
+
+Daily `pg_dump -Fc` at 03:30Z, shipped offsite to B2; weekly restore drill into a throwaway
+`roma_drill_*` database on Sundays 04:30Z. Runbook: [docs/RESTORE-DRILL-RUNBOOK.md](./docs/RESTORE-DRILL-RUNBOOK.md).
+
+---
+
 ## 📄 Version
 
 **v2.1.0** — Full billing flow (GPU-sec + tokens + spend-caps) — 2026-08-20
