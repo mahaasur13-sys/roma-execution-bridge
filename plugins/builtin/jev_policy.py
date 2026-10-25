@@ -128,7 +128,9 @@ def build_state(tenant_ref: str, tenant: dict[str, Any], payload: dict[str, Any]
 # ── Observation (fail-closed) ────────────────────────────────────────────
 
 
-def _ask(state: dict[str, Any], *, client: Any = None, timeout: float | None = None) -> tuple[str, float | None, dict[str, float]] | None:
+def _ask(
+    state: dict[str, Any], *, client: Any = None, timeout: float | None = None
+) -> tuple[str, float | None, dict[str, float]] | None:
     """One Jev call + parse. Returns (choice, confidence, probabilities) or None (fail-closed).
 
     Импорт клиента, конструктор (в т.ч. пин модели), запрос и разбор ответа — внутри try:
@@ -204,7 +206,9 @@ def observe_once(state: dict[str, Any], verdict: str, *, client: Any = None) -> 
     return observation
 
 
-def cascade_once(state: dict[str, Any], *, client: Any = None, timeout: float | None = _CASCADE_TIMEOUT_S) -> str | None:
+def cascade_once(
+    state: dict[str, Any], *, client: Any = None, timeout: float | None = _CASCADE_TIMEOUT_S
+) -> str | None:
     """One synchronous Jev decision for routing.
 
     Returns the classification only when ``confidence >= _CASCADE_CONFIDENCE``; otherwise

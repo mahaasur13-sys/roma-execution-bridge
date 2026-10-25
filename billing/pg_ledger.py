@@ -37,9 +37,7 @@ class PGBillingLedger:
         self._pg = get_pg_manager()
         self._entries: list[dict] = []  # in-memory fallback
 
-    def _pg_execute(
-        self, operation: str, query: str, params: tuple = None, fetch: bool = False
-    ) -> list | None:
+    def _pg_execute(self, operation: str, query: str, params: tuple = None, fetch: bool = False) -> list | None:
         """Execute a PG query with automatic retry + fallback."""
         if not self._pg._ensure_pool():
             raise PGUnavailableError("PG not configured or unavailable")
@@ -121,15 +119,11 @@ class PGBillingLedger:
             )
         return ledger_id
 
-    def credit(
-        self, tenant_id: str, amount: float, currency: str = "USD", **meta
-    ) -> str:
+    def credit(self, tenant_id: str, amount: float, currency: str = "USD", **meta) -> str:
         """Credit a tenant and return the resulting ``ledger_id`` (never None)."""
         return self.append(tenant_id, "CREDIT", amount, currency, meta)
 
-    def debit(
-        self, tenant_id: str, amount: float, currency: str = "USD", **meta
-    ) -> None:
+    def debit(self, tenant_id: str, amount: float, currency: str = "USD", **meta) -> None:
         self.append(tenant_id, "DEBIT", amount, currency, meta)
 
     def _txn(self, operation, statements, fetch_last=True):
@@ -164,18 +158,14 @@ class PGBillingLedger:
             logger.error("BillingLedger.%s PG error: %s", operation, e)
             raise PGUnavailableError(str(e)) from e
 
-    def debit_if_funds(
-        self, tenant_id, amount, currency="USD", idempotency_key=None, **meta
-    ) -> str | None:
+    def debit_if_funds(self, tenant_id, amount, currency="USD", idempotency_key=None, **meta) -> str | None:
         if amount < 0:
             raise ValueError("debit amount must be >= 0")
         if idempotency_key:
-            digest = hashlib.sha256(
-                f"{tenant_id}:{idempotency_key}".encode()
-            ).hexdigest()
+            digest = hashlib.sha256(f"{tenant_id}:{idempotency_key}".encode()).hexdigest()
             ledger_id = f"led-{digest[:24]}"
         else:
-            ledger_id = f"led-{int(time.time()*1000)}-{uuid4().hex[:12]}"
+            ledger_id = f"led-{int(time.time() * 1000)}-{uuid4().hex[:12]}"
         meta = dict(meta or {})
         if idempotency_key:
             meta["idempotency_key"] = idempotency_key
@@ -231,19 +221,14 @@ class PGBillingLedger:
         try:
             rows = self._pg_execute(
                 "ledger_debit_sum",
-                "SELECT COALESCE(SUM(amount), 0) FROM ledger_entries "
-                "WHERE tenant_id = %s AND entry_type = 'DEBIT'",
+                "SELECT COALESCE(SUM(amount), 0) FROM ledger_entries WHERE tenant_id = %s AND entry_type = 'DEBIT'",
                 (tenant_id,),
                 fetch=True,
             )
             return float(rows[0][0])
         except PGUnavailableError:
             pass
-        return sum(
-            e["amount"]
-            for e in self._entries
-            if e["tenant_id"] == tenant_id and e["type"] == "DEBIT"
-        )
+        return sum(e["amount"] for e in self._entries if e["tenant_id"] == tenant_id and e["type"] == "DEBIT")
 
     def get_tenant_usage_cost(self, tenant_id: str) -> float:
         try:
@@ -315,9 +300,7 @@ class PGBillingLedger:
             )
             by_tenant = {}
             for tenant_id, etype, total, cnt in rows:
-                t = by_tenant.setdefault(
-                    tenant_id, {"credits": 0.0, "debits": 0.0, "net": 0.0, "entries": 0}
-                )
+                t = by_tenant.setdefault(tenant_id, {"credits": 0.0, "debits": 0.0, "net": 0.0, "entries": 0})
                 t["entries"] += cnt
                 if etype == "CREDIT":
                     t["credits"] += total
@@ -345,9 +328,7 @@ class PGBillingLedger:
 
     @property
     def is_persistent(self) -> bool:
-        return (
-            self._pg._create_pool() if self._pg._pool is None else self._pg.is_connected
-        )
+        return self._pg._create_pool() if self._pg._pool is None else self._pg.is_connected
 
     def get_tenant_entry_count(self, tenant_id: str) -> int:
         try:

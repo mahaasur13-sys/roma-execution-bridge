@@ -41,9 +41,7 @@ class LocalBackend(BaseBackend):
     async def cancel_job(self, ctx: JobContext) -> dict:
         return {"status": "cancelled", "job_id": ctx.job_id, "backend": "local"}
 
-    async def run_command(
-        self, ctx: JobContext, command: str, timeout: int = 600
-    ) -> dict:
+    async def run_command(self, ctx: JobContext, command: str, timeout: int = 600) -> dict:
         """Выполняет команду локально (симуляция)."""
         import asyncio
 

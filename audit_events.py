@@ -19,9 +19,7 @@ def write_audit_event(
     data: dict | None = None,
 ) -> dict:
     """Write a single audit event to PG/SQLite. Returns {id, ...}."""
-    return _store.write_event(
-        tenant_id, event_type, entity_type, entity_id, data or {}
-    )
+    return _store.write_event(tenant_id, event_type, entity_type, entity_id, data or {})
 
 
 CRYPTO_AUDIT_EVENTS = {

@@ -126,6 +126,7 @@ def test_top_up_route_returns_non_empty_entry_id(monkeypatch):
     assert body["entry_id"], f"entry_id must not be empty: {body!r}"
     assert body["entry_id"] in _ids(fresh, target)
 
+
 def test_identical_entries_get_distinct_ids(ledger):
     """The id must not come from the built-in ``hash()``.
 
@@ -176,6 +177,4 @@ def test_pg_down_is_logged_not_swallowed(monkeypatch, ledger):
     entry_id = ledger.credit(tenant_id, 9.0)
 
     assert entry_id and entry_id in _ids(ledger, tenant_id)
-    assert any(
-        "kept in memory only" in line and entry_id in line for line in seen
-    ), seen
+    assert any("kept in memory only" in line and entry_id in line for line in seen), seen

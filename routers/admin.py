@@ -90,9 +90,7 @@ async def admin_deactivate_invite(payload: dict):
 async def admin_page(request: Request):
     """Admin dashboard HTML page."""
     info = _admin_only(request)
-    return Response(
-        content=_render_admin_dashboard(info["tenant_id"]), media_type="text/html"
-    )
+    return Response(content=_render_admin_dashboard(info["tenant_id"]), media_type="text/html")
 
 
 @router.get("/verification-stats")
@@ -163,9 +161,7 @@ async def admin_analytics_users(request: Request):
     end_date = request.query_params.get("end_date", "")
     sort_by = request.query_params.get("sort_by", "last_seen")
     try:
-        users = db.get_analytics_users(
-            start_date=start_date, end_date=end_date, sort_by=sort_by
-        )
+        users = db.get_analytics_users(start_date=start_date, end_date=end_date, sort_by=sort_by)
         return {"status": "ok", "users": users}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

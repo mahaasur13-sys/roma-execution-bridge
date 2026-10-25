@@ -153,7 +153,7 @@ def _ip_allowed(client_ip: str) -> bool:
     try:
         client = ipaddress.ip_address(client_ip)
     except ValueError:
-        logger.warning(f"Admin IP check: invalid client IP \'{client_ip}\'")
+        logger.warning(f"Admin IP check: invalid client IP '{client_ip}'")
         return False
     for entry in allowlist.split(","):
         entry = entry.strip()
@@ -166,7 +166,7 @@ def _ip_allowed(client_ip: str) -> bool:
             if client in network:
                 return True
         except ValueError:
-            logger.warning(f"Admin IP allowlist: invalid entry \'{entry}\'")
+            logger.warning(f"Admin IP allowlist: invalid entry '{entry}'")
             continue
     return False
 
@@ -191,8 +191,6 @@ def _admin_only(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
     if info.get("tenant_id") != "tenant-demo":
-        raise HTTPException(
-            status_code=403, detail="Admin access requires tenant-demo API key"
-        )
+        raise HTTPException(status_code=403, detail="Admin access requires tenant-demo API key")
 
     return info

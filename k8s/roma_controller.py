@@ -22,9 +22,7 @@ try:
     HAS_K8S = True
 except ImportError:
     HAS_K8S = False
-    print(
-        "WARNING: kubernetes client not installed. Controller running in DRY_RUN mode."
-    )
+    print("WARNING: kubernetes client not installed. Controller running in DRY_RUN mode.")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("roma-controller")
@@ -81,12 +79,8 @@ def create_k8s_job_object(romatask: Dict[str, Any]) -> Dict[str, Any]:
                             "command": ["python", "-c", f"print('ROMA Task: {task}')"],
                             "resources": (
                                 {
-                                    "limits": (
-                                        {"nvidia.com/gpu": "1"} if gpu_required else {}
-                                    ),
-                                    "requests": (
-                                        {"nvidia.com/gpu": "1"} if gpu_required else {}
-                                    ),
+                                    "limits": ({"nvidia.com/gpu": "1"} if gpu_required else {}),
+                                    "requests": ({"nvidia.com/gpu": "1"} if gpu_required else {}),
                                 }
                                 if gpu_required
                                 else {}
@@ -153,9 +147,7 @@ def run_controller(dry_run: bool = False):
     w = watch.Watch()
     log.info("Watching for RomaTask resources...")
 
-    for event in w.stream(
-        custom_api.list_cluster_custom_object, "roma.ai", "v1", "romatasks"
-    ):
+    for event in w.stream(custom_api.list_cluster_custom_object, "roma.ai", "v1", "romatasks"):
         romatask = event["object"]
         event_type = event["type"]
         name = romatask["metadata"]["name"]
@@ -186,16 +178,12 @@ def run_controller(dry_run: bool = False):
             job_name = romatask.get("status", {}).get("k8sJobName")
             if job_name and current_phase == "Queued":
                 try:
-                    job = batch_api.read_namespaced_job(
-                        job_name, romatask["metadata"]["namespace"]
-                    )
+                    job = batch_api.read_namespaced_job(job_name, romatask["metadata"]["namespace"])
                     if job.status.succeeded:
                         update_romatask_status(api, romatask, "Completed")
                         log.info(f"Task completed: {name}")
                     elif job.status.failed:
-                        update_romatask_status(
-                            api, romatask, "Failed", error="Job failed"
-                        )
+                        update_romatask_status(api, romatask, "Failed", error="Job failed")
                         log.info(f"Task failed: {name}")
                 except Exception:
                     pass
@@ -208,9 +196,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="ROMA K8s Controller")
-    parser.add_argument(
-        "--dry-run", action="store_true", help="Run without K8s connection"
-    )
+    parser.add_argument("--dry-run", action="store_true", help="Run without K8s connection")
     args = parser.parse_args()
 
     def sigterm_handler(signum, frame):

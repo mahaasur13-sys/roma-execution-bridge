@@ -59,8 +59,7 @@ def _resolve_url(url: str | None) -> str:
         return dsn
     if _is_production():
         raise SupportDatabaseUnavailable(
-            "support DB requires PG_DSN in production or an explicitly injected "
-            "test/local DB"
+            "support DB requires PG_DSN in production or an explicitly injected test/local DB"
         )
     logger.warning(
         "support DB: PG_DSN is unset outside production — falling back to a local "
@@ -74,13 +73,9 @@ def get_engine(url: str | None = None) -> Engine:
     if resolved.startswith("sqlite"):
         connect_args = {"check_same_thread": False}
         if ":memory:" in resolved:
-            return create_engine(
-                resolved, connect_args=connect_args, poolclass=StaticPool
-            )
+            return create_engine(resolved, connect_args=connect_args, poolclass=StaticPool)
         return create_engine(resolved, connect_args=connect_args)
-    return create_engine(
-        resolved, pool_pre_ping=True, connect_args={"connect_timeout": 5}
-    )
+    return create_engine(resolved, pool_pre_ping=True, connect_args={"connect_timeout": 5})
 
 
 def get_session_factory(url: str | None = None):

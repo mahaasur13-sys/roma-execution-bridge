@@ -28,9 +28,7 @@ _INFLIGHT = set()
 # и до 120s для local. Осиротевшим считаем running, провисевший вдвое дольше
 # самого длинного цикла: воркер, который его вёл, уже не вернётся.
 MAX_JOB_TIMEOUT_SECONDS = 600
-JOB_ORPHAN_TIMEOUT_SECONDS = int(
-    os.environ.get("JOB_ORPHAN_TIMEOUT", str(MAX_JOB_TIMEOUT_SECONDS * 2))
-)
+JOB_ORPHAN_TIMEOUT_SECONDS = int(os.environ.get("JOB_ORPHAN_TIMEOUT", str(MAX_JOB_TIMEOUT_SECONDS * 2)))
 _ORPHAN_SWEEP_INTERVAL_S = 300.0
 _last_orphan_sweep = 0.0
 
@@ -110,9 +108,7 @@ async def poll_and_execute():
 
 
 def dispatch_is_ready(backend_name: str | None, status: str | None) -> bool:
-    return status in ("running", "provisioning") or (
-        backend_name == "local" and status == "queued"
-    )
+    return status in ("running", "provisioning") or (backend_name == "local" and status == "queued")
 
 
 async def _execute_and_bill_impl(
@@ -135,9 +131,7 @@ async def _execute_and_bill_impl(
 
     # Шаг 1: Dispatch
     try:
-        result = await _backend_manager["dispatch"](
-            job_id=job_id, tenant_id=tenant_id, payload=payload
-        )
+        result = await _backend_manager["dispatch"](job_id=job_id, tenant_id=tenant_id, payload=payload)
         # The dispatched backend comes ONLY from the dispatch result. payload.backend
         # is the *requested* backend (kept in the log below) and must not decide
         # failed-vs-running nor be persisted as the actual backend.
@@ -247,11 +241,7 @@ async def _execute_and_bill_impl(
                 ssh_host = status_info.get("ssh_host", status_info.get("host", ""))
                 if ssh_host:
                     cmd_result = await _execute_command(job_id, payload, tenant_id)
-                    status = (
-                        "completed"
-                        if cmd_result.get("status") == "completed"
-                        else "failed"
-                    )
+                    status = "completed" if cmd_result.get("status") == "completed" else "failed"
                     break
 
         except Exception as exc:

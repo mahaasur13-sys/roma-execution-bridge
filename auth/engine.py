@@ -160,9 +160,7 @@ class AuthEngine:
         self.hmac_secrets[tenant_id] = secret
         return secret
 
-    def sign_request(
-        self, tenant_id: str, method: str, path: str, body: str, timestamp: float
-    ) -> str:
+    def sign_request(self, tenant_id: str, method: str, path: str, body: str, timestamp: float) -> str:
         """Create HMAC signature for request signing."""
         secret = self.hmac_secrets.get(tenant_id)
         if not secret:
@@ -190,9 +188,7 @@ class AuthEngine:
         """Validate or raise AuthError."""
         key = self.validate_key(full_secret)
         if not key:
-            raise AuthError(
-                "invalid_or_expired_key", "API key is invalid, expired, or revoked"
-            )
+            raise AuthError("invalid_or_expired_key", "API key is invalid, expired, or revoked")
         return key
 
     def require_tenant(self, tenant_id: str) -> Tenant:
@@ -233,12 +229,8 @@ if __name__ == "__main__":
     # HMAC
     hmac_secret = auth.create_hmac_secret("tenant-acme")
     ts = time.time()
-    sig = auth.sign_request(
-        "tenant-acme", "POST", "/api/v1/submit", '{"task":"test"}', ts
-    )
-    verify = auth.verify_signature(
-        "tenant-acme", "POST", "/api/v1/submit", '{"task":"test"}', ts, sig
-    )
+    sig = auth.sign_request("tenant-acme", "POST", "/api/v1/submit", '{"task":"test"}', ts)
+    verify = auth.verify_signature("tenant-acme", "POST", "/api/v1/submit", '{"task":"test"}', ts, sig)
     print(f"HMAC verify: {verify}")
     test_payload = '{"task":"test"}'
     print(

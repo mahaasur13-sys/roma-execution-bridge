@@ -66,15 +66,9 @@ def cp(monkeypatch):
         "get_tenant",
         lambda tid: {"id": tid} if tid in ("tenant-a", "tenant-b") else None,
     )
-    monkeypatch.setattr(
-        main.db, "update_tenant_subscription", lambda *a, **k: calls["sub"].append(a)
-    )
-    monkeypatch.setattr(
-        main.db, "mark_invoice_processed", lambda *a, **k: calls["mark"].append(a)
-    )
-    monkeypatch.setattr(
-        main.db, "set_tenant_inactive", lambda *a, **k: calls["inactive"].append(a)
-    )
+    monkeypatch.setattr(main.db, "update_tenant_subscription", lambda *a, **k: calls["sub"].append(a))
+    monkeypatch.setattr(main.db, "mark_invoice_processed", lambda *a, **k: calls["mark"].append(a))
+    monkeypatch.setattr(main.db, "set_tenant_inactive", lambda *a, **k: calls["inactive"].append(a))
 
     def _processed(invoice_id, tenant_id=""):
         if invoice_id not in store:

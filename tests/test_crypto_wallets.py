@@ -45,7 +45,6 @@ def monero_config() -> MoneroViewOnlyConfig:
 
 
 class TestWalletCreation:
-
     @pytest.mark.asyncio
     async def test_01_create_provider_wallet(self, settings: CryptoSettings) -> None:
         """Smoke 1: Create provider-type wallet."""
@@ -104,9 +103,7 @@ class TestWalletCreation:
             await svc.create_wallet(req)
 
     @pytest.mark.asyncio
-    async def test_04_monero_missing_config_blocked(
-        self, settings: CryptoSettings
-    ) -> None:
+    async def test_04_monero_missing_config_blocked(self, settings: CryptoSettings) -> None:
         """Smoke 4: Monero wallet without config raises error."""
         svc = CryptoWalletService(settings=settings)
         req = CreateWalletRequest(
@@ -120,7 +117,6 @@ class TestWalletCreation:
 
 
 class TestMoneroWallet:
-
     @pytest.mark.asyncio
     async def test_05_generate_monero_subaddress(
         self, settings: CryptoSettings, monero_config: MoneroViewOnlyConfig
@@ -156,9 +152,7 @@ class TestMoneroWallet:
                 label="invoice-123",
                 invoice_id=uuid4(),
             )
-            result = await svc.generate_monero_subaddress(
-                str(wallet.wallet_id), sub_req
-            )
+            result = await svc.generate_monero_subaddress(str(wallet.wallet_id), sub_req)
             assert result.subaddress_index == 5
             assert "monero_subaddress" in result.address
             assert result.wallet_id == wallet.wallet_id
@@ -216,11 +210,8 @@ class TestMoneroWallet:
 
 
 class TestWalletRotation:
-
     @pytest.mark.asyncio
-    async def test_08_wallet_rotation(
-        self, settings: CryptoSettings, monero_config: MoneroViewOnlyConfig
-    ) -> None:
+    async def test_08_wallet_rotation(self, settings: CryptoSettings, monero_config: MoneroViewOnlyConfig) -> None:
         """Smoke 8: Rotate wallet and track event."""
         svc = CryptoWalletService(settings=settings)
         req = CreateWalletRequest(

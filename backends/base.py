@@ -25,9 +25,7 @@ class JobContext:
 
     @property
     def docker_image(self) -> str:
-        return self.image or os.getenv(
-            "VASTAI_IMAGE", "nvidia/cuda:12.1-runtime-ubuntu22.04"
-        )
+        return self.image or os.getenv("VASTAI_IMAGE", "nvidia/cuda:12.1-runtime-ubuntu22.04")
 
 
 class BaseBackend:
@@ -58,8 +56,6 @@ class BaseBackend:
         """Get recent logs from instance."""
         raise NotImplementedError
 
-    async def run_command(
-        self, ctx: JobContext, command: str, timeout: int = 600
-    ) -> dict:
+    async def run_command(self, ctx: JobContext, command: str, timeout: int = 600) -> dict:
         """Выполнить команду на бэкенде. Возвращает {status, output, exit_code}."""
         raise NotImplementedError

@@ -46,11 +46,7 @@ def _select_gpu(gpu: str, priority: str) -> str:
     if gpu != "auto":
         available = [w for w in workers if w.get("gpu_type") == gpu]
         return gpu if available else workers[0].get("gpu_type", "RTX4090")
-    for g in (
-        ["H100", "A100", "RTX4090", "RTX3060"]
-        if priority == "high"
-        else ["RTX4090", "RTX3060"]
-    ):
+    for g in ["H100", "A100", "RTX4090", "RTX3060"] if priority == "high" else ["RTX4090", "RTX3060"]:
         available = [w for w in workers if w.get("gpu_type") == g]
         if available:
             return g
@@ -62,9 +58,7 @@ def run_endpoint(body: RunRequest):
     org_id = "demo_org"
     gpu_selected = _select_gpu(body.gpu, body.priority)
     gpu_seconds = _pricing.estimate_duration(body.task, gpu_selected)
-    base_cost = _pricing.calculate(
-        {"task": body.task, "gpu_required": gpu_selected, "gpu_seconds": gpu_seconds}
-    )
+    base_cost = _pricing.calculate({"task": body.task, "gpu_required": gpu_selected, "gpu_seconds": gpu_seconds})
     tier_markup = {"free": 2.5, "pro": 1.5, "enterprise": 1.0}
     tier = org_id.split("_")[0] if "_" in org_id else "pro"
     total_cost = round(base_cost * tier_markup.get(tier, 1.5), 4)

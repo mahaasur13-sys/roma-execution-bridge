@@ -35,9 +35,7 @@ def test_record_attempts_both_durable_writes_and_returns_event(monkeypatch):
 
     monkeypatch.setattr(engine, "_pg_execute", _ok)
 
-    ev = engine.record(
-        "gpu_usage", tenant="t1", gpu_seconds=10.0, job_id="j1", billed=True
-    )
+    ev = engine.record("gpu_usage", tenant="t1", gpu_seconds=10.0, job_id="j1", billed=True)
     assert ev.tenant_id == "t1"
     assert ev.value == 10.0
     # usage_insert must be attempted first, then the totals upsert.

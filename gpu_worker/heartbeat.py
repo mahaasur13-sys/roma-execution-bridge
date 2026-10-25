@@ -62,9 +62,7 @@ class HeartbeatClient:
                     "vram_total_gb": round(gpu["vram_total_gb"], 2),
                     "status": "healthy",
                 }
-                resp = requests.post(
-                    f"{self.roma_url}/worker/heartbeat", json=payload, timeout=3
-                )
+                resp = requests.post(f"{self.roma_url}/worker/heartbeat", json=payload, timeout=3)
                 if resp.status_code != 200:
                     print(f"[{self.worker_id}] heartbeat rejected: {resp.status_code}")
             except requests.RequestException as e:

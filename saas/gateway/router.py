@@ -27,12 +27,8 @@ async def gateway_config(request: Request):
     return {
         "tenant_id": tenant_id,
         "rate_limit": {
-            "requests_per_minute": (
-                cfg.rate_limit.requests_per_minute if cfg.rate_limit else 60
-            ),
-            "strategy": (
-                cfg.rate_limit.strategy.value if cfg.rate_limit else "in_memory"
-            ),
+            "requests_per_minute": (cfg.rate_limit.requests_per_minute if cfg.rate_limit else 60),
+            "strategy": (cfg.rate_limit.strategy.value if cfg.rate_limit else "in_memory"),
         },
         "branding": {
             "enabled": cfg.branding.enabled if cfg.branding else False,

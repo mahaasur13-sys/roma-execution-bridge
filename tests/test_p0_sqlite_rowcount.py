@@ -46,9 +46,7 @@ def test_update_execution_job_sqlite_rowcount(sqlite_mode):
     tenant_id = _uniq("test-upd")
     db.insert_execution_job(job_id, "d-1", tenant_id, "queued", {"task": "echo hi"})
 
-    n = db._update_execution_job_sqlite(
-        job_id, "running", None, None, "local", None, None, None
-    )
+    n = db._update_execution_job_sqlite(job_id, "running", None, None, "local", None, None, None)
     assert n == 1
 
     # Повторный перевод в тот же статус через guard — 0 строк, но без исключения.

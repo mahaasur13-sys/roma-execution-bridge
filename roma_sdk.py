@@ -64,9 +64,7 @@ class ROMAClient:
             resp = requests.post(f"{self.base_url}/submit", json={"task": ""})
             if resp.status_code == 400:
                 data = resp.json()
-                raise ROMAException(
-                    f"REJECTED: {data['error']['code']} — {data['error']['message']}"
-                )
+                raise ROMAException(f"REJECTED: {data['error']['code']} — {data['error']['message']}")
             resp.raise_for_status()
 
         payload = {

@@ -150,9 +150,7 @@ def test_v1_complete_requires_auth(tenants):
 def test_v1_complete_cross_tenant_404(tenants):
     jid = _seed_job(tenants["a_id"])
     client = TestClient(main.app, raise_server_exceptions=False)
-    resp = client.post(
-        f"/v1/jobs/{jid}/complete", headers={"X-API-Key": tenants["key_b"]}
-    )
+    resp = client.post(f"/v1/jobs/{jid}/complete", headers={"X-API-Key": tenants["key_b"]})
     assert resp.status_code == 404
     assert db.get_execution_job(jid)["status"] == "running"
 
@@ -283,9 +281,7 @@ def test_execute_rejects_image_outside_allowlist(monkeypatch):
 
 def test_validate_execute_job_allowlist():
     # allowed binary → argv list (no shell)
-    argv = gws._validate_execute_job(
-        gws.JobRequest(job_id="j1", command="python train.py --epochs 1")
-    )
+    argv = gws._validate_execute_job(gws.JobRequest(job_id="j1", command="python train.py --epochs 1"))
     assert argv == ["python", "train.py", "--epochs", "1"]
 
     # non-allowlisted binary → rejected
@@ -295,25 +291,17 @@ def test_validate_execute_job_allowlist():
 
     # shell metacharacter binary is not in the allowlist → rejected
     with pytest.raises(HTTPException) as e2:
-        gws._validate_execute_job(
-            gws.JobRequest(job_id="j1", command="python; rm -rf /")
-        )
+        gws._validate_execute_job(gws.JobRequest(job_id="j1", command="python; rm -rf /"))
     assert e2.value.status_code == 403
 
     # any mount_paths → rejected
     with pytest.raises(HTTPException) as e3:
-        gws._validate_execute_job(
-            gws.JobRequest(
-                job_id="j1", command="python -c 1", mount_paths={"/host": "/c"}
-            )
-        )
+        gws._validate_execute_job(gws.JobRequest(job_id="j1", command="python -c 1", mount_paths={"/host": "/c"}))
     assert e3.value.status_code == 403
 
     # arbitrary image → rejected
     with pytest.raises(HTTPException) as e4:
-        gws._validate_execute_job(
-            gws.JobRequest(job_id="j1", command="python -c 1", image="alpine:latest")
-        )
+        gws._validate_execute_job(gws.JobRequest(job_id="j1", command="python -c 1", image="alpine:latest"))
     assert e4.value.status_code == 403
 
 
@@ -338,8 +326,7 @@ def test_empty_tenant_id_rejected_401(monkeypatch):
     calls = []
     fake_client = SimpleNamespace(
         config=SimpleNamespace(webhook_secret="wh"),
-        create_order=lambda **kwargs: calls.append(kwargs)
-        or {"Url": "https://example.com"},
+        create_order=lambda **kwargs: calls.append(kwargs) or {"Url": "https://example.com"},
     )
     monkeypatch.setattr(main, "CLOUDPAYMENTS_ENABLED", True)
     monkeypatch.setattr(main, "cloudpayments_client", fake_client)

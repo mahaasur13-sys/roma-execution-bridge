@@ -84,9 +84,7 @@ class GPUObservabilityLayer:
     def _cleanup(self, worker_id: str):
         cutoff = datetime.utcnow() - self.retention
         if worker_id in self._metrics:
-            self._metrics[worker_id] = [
-                m for m in self._metrics[worker_id] if m.timestamp > cutoff
-            ]
+            self._metrics[worker_id] = [m for m in self._metrics[worker_id] if m.timestamp > cutoff]
 
     def get_worker_metrics(self, worker_id: str, last_n: int = 10) -> List[GPUMetric]:
         with self._mu:
@@ -113,9 +111,7 @@ class GPUObservabilityLayer:
                 }
             return result
 
-    def get_job_success_rate(
-        self, worker_id: str = None, since_hours: int = 24
-    ) -> Dict:
+    def get_job_success_rate(self, worker_id: str = None, since_hours: int = 24) -> Dict:
         cutoff = datetime.utcnow() - timedelta(hours=since_hours)
         with self._mu:
             jobs = []
@@ -123,15 +119,10 @@ class GPUObservabilityLayer:
                 jobs = [
                     r
                     for r in self._job_results.values()
-                    if r.get("worker_id") == worker_id
-                    and datetime.fromisoformat(r["timestamp"]) > cutoff
+                    if r.get("worker_id") == worker_id and datetime.fromisoformat(r["timestamp"]) > cutoff
                 ]
             else:
-                jobs = [
-                    r
-                    for r in self._job_results.values()
-                    if datetime.fromisoformat(r["timestamp"]) > cutoff
-                ]
+                jobs = [r for r in self._job_results.values() if datetime.fromisoformat(r["timestamp"]) > cutoff]
             if not jobs:
                 return {"total": 0, "success": 0, "rate": 0.0}
             success = sum(1 for j in jobs if j["success"])
@@ -178,15 +169,10 @@ class GPUObservabilityLayer:
                 r
                 for r in self._job_results.values()
                 if r.get("worker_id") == worker_id
-                and (
-                    datetime.utcnow() - datetime.fromisoformat(r["timestamp"])
-                ).total_seconds()
-                < 3600
+                and (datetime.utcnow() - datetime.fromisoformat(r["timestamp"])).total_seconds() < 3600
             ]
             if recent_jobs:
-                failure_rate = sum(1 for j in recent_jobs if not j["success"]) / len(
-                    recent_jobs
-                )
+                failure_rate = sum(1 for j in recent_jobs if not j["success"]) / len(recent_jobs)
                 if failure_rate > 0.3:
                     score = min(score, 60.0)
                     reason = f"high failure rate ({failure_rate:.0%})"
@@ -208,14 +194,10 @@ class GPUObservabilityLayer:
             return {
                 "workers_tracked": len(workers),
                 "total_jobs": total_jobs,
-                "job_success_rate": (
-                    round(success_jobs / total_jobs * 100, 2) if total_jobs else 0
-                ),
+                "job_success_rate": (round(success_jobs / total_jobs * 100, 2) if total_jobs else 0),
                 "aggregated_metrics": self.get_aggregated_metrics(),
                 "success_rate_24h": self.get_job_success_rate(since_hours=24),
-                "worker_health": [
-                    asdict(self.get_worker_health_score(w)) for w in workers
-                ],
+                "worker_health": [asdict(self.get_worker_health_score(w)) for w in workers],
             }
 
 
@@ -240,9 +222,7 @@ if __name__ == "__main__":
 
     # Simulate job results
     obs.record_job_result("job-001", "gpu-node-1", success=True, duration_ms=1200)
-    obs.record_job_result(
-        "job-002", "gpu-node-1", success=False, duration_ms=500, error="OOM"
-    )
+    obs.record_job_result("job-002", "gpu-node-1", success=False, duration_ms=500, error="OOM")
     obs.record_job_result("job-003", "gpu-node-2", success=True, duration_ms=800)
 
     # Get health scores

@@ -89,27 +89,19 @@ class CompletenessError(Exception):
 
 def load_manifest(path: pathlib.Path) -> tuple[dict, str]:
     if not path.exists():
-        raise CompletenessError(
-            f"манифест канона не найден: {path} (источник точных чисел набора)"
-        )
+        raise CompletenessError(f"манифест канона не найден: {path} (источник точных чисел набора)")
     raw = path.read_bytes()
     try:
         data = json.loads(raw.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise CompletenessError(
-            f"{type(exc).__name__} в манифесте {path}: {exc}"
-        ) from exc
+        raise CompletenessError(f"{type(exc).__name__} в манифесте {path}: {exc}") from exc
     canon = data.get("canon")
     if not isinstance(canon, dict):
-        raise CompletenessError(
-            f"манифест {path}: нет объекта 'canon' с точными числами"
-        )
+        raise CompletenessError(f"манифест {path}: нет объекта 'canon' с точными числами")
     for key in REQUIRED_KEYS:
         value = canon.get(key)
         if isinstance(value, bool) or not isinstance(value, int):
-            raise CompletenessError(
-                f"манифест {path}: canon['{key}'] не целое число: {value!r}"
-            )
+            raise CompletenessError(f"манифест {path}: canon['{key}'] не целое число: {value!r}")
     for key in ("admission_skips", "env_skips_expected"):
         value = canon.get(key)
         if isinstance(value, bool) or not isinstance(value, int):
@@ -125,17 +117,13 @@ def load_manifest(path: pathlib.Path) -> tuple[dict, str]:
         )
     for env_name, profile in profiles.items():
         if not isinstance(profile, dict):
-            raise CompletenessError(
-                f"манифест {path}: profiles['{env_name}'] не объект: {profile!r}"
-            )
+            raise CompletenessError(f"манифест {path}: profiles['{env_name}'] не объект: {profile!r}")
         for key in PROFILE_KEYS:
             if key == "named_admissions":
                 continue
             value = profile.get(key)
             if isinstance(value, bool) or not isinstance(value, int):
-                raise CompletenessError(
-                    f"манифест {path}: profiles['{env_name}']['{key}'] не целое число: {value!r}"
-                )
+                raise CompletenessError(f"манифест {path}: profiles['{env_name}']['{key}'] не целое число: {value!r}")
         admissions = profile.get("named_admissions")
         if not isinstance(admissions, list):
             raise CompletenessError(
@@ -149,8 +137,7 @@ def load_manifest(path: pathlib.Path) -> tuple[dict, str]:
             )
         for entry in admissions:
             if not isinstance(entry, dict) or any(
-                not isinstance(entry.get(key), str) or not entry.get(key)
-                for key in ADMISSION_KEYS
+                not isinstance(entry.get(key), str) or not entry.get(key) for key in ADMISSION_KEYS
             ):
                 raise CompletenessError(
                     f"манифест {path}: profiles['{env_name}']: запись admission без полной "
@@ -174,9 +161,7 @@ def resolve_profile(data: dict, path: pathlib.Path) -> tuple[str, dict]:
             f"fail-closed (объявлены: {sorted(profiles)})"
         )
     # Ярлык объявлен манифестом (печать профиля читаема из лога и из файла).
-    profile["label"] = str(
-        profile.get("label") or ("CI" if env_name == "ci" else env_name)
-    )
+    profile["label"] = str(profile.get("label") or ("CI" if env_name == "ci" else env_name))
     return env_name, profile
 
 
@@ -189,17 +174,13 @@ def case_id_of(case: ET.Element) -> str:
 
 def parse_junit(path: pathlib.Path) -> tuple[int, dict]:
     if not path.exists():
-        raise CompletenessError(
-            f"junitxml не найден: {path} (числа обязаны быть машинными)"
-        )
+        raise CompletenessError(f"junitxml не найден: {path} (числа обязаны быть машинными)")
     if path.stat().st_size == 0:
         raise CompletenessError(f"junitxml пуст: {path} (прогон не записал результат)")
     try:
         root = ET.parse(path).getroot()
     except ET.ParseError as exc:
-        raise CompletenessError(
-            f"junitxml не читается ({type(exc).__name__}): {exc}"
-        ) from exc
+        raise CompletenessError(f"junitxml не читается ({type(exc).__name__}): {exc}") from exc
 
     suites = [root] if root.tag == "testsuite" else [s for s in root.iter("testsuite")]
     if not suites:
@@ -255,9 +236,7 @@ def print_block(
     print("=== RUN COMPLETENESS (A-6: collected == executed) ===")
     print(f"JUNIT         : {junit}")
     print(f"COLLECTED     : {declared}  (объявлено pytest в junitxml)")
-    print(
-        f"EXECUTED      : {observed['recorded']}  (элементов <testcase> в том же файле)"
-    )
+    print(f"EXECUTED      : {observed['recorded']}  (элементов <testcase> в том же файле)")
     print(
         f"OUTCOMES      : {observed['passed']} passed · {observed['failures']} failed · "
         f"{observed['errors']} errors · {observed['skipped']} skipped = {executed}"
@@ -278,15 +257,10 @@ def print_block(
         f"(passed {profile['passed']} · admission {profile['admission_skips']} · "
         f"env-skip max {profile['env_skips_max']})"
     )
-    print(
-        f"             {declared} = {profile['passed']} + {profile['admission_skips']} "
-        f"({env_label} profile)"
-    )
+    print(f"             {declared} = {profile['passed']} + {profile['admission_skips']} ({env_label} profile)")
     print(f"RUN MODE      : {mode}")
     if mode == "narrow":
-        print(
-            "             канон НЕ применяется (локальный/негативный прогон) — область сужена явно"
-        )
+        print("             канон НЕ применяется (локальный/негативный прогон) — область сужена явно")
     print("=" * 56)
 
 
@@ -316,8 +290,7 @@ def check(
     executed = sum(observed[k] for k in ("passed", "failures", "errors", "skipped"))
     if declared != observed["recorded"]:
         problems.append(
-            f"collected != executed: junit объявляет tests={declared}, "
-            f"записано элементов={observed['recorded']}"
+            f"collected != executed: junit объявляет tests={declared}, записано элементов={observed['recorded']}"
         )
     if observed["recorded"] != executed:
         problems.append(
@@ -374,9 +347,7 @@ def check(
         # Поимённая сверка: счётчик без имён слеп к подмене одного осознанного скипа другим.
         named = {entry["test"]: entry for entry in profile["named_admissions"]}
         env_skip_ids = set(observed["env_skipped_ids"])
-        admission_ids = [
-            cid for cid in observed["skipped_ids"] if cid not in env_skip_ids
-        ]
+        admission_ids = [cid for cid in observed["skipped_ids"] if cid not in env_skip_ids]
         unnamed = sorted(set(admission_ids) - set(named))
         if unnamed:
             problems.append(
@@ -404,27 +375,16 @@ def check(
 
     if problems:
         raise CompletenessError("; ".join(problems))
-    print(
-        "RUN COMPLETENESS: PASSED"
-        + (" (канон не применялся)" if mode == "narrow" else "")
-    )
+    print("RUN COMPLETENESS: PASSED" + (" (канон не применялся)" if mode == "narrow" else ""))
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="A-6: полнота набора тестов (fail-closed)"
-    )
-    parser.add_argument(
-        "--junit", default="/tmp/roma_junit.xml", help="junitxml одного прогона"
-    )
+    parser = argparse.ArgumentParser(description="A-6: полнота набора тестов (fail-closed)")
+    parser.add_argument("--junit", default="/tmp/roma_junit.xml", help="junitxml одного прогона")
     parser.add_argument(
         "--manifest",
-        default=str(
-            pathlib.Path(__file__).resolve().parents[1]
-            / ".ci"
-            / "run-completeness.json"
-        ),
+        default=str(pathlib.Path(__file__).resolve().parents[1] / ".ci" / "run-completeness.json"),
         help="манифест канона (точные числа последнего repo-wide прогона)",
     )
     parser.add_argument("--mode", choices=("repo-wide", "narrow"), default="repo-wide")

@@ -46,9 +46,7 @@ class IrohAdapter:
 
     relay_url: str = "https://relay.dashbeam.io"
     data_dir: str = "./data/dashbeam"
-    node_id: str = field(
-        default_factory=lambda: hashlib.sha256(os.urandom(32)).hexdigest()[:32]
-    )
+    node_id: str = field(default_factory=lambda: hashlib.sha256(os.urandom(32)).hexdigest()[:32])
     _proto: IrohNodeProtocol | None = None
 
     # ─── Lifecycle ───
@@ -85,9 +83,7 @@ class IrohAdapter:
         mime_type: str = "application/octet-stream",
     ) -> DashBeamTicket:
         """Create a one-time P2P transfer ticket."""
-        token = hashlib.sha256(
-            f"{self.node_id}:{file_hash}:{uuid.uuid4()}".encode()
-        ).hexdigest()[:48]
+        token = hashlib.sha256(f"{self.node_id}:{file_hash}:{uuid.uuid4()}".encode()).hexdigest()[:48]
 
         return DashBeamTicket(
             ticket_id=str(uuid.uuid4()),
@@ -104,15 +100,11 @@ class IrohAdapter:
 
     # ─── Transfer ───
 
-    async def send_bytes(
-        self, ticket: DashBeamTicket, data: bytes, peer_node_id: str
-    ) -> int:
+    async def send_bytes(self, ticket: DashBeamTicket, data: bytes, peer_node_id: str) -> int:
         """Send encrypted bytes to a peer via ticket."""
         actual_hash = hashlib.sha256(data).hexdigest()
         if actual_hash != ticket.file_hash:
-            raise ValueError(
-                f"Hash mismatch: expected {ticket.file_hash}, got {actual_hash}"
-            )
+            raise ValueError(f"Hash mismatch: expected {ticket.file_hash}, got {actual_hash}")
         return len(data)
 
     async def receive_bytes(self, ticket: DashBeamTicket) -> bytes:

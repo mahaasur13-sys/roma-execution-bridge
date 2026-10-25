@@ -112,14 +112,10 @@ class VastaiBackend(BaseBackend):
     backend_name = "vastai"
 
     def __init__(self) -> None:
-        self._api_key = (
-            os.getenv("VAST_KEY") or os.getenv("VASTAI_API_KEY", "")
-        ).strip()
+        self._api_key = (os.getenv("VAST_KEY") or os.getenv("VASTAI_API_KEY", "")).strip()
         self._default_gpu = os.getenv("VASTAI_DEFAULT_GPU", "RTX_4090")
         self._max_price = float(os.getenv("VASTAI_MAX_PRICE", "0.60"))
-        self._default_image = os.getenv(
-            "VASTAI_IMAGE", "vastai/pytorch:cuda-13.2.1-auto"
-        )
+        self._default_image = os.getenv("VASTAI_IMAGE", "vastai/pytorch:cuda-13.2.1-auto")
         self._min_disk_gb = int(os.getenv("VASTAI_DISK_GB", "20"))
         self._max_gpu_count = int(os.getenv("VASTAI_MAX_GPU_COUNT", "5"))
         self._session = requests.Session()
@@ -282,9 +278,7 @@ class VastaiBackend(BaseBackend):
                     "status": "provisioning",
                 }
 
-        logger.error(
-            "vastai.rent_failed instance=%d result=%s", offer.instance_id, result
-        )
+        logger.error("vastai.rent_failed instance=%d result=%s", offer.instance_id, result)
         return None
 
     def get_instances(self, contract_id: int | None = None) -> list[VastaiInstance]:
@@ -325,9 +319,7 @@ class VastaiBackend(BaseBackend):
     def get_instance_logs(self, instance_id: int, limit: int = 50) -> str:
         """Get recent logs from instance (if supported)."""
         try:
-            data = self._api_get(
-                f"/instances/{instance_id}/logs/", params={"limit": limit}
-            )
+            data = self._api_get(f"/instances/{instance_id}/logs/", params={"limit": limit})
             logs = data.get("logs", [])
             return "\n".join(logs[-limit:])
         except Exception as e:
@@ -348,9 +340,7 @@ class VastaiBackend(BaseBackend):
                 "message": "Vast.ai not configured: missing VAST_KEY / VASTAI_API_KEY",
             }
 
-        requested_gpu = (
-            ctx.instance_type if ctx.instance_type != "any" else self._default_gpu
-        )
+        requested_gpu = ctx.instance_type if ctx.instance_type != "any" else self._default_gpu
         max_price = self._gpu_tier.get("max_price", self._max_price)
         min_ram = self._gpu_tier.get("min_ram_mb", 8 * 1024)
         image = ctx.docker_image
@@ -379,9 +369,7 @@ class VastaiBackend(BaseBackend):
                     )
 
                     if not offers:
-                        logger.warning(
-                            "vastai.no_offers gpu=%s attempt=%d", gpu_model, attempt
-                        )
+                        logger.warning("vastai.no_offers gpu=%s attempt=%d", gpu_model, attempt)
                         last_error = f"No offers for {gpu_model}"
                         break  # no offers → next model in chain
 
@@ -396,9 +384,7 @@ class VastaiBackend(BaseBackend):
                     )
 
                     label = f"roma-{ctx.tenant_id[:12]}-{ctx.job_id[:8]}"
-                    rental = self.rent_instance(
-                        offer=best, image=image, disk_gb=self._min_disk_gb, label=label
-                    )
+                    rental = self.rent_instance(offer=best, image=image, disk_gb=self._min_disk_gb, label=label)
 
                     if rental:
                         contract_id = rental["contract_id"]
@@ -416,9 +402,7 @@ class VastaiBackend(BaseBackend):
                             "estimated_boot_sec": 60,
                         }
                         if gpu_model != requested_gpu:
-                            result["message"] = (
-                                f"fallback used={used_model} requested={requested_gpu}"
-                            )
+                            result["message"] = f"fallback used={used_model} requested={requested_gpu}"
                             logger.info(
                                 "vastai.fallback used=%s requested=%s job=%s",
                                 used_model,
@@ -466,9 +450,7 @@ class VastaiBackend(BaseBackend):
                         continue
 
                     # Unexpected error — fail this attempt, retry same model
-                    logger.warning(
-                        "vastai.rent_error gpu=%s attempt=%d: %s", gpu_model, attempt, e
-                    )
+                    logger.warning("vastai.rent_error gpu=%s attempt=%d: %s", gpu_model, attempt, e)
                     continue
 
             logger.info("vastai.gpu_exhausted gpu=%s", gpu_model)
@@ -630,9 +612,7 @@ class VastaiBackend(BaseBackend):
                 return jid
         return None
 
-    async def run_command(
-        self, ctx: JobContext, command: str, timeout: int = 600
-    ) -> dict:
+    async def run_command(self, ctx: JobContext, command: str, timeout: int = 600) -> dict:
         """Выполняет команду на Vast.ai инстансе через /api/v0/commands/.
 
         Использует эндпоинт vast.ai для отправки команды на арендованный инстанс.
@@ -647,7 +627,6 @@ class VastaiBackend(BaseBackend):
             }
 
         try:
-
             payload = {
                 "contract": contract_id,
                 "cmd": command,

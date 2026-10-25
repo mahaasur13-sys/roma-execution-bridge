@@ -53,15 +53,11 @@ class OnboardingSession:
     stripe_onboarding_url: str = ""
     tenant_id: str = ""
     errors: list[str] = field(default_factory=list)
-    created_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def _validate_slug(self) -> bool:
         if not re.match(r"^[a-z0-9][a-z0-9-]{2,62}[a-z0-9]$", self.slug):
-            self.errors.append(
-                f"Invalid slug: '{self.slug}' (use lowercase letters, numbers, hyphens)"
-            )
+            self.errors.append(f"Invalid slug: '{self.slug}' (use lowercase letters, numbers, hyphens)")
             return False
         return True
 
@@ -73,18 +69,12 @@ class OnboardingSession:
 
     def _validate_revenue_share(self) -> bool:
         if not (5.0 <= self.revenue_share <= 30.0):
-            self.errors.append(
-                f"Revenue share must be 5-30%, got {self.revenue_share}%"
-            )
+            self.errors.append(f"Revenue share must be 5-30%, got {self.revenue_share}%")
             return False
         return True
 
-    def set_branding(
-        self, app_name: str, primary_color: str = "#6366f1", **kwargs: Any
-    ) -> OnboardingSession:
-        self.branding = BrandingData(
-            app_name=app_name, primary_color=primary_color, **kwargs
-        )
+    def set_branding(self, app_name: str, primary_color: str = "#6366f1", **kwargs: Any) -> OnboardingSession:
+        self.branding = BrandingData(app_name=app_name, primary_color=primary_color, **kwargs)
         self.step = OnboardingStep.BRANDING
         return self
 

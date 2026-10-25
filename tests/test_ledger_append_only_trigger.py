@@ -20,18 +20,14 @@ FUNCTION_NAME = "ledger_no_mutate"
 def _pg_conn():
     """Живое PG-соединение или skip (нет PG_DSN / PG недоступен)."""
     if not os.environ.get("PG_DSN"):
-        pytest.skip(
-            "PG_DSN не задан — триггер L1 проверяется только на живом PG; issue: P1-C · expiry: 2026-12-31"
-        )
+        pytest.skip("PG_DSN не задан — триггер L1 проверяется только на живом PG; issue: P1-C · expiry: 2026-12-31")
 
     from billing.pg_connection import get_pg_manager, PGUnavailableError
 
     try:
         ctx = get_pg_manager().get_connection("test_ledger_append_only")
     except PGUnavailableError:
-        pytest.skip(
-            "PG недоступен в этом процессе pytest; issue: P1-C · expiry: 2026-12-31"
-        )
+        pytest.skip("PG недоступен в этом процессе pytest; issue: P1-C · expiry: 2026-12-31")
     return ctx
 
 
@@ -52,9 +48,7 @@ def _seed_entry(cur):
     )
     fallback = cur.fetchone()
     if not fallback:
-        pytest.skip(
-            "ledger_entries пуста и INSERT недоступен — нечего проверять; issue: P1-C · expiry: 2026-12-31"
-        )
+        pytest.skip("ledger_entries пуста и INSERT недоступен — нечего проверять; issue: P1-C · expiry: 2026-12-31")
     return fallback[0]
 
 
@@ -71,9 +65,7 @@ def test_trigger_names_present():
         found = {name: (fn, enabled) for name, fn, enabled in cur.fetchall()}
 
     assert TRIGGER_ROW in found, f"нет триггера {TRIGGER_ROW}: {sorted(found)}"
-    assert (
-        TRIGGER_TRUNCATE in found
-    ), f"нет триггера {TRIGGER_TRUNCATE}: {sorted(found)}"
+    assert TRIGGER_TRUNCATE in found, f"нет триггера {TRIGGER_TRUNCATE}: {sorted(found)}"
     assert found[TRIGGER_ROW][0] == FUNCTION_NAME
     assert found[TRIGGER_TRUNCATE][0] == FUNCTION_NAME
     assert found[TRIGGER_ROW][1] == "O", "триггер должен быть enabled (O)"

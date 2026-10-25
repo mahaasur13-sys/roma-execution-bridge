@@ -53,9 +53,7 @@ def _set_guard(monkeypatch, cap=5.0, ledger=None):
     monkeypatch.setattr(main, "billing_ledger", ledger or _FakeLedger())
     monkeypatch.setattr(main, "track_spend_cap", lambda *a, **k: None)
     monkeypatch.setattr(main, "track_spend_cap_blocked", lambda *a, **k: None)
-    monkeypatch.setattr(
-        main, "alert_dispatcher", types.SimpleNamespace(send=lambda *a, **k: None)
-    )
+    monkeypatch.setattr(main, "alert_dispatcher", types.SimpleNamespace(send=lambda *a, **k: None))
 
 
 def _active_tenant(tid="t1"):
@@ -63,6 +61,7 @@ def _active_tenant(tid="t1"):
 
 
 # ── submit_atom_cluster ────────────────────────────────────────
+
 
 def _cluster_spec(nodes=2, expected_gpu_seconds=100):
     return {"nodes": nodes, "expected_gpu_seconds": expected_gpu_seconds}
@@ -74,11 +73,7 @@ def test_cluster_cap_zero_does_not_create_job(monkeypatch):
     created = []
     monkeypatch.setattr(db_adapter, "insert_job_raw", lambda *a, **k: created.append(1))
     with pytest.raises(HTTPException) as e:
-        asyncio.run(
-            main.submit_atom_cluster(
-                {"cluster_spec": _cluster_spec()}, {"tenant_id": "t1"}
-            )
-        )
+        asyncio.run(main.submit_atom_cluster({"cluster_spec": _cluster_spec()}, {"tenant_id": "t1"}))
     assert e.value.status_code == 402
     assert created == []
 
@@ -89,11 +84,7 @@ def test_cluster_pg_unavailable_does_not_create_job(monkeypatch):
     created = []
     monkeypatch.setattr(db_adapter, "insert_job_raw", lambda *a, **k: created.append(1))
     with pytest.raises(HTTPException):
-        asyncio.run(
-            main.submit_atom_cluster(
-                {"cluster_spec": _cluster_spec()}, {"tenant_id": "t1"}
-            )
-        )
+        asyncio.run(main.submit_atom_cluster({"cluster_spec": _cluster_spec()}, {"tenant_id": "t1"}))
     assert created == []
 
 
@@ -126,6 +117,7 @@ def test_cluster_nodes_below_one_does_not_create_job(monkeypatch):
 
 # ── submit_job ─────────────────────────────────────────────────
 
+
 def test_submit_job_cap_zero_does_not_create_job(monkeypatch):
     _set_guard(monkeypatch, cap=0.0)
     monkeypatch.setattr(main, "_check_limits", lambda tid: (True, ""))
@@ -148,6 +140,7 @@ def test_submit_job_pg_unavailable_does_not_create_job(monkeypatch):
 
 
 # ── decision_store.submit_job_through_gate ─────────────────────
+
 
 def _setup_gate(monkeypatch):
     monkeypatch.setattr(db_adapter, "insert_decision_request", lambda *a, **k: None)

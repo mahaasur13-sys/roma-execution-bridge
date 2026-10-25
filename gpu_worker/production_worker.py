@@ -63,9 +63,7 @@ class ROMAWorkerLoop:
 
     def select_best_worker(self, workers: list) -> Optional[WorkerNode]:
         """Select worker with most available VRAM"""
-        available = [
-            w for w in workers if w.current_job is None and w.status == "healthy"
-        ]
+        available = [w for w in workers if w.current_job is None and w.status == "healthy"]
         if not available:
             return None
         # Sort by available VRAM descending
@@ -89,9 +87,7 @@ class ROMAWorkerLoop:
         """Handle job failure with retry"""
         action = self.retry_mgr.handle_failure(job["id"], job.get("error", "unknown"))
         if action == "retry":
-            print(
-                f"[{self.worker_id}] Job {job['id']} re-enqueued (retry {job.get('retries', 0)})"
-            )
+            print(f"[{self.worker_id}] Job {job['id']} re-enqueued (retry {job.get('retries', 0)})")
         elif action == "fail":
             print(f"[{self.worker_id}] Job {job['id']} FAILED permanently")
 
@@ -135,9 +131,7 @@ class ROMAWorkerLoop:
 
         # Try to acquire GPU lock
         if not self.lock_mgr.acquire(worker.worker_id, job.job_id):
-            print(
-                f"[{self.worker_id}] GPU {worker.worker_id} already locked by {job.job_id}"
-            )
+            print(f"[{self.worker_id}] GPU {worker.worker_id} already locked by {job.job_id}")
             return False
 
         # Execute job
@@ -149,9 +143,7 @@ class ROMAWorkerLoop:
 
             if result.success:
                 self.retry_mgr.mark_completed(job.job_id, result.output)
-                self.observability.record_job_result(
-                    job.job_id, worker.worker_id, True, result.duration_ms
-                )
+                self.observability.record_job_result(job.job_id, worker.worker_id, True, result.duration_ms)
                 # Commit to event store (final guarantee)
                 self.retry_mgr.mark_committed(job.job_id)
                 print(f"[{self.worker_id}] Job {job.job_id} completed and committed")
@@ -173,9 +165,7 @@ class ROMAWorkerLoop:
         finally:
             self.lock_mgr.release(worker.worker_id)
             self.registry.release_gpu_lock(worker.worker_id)
-            self.registry.job_completed(
-                worker.worker_id, job.state.value == "completed"
-            )
+            self.registry.job_completed(worker.worker_id, job.state.value == "completed")
 
         return True
 
@@ -233,9 +223,7 @@ CMD ["python3", "-m", "uvicorn", "gpu_worker.server:app", "--host", "0.0.0.0", "
 """
 
     @staticmethod
-    def get_deployment_command(
-        control_plane: str, worker_id: str, memory_gb: int = 8, cpus: int = 4
-    ) -> str:
+    def get_deployment_command(control_plane: str, worker_id: str, memory_gb: int = 8, cpus: int = 4) -> str:
         return GPUWorkerDeployment.DOCKER_TEMPLATE.format(
             memory_limit=memory_gb,
             cpus=cpus,
@@ -255,9 +243,7 @@ if __name__ == "__main__":
     print(f"ROMA Worker [{worker_id}]")
     print(f"  Registry: {registry_url}")
     print(f"  ROMA API: {roma_url}")
-    print(
-        f"  Status: RUNNING (loop active, GPU={'yes' if os.path.exists('/dev/nvidia0') else 'no'})"
-    )
+    print(f"  Status: RUNNING (loop active, GPU={'yes' if os.path.exists('/dev/nvidia0') else 'no'})")
 
     # Test: register with registry
     import requests

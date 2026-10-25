@@ -35,9 +35,7 @@ import pathlib
 import sys
 import uuid
 
-DEFAULT_ARTIFACTS_DIR = pathlib.Path(
-    os.environ.get("ROMA_ARTIFACTS_DIR", "/home/workspace/artifacts")
-)
+DEFAULT_ARTIFACTS_DIR = pathlib.Path(os.environ.get("ROMA_ARTIFACTS_DIR", "/home/workspace/artifacts"))
 TTL_MIN = 15
 SCOPE = [
     "artifacts/**",
@@ -69,9 +67,7 @@ def atomic_write(path: pathlib.Path, payload: dict) -> None:
     """Атомарная запись JSON: tmp в том же каталоге + os.replace."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     os.replace(tmp, path)
 
 
@@ -131,9 +127,7 @@ def marker_path(sessions_dir: pathlib.Path, instance_id: str) -> pathlib.Path:
     return sessions_dir / f"{instance_id}.json"
 
 
-def write_marker(
-    sessions_dir: pathlib.Path, instance_id: str, *, conversation_id: str = ""
-) -> pathlib.Path:
+def write_marker(sessions_dir: pathlib.Path, instance_id: str, *, conversation_id: str = "") -> pathlib.Path:
     """Создать/обновить маркер сессии: last_seen, pid, boot_id — всегда свежие."""
     path = marker_path(sessions_dir, instance_id)
     previous = read_json(path)
@@ -150,9 +144,7 @@ def write_marker(
     return path
 
 
-def fresh_markers(
-    sessions_dir: pathlib.Path, ttl_min: int = TTL_MIN
-) -> dict[str, dict]:
+def fresh_markers(sessions_dir: pathlib.Path, ttl_min: int = TTL_MIN) -> dict[str, dict]:
     """Маркеры, чей last_seen моложе ttl. Живая сессия обязана обновлять last_seen."""
     out: dict[str, dict] = {}
     if not sessions_dir.is_dir():
@@ -163,9 +155,7 @@ def fresh_markers(
         if not data:
             continue
         try:
-            seen = datetime.datetime.fromisoformat(
-                str(data["last_seen"]).replace("Z", "+00:00")
-            )
+            seen = datetime.datetime.fromisoformat(str(data["last_seen"]).replace("Z", "+00:00"))
         except (KeyError, ValueError):
             continue
         if (now - seen).total_seconds() < ttl_min * 60:
@@ -196,10 +186,7 @@ def guard(
 
 
 def _collision_message(fresh: dict[str, dict]) -> str:
-    rows = "\n".join(
-        f"  - {iid} pid={d.get('pid')} last_seen={d.get('last_seen')}"
-        for iid, d in fresh.items()
-    )
+    rows = "\n".join(f"  - {iid} pid={d.get('pid')} last_seen={d.get('last_seen')}" for iid, d in fresh.items())
     return (
         "LEASE COLLISION: свежих маркеров сессий больше одного (< ttl). "
         "Писать нельзя никому — эскалация владельцу.\n" + rows
@@ -232,9 +219,7 @@ class Lease:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         return handle
 
-    def _assert_capture_allowed(
-        self, state: dict, requested: str | None, iid: str
-    ) -> dict:
+    def _assert_capture_allowed(self, state: dict, requested: str | None, iid: str) -> dict:
         """P-LEASE-3: проверки права захвата ДО любых изменений (под тем же flock).
 
         Возвращает явный отчёт о применённых проверках; при отказе бросает CollisionError
@@ -261,11 +246,7 @@ class Lease:
         age_min = round((utcnow() - parse_heartbeat_at(hb)).total_seconds() / 60, 1)
         checks.update({"heartbeat_at": hb, "heartbeat_age_min": age_min})
         holder = state.get("instance_id")
-        foreign = {
-            iid_: data
-            for iid_, data in fresh_markers(self.sessions, ttl).items()
-            if iid_ not in {holder, iid}
-        }
+        foreign = {iid_: data for iid_, data in fresh_markers(self.sessions, ttl).items() if iid_ not in {holder, iid}}
         checks["fresh_foreign_markers"] = len(foreign)
 
         if age_min <= ttl:
@@ -292,9 +273,7 @@ class Lease:
         self.capture_checks = checks
         return checks
 
-    def capture(
-        self, instance_id: str | None = None, *, task: str = "", status: str = ""
-    ) -> dict:
+    def capture(self, instance_id: str | None = None, *, task: str = "", status: str = "") -> dict:
         iid = instance_id or str(uuid.uuid4())
         with self._locked():
             old = read_state_strict(self.lease_path)
@@ -318,9 +297,7 @@ class Lease:
                 if keep in old:
                     payload.setdefault(keep, old[keep])
             atomic_write(self.lease_path, payload)
-            write_marker(
-                self.sessions, iid, conversation_id=payload.get("conversation_id", "")
-            )
+            write_marker(self.sessions, iid, conversation_id=payload.get("conversation_id", ""))
             return payload
 
     def heartbeat(self) -> dict:
@@ -329,17 +306,13 @@ class Lease:
             state = self.state
             iid = state.get("instance_id")
             if not iid:
-                raise CollisionError(
-                    "heartbeat без захваченной аренды: сначала `lease.py capture`"
-                )
+                raise CollisionError("heartbeat без захваченной аренды: сначала `lease.py capture`")
             guard(self.sessions, self.ttl_min, own_instance=iid)
             state["heartbeat_at"] = iso()
             state["pid"] = os.getpid()
             state["boot_id"] = boot_id()
             atomic_write(self.lease_path, state)
-            write_marker(
-                self.sessions, iid, conversation_id=state.get("conversation_id", "")
-            )
+            write_marker(self.sessions, iid, conversation_id=state.get("conversation_id", ""))
             return state
 
     def status(self) -> dict:
@@ -350,11 +323,7 @@ class Lease:
         if hb:
             try:
                 age_min = round(
-                    (
-                        utcnow()
-                        - datetime.datetime.fromisoformat(hb.replace("Z", "+00:00"))
-                    ).total_seconds()
-                    / 60,
+                    (utcnow() - datetime.datetime.fromisoformat(hb.replace("Z", "+00:00"))).total_seconds() / 60,
                     1,
                 )
             except ValueError:
@@ -371,9 +340,7 @@ class Lease:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(
-        description="Lease v2 (A-0/P-LEASE-3): аренда писателя + маркеры сессий"
-    )
+    ap = argparse.ArgumentParser(description="Lease v2 (A-0/P-LEASE-3): аренда писателя + маркеры сессий")
     ap.add_argument("command", choices=("capture", "heartbeat", "status", "guard"))
     ap.add_argument("instance_id", nargs="?", default=None)
     ap.add_argument("--artifacts-dir", default=str(DEFAULT_ARTIFACTS_DIR))
@@ -385,9 +352,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "capture":
             state = lease.capture(args.instance_id)
             checks = lease.capture_checks
-            print(
-                f"LEASED instance_id={state['instance_id']} fencing_token={state['fencing_token']}"
-            )
+            print(f"LEASED instance_id={state['instance_id']} fencing_token={state['fencing_token']}")
             print(
                 "checks: lease={lease} · heartbeat_age_min={heartbeat_age_min} · ttl_min={ttl_min} "
                 "· requested={requested_instance} · fresh_foreign_markers={fresh_foreign_markers}".format(
@@ -420,12 +385,8 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"{key:>22}: {value}")
                 print(f"fresh session markers: {st['fresh_session_markers']}")
             return 0
-        guard(
-            lease.sessions, lease.ttl_min, own_instance=lease.state.get("instance_id")
-        )
-        print(
-            f"GUARD OK: fresh session markers: {len(fresh_markers(lease.sessions, lease.ttl_min))}"
-        )
+        guard(lease.sessions, lease.ttl_min, own_instance=lease.state.get("instance_id"))
+        print(f"GUARD OK: fresh session markers: {len(fresh_markers(lease.sessions, lease.ttl_min))}")
         return 0
     except CollisionError as exc:
         print(str(exc), file=sys.stderr)

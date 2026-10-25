@@ -53,9 +53,7 @@ def _write_junit(
     elements: int | None = None,
 ) -> pathlib.Path:
     """Синтетический junit: `declared` (атрибут tests) можно развести с числом элементов."""
-    total_elements = (
-        elements if elements is not None else passed + failures + errors + skipped
-    )
+    total_elements = elements if elements is not None else passed + failures + errors + skipped
     cases = []
     for index in range(total_elements):
         if index < failures:
@@ -66,9 +64,7 @@ def _write_junit(
             outcome = '<skipped message="synthetic" />'
         else:
             outcome = ""
-        cases.append(
-            f'<testcase classname="synthetic.Case" name="test_{index}">{outcome}</testcase>'
-        )
+        cases.append(f'<testcase classname="synthetic.Case" name="test_{index}">{outcome}</testcase>')
     path.write_text(
         '<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests">'
         f'<testsuite name="pytest" errors="{errors}" failures="{failures}" '
@@ -115,15 +111,10 @@ def _write_named_junit(
     extra: str | None = None,
 ) -> pathlib.Path:
     """Синтетический junit в форме профиля: passed + ПОИМЁННЫЕ admission-скипы."""
-    entries = [
-        entry["test"] for entry in profile["named_admissions"] if entry["test"] != drop
-    ]
+    entries = [entry["test"] for entry in profile["named_admissions"] if entry["test"] != drop]
     if extra is not None:
         entries.append(extra)
-    cases = [
-        f'<testcase classname="synthetic.Case" name="test_{index}" />'
-        for index in range(profile["passed"])
-    ]
+    cases = [f'<testcase classname="synthetic.Case" name="test_{index}" />' for index in range(profile["passed"])]
     for entry in entries:
         module, name = entry.split("::")
         classname = module[:-3].replace("/", ".")
@@ -154,10 +145,9 @@ def test_checker_accepts_run_matching_profile(tmp_path: pathlib.Path) -> None:
     assert "RUN COMPLETENESS: PASSED" in result.stdout
     assert f"CANON         : {MANIFEST}" in result.stdout
     assert f"({profile['label']} profile)" in result.stdout, result.stdout
-    assert (
-        f"{_canon()['collected']} = {profile['passed']} + {profile['admission_skips']}"
-        in result.stdout
-    ), result.stdout
+    assert f"{_canon()['collected']} = {profile['passed']} + {profile['admission_skips']}" in result.stdout, (
+        result.stdout
+    )
 
 
 def test_checker_fails_closed_on_unknown_environment(tmp_path: pathlib.Path) -> None:
@@ -224,9 +214,7 @@ def test_checker_rejects_narrowed_run_still_above_legacy_threshold(
 ) -> None:
     """РЕАЛЬНЫЙ суженный прогон: два файла сняты --deselect, счётчик всё ещё >= 244."""
     if os.environ.get(NESTED_ENV) == "1":
-        pytest.fail(
-            "рекурсия: тест полноты запущен внутри самого себя — --deselect не применился"
-        )
+        pytest.fail("рекурсия: тест полноты запущен внутри самого себя — --deselect не применился")
     junit = tmp_path / "narrowed.xml"
     # Негатив не участвует в измерении покрытия: дочерний прогон обязан быть без
     # coverage-хуков (A1-артефакт a1_coverage.pth + COV_CORE_*), иначе результат
@@ -267,9 +255,7 @@ def test_checker_rejects_narrowed_run_still_above_legacy_threshold(
         f"получено {recorded} — иначе негатив не про прежний порог"
     )
     result = _run_checker(junit=junit)
-    assert (
-        result.returncode != 0
-    ), "суженный прогон выше прежнего порога обязан ронять проверку"
+    assert result.returncode != 0, "суженный прогон выше прежнего порога обязан ронять проверку"
     # G-CI-PG-CANON: формулировка зависит от класса скипов прогона (env-skip
     # добавляет пометку), но негатив обязан называть расхождение и канон.
     assert f"collected: {recorded} != " in result.stderr, result.stderr
@@ -304,9 +290,7 @@ def test_checker_rejects_unparsable_junit(tmp_path: pathlib.Path) -> None:
 
 def test_checker_fails_closed_on_missing_manifest(tmp_path: pathlib.Path) -> None:
     canon = _canon()
-    junit = _write_junit(
-        tmp_path / "canon.xml", passed=canon["passed"], skipped=canon["skipped"]
-    )
+    junit = _write_junit(tmp_path / "canon.xml", passed=canon["passed"], skipped=canon["skipped"])
     result = _run_checker(junit=junit, manifest=tmp_path / "no-such-manifest.json")
     assert result.returncode != 0
     assert "манифест канона не найден" in result.stderr
@@ -317,10 +301,8 @@ def test_gate_and_ci_wrapper_use_single_checker() -> None:
     gate = GATE.read_text(encoding="utf-8")
     wrapper = SMOKE_WRAPPER.read_text(encoding="utf-8")
     assert "ci_run_completeness.py" in gate
-    assert (
-        "MIN_COLLECTED" not in gate and "collected>=" not in gate
-    ), "в гейте снова свой порог — проверка полноты обязана быть одна"
+    assert "MIN_COLLECTED" not in gate and "collected>=" not in gate, (
+        "в гейте снова свой порог — проверка полноты обязана быть одна"
+    )
     assert "ci_run_completeness.py" in wrapper
-    assert (
-        re.search(r"^\s*CANON_MIN\s*=", wrapper, re.M) is None
-    ), "в CI-обёртке снова свой порог"
+    assert re.search(r"^\s*CANON_MIN\s*=", wrapper, re.M) is None, "в CI-обёртке снова свой порог"

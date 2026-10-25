@@ -144,9 +144,7 @@ def load_plans() -> dict:
     except FileNotFoundError as exc:
         raise PlanSourceError(f"plans.json отсутствует: {PLANS_PATH}") from exc
     except (OSError, ValueError) as exc:
-        raise PlanSourceError(
-            f"plans.json нечитаем/невалиден ({PLANS_PATH}): {type(exc).__name__}: {exc}"
-        ) from exc
+        raise PlanSourceError(f"plans.json нечитаем/невалиден ({PLANS_PATH}): {type(exc).__name__}: {exc}") from exc
     if not isinstance(raw, dict) or not raw:
         raise PlanSourceError(f"plans.json пуст или не объект: {PLANS_PATH}")
     return raw
@@ -169,9 +167,7 @@ def plan_limits(plan: str | None) -> PlanLimits:
         gpu_s_per_job = int(cfg["gpu_s_per_job"])
     except (TypeError, ValueError) as exc:
         raise PlanSourceError(f"тир {key!r}: поля квот не целые числа ({exc})") from exc
-    return PlanLimits(
-        plan=key, jobs_per_month=jobs_per_month, gpu_s_per_job=gpu_s_per_job
-    )
+    return PlanLimits(plan=key, jobs_per_month=jobs_per_month, gpu_s_per_job=gpu_s_per_job)
 
 
 def ledger_consumption(tenant_id: str) -> Consumption:
@@ -185,13 +181,9 @@ def ledger_consumption(tenant_id: str) -> Consumption:
     try:
         raw = db.get_tenant_usage_db(tenant_id)
     except Exception as exc:  # недоступность счётчиков — не молчаливый allow
-        raise UsageLedgerUnavailable(
-            f"леджер usage недоступен для {tenant_id!r}: {type(exc).__name__}: {exc}"
-        ) from exc
+        raise UsageLedgerUnavailable(f"леджер usage недоступен для {tenant_id!r}: {type(exc).__name__}: {exc}") from exc
     if not isinstance(raw, dict):
-        raise UsageLedgerUnavailable(
-            f"леджер usage вернул неожиданный тип для {tenant_id!r}: {type(raw).__name__}"
-        )
+        raise UsageLedgerUnavailable(f"леджер usage вернул неожиданный тип для {tenant_id!r}: {type(raw).__name__}")
     try:
         return Consumption(
             tenant_id=tenant_id,
@@ -199,18 +191,14 @@ def ledger_consumption(tenant_id: str) -> Consumption:
             gpu_seconds_used=int(raw.get("total_gpu_seconds", 0)),
         )
     except (TypeError, ValueError) as exc:
-        raise UsageLedgerUnavailable(
-            f"леджер usage вернул неразбираемые счётчики для {tenant_id!r}: {exc}"
-        ) from exc
+        raise UsageLedgerUnavailable(f"леджер usage вернул неразбираемые счётчики для {tenant_id!r}: {exc}") from exc
 
 
 def _unlimited(limit: int) -> bool:
     return limit < 0
 
 
-def free_quota_verdict(
-    limits: PlanLimits, consumption: Consumption, estimate_gpu_s: float
-) -> dict:
+def free_quota_verdict(limits: PlanLimits, consumption: Consumption, estimate_gpu_s: float) -> dict:
     """Двумерный предикат по квоте (без денег и без эвристик длительности).
 
     Измерения: джобы за месяц и GPU-секунды (смета джоба против per-job лимита,
@@ -253,10 +241,7 @@ def free_quota_verdict(
         return {
             "decision": REJECTED,
             "category": QUOTA_JOB_ESTIMATE_EXCEEDS_PER_JOB,
-            "reason": (
-                f"смета джоба превышает лимит тира: {estimate} > {per_job_cap} GPU-s "
-                f"(превышение: {over})"
-            ),
+            "reason": (f"смета джоба превышает лимит тира: {estimate} > {per_job_cap} GPU-s (превышение: {over})"),
             "basis": {
                 **basis,
                 "distance": {"per_job_over_by_gpu_s": over},
@@ -302,16 +287,8 @@ def free_quota_verdict(
         "basis": {
             **basis,
             "distance": {
-                "jobs_remaining": (
-                    UNLIMITED
-                    if _unlimited(jobs_limit)
-                    else jobs_limit - consumption.jobs_used
-                ),
-                "monthly_gpu_s_remaining": (
-                    UNLIMITED
-                    if _unlimited(monthly_limit)
-                    else monthly_limit - projected
-                ),
+                "jobs_remaining": (UNLIMITED if _unlimited(jobs_limit) else jobs_limit - consumption.jobs_used),
+                "monthly_gpu_s_remaining": (UNLIMITED if _unlimited(monthly_limit) else monthly_limit - projected),
             },
             "projected_monthly_gpu_s": projected,
             "proximity_pct": proximity,

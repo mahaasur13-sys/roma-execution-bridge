@@ -71,15 +71,11 @@ def _scheduler(gate_denied: bool = False, gpu_available: bool = False):
     sched.gpu_connector = SimpleNamespace(is_available=lambda: gpu_available)
     if gate_denied:
         sched.cost_gate = SimpleNamespace(
-            evaluate=lambda tenant_id, payload: SimpleNamespace(
-                result="denied", reason="gate denied by tenant quota"
-            )
+            evaluate=lambda tenant_id, payload: SimpleNamespace(result="denied", reason="gate denied by tenant quota")
         )
     else:
         sched.cost_gate = SimpleNamespace(
-            evaluate=lambda tenant_id, payload: SimpleNamespace(
-                result="allowed", reason="gate allowed"
-            )
+            evaluate=lambda tenant_id, payload: SimpleNamespace(result="allowed", reason="gate allowed")
         )
 
     calls: list = []
@@ -97,9 +93,7 @@ def _scheduler(gate_denied: bool = False, gpu_available: bool = False):
     return sched
 
 
-def _job(
-    job_id: str, tenant_id: str, gpu_required: bool, plugin_type: str = "inference"
-):
+def _job(job_id: str, tenant_id: str, gpu_required: bool, plugin_type: str = "inference"):
     return {
         "job_id": job_id,
         "task_type": "batch inference",
@@ -130,9 +124,7 @@ def test_quota_rejected_verdict_blocks_local_branch(monkeypatch):
     assert "execution_target" not in route, route
     assert sched._local_calls == [], sched._local_calls
 
-    result = asyncio.run(
-        sched.execute_job(_job("j-local", "t-free", gpu_required=False))
-    )
+    result = asyncio.run(sched.execute_job(_job("j-local", "t-free", gpu_required=False)))
     assert result["status"] == "rejected", result
     assert sched._local_calls == [], sched._local_calls
 
@@ -143,9 +135,7 @@ def test_quota_rejected_verdict_blocks_gpu_branch(monkeypatch):
     _patch_ledger(monkeypatch, jobs=0, gpu_seconds=0)
     sched = _scheduler(gpu_available=True)
 
-    route = sched.route_job(
-        _job("j-gpu", "t-free", gpu_required=True, plugin_type="ml_training")
-    )
+    route = sched.route_job(_job("j-gpu", "t-free", gpu_required=True, plugin_type="ml_training"))
 
     assert route["status"] == "rejected", route
     assert route["reason"] == QUOTA_JOB_ESTIMATE_EXCEEDS_PER_JOB, route
@@ -201,9 +191,7 @@ def test_gate_denied_blocks_local_branch(monkeypatch):
     assert route["reason"] == "gate denied by tenant quota", route
     assert sched._local_calls == [], sched._local_calls
 
-    result = asyncio.run(
-        sched.execute_job(_job("j-deny-local", "t-pro", gpu_required=False))
-    )
+    result = asyncio.run(sched.execute_job(_job("j-deny-local", "t-pro", gpu_required=False)))
     assert result["status"] == "rejected", result
     assert sched._local_calls == [], sched._local_calls
 
@@ -232,9 +220,7 @@ def test_approved_within_quota_still_takes_local_path(monkeypatch):
     assert route["execution_target"] == "local", route
     assert route["gate_decision"] == "allowed", route
 
-    result = asyncio.run(
-        sched.execute_job(_job("j-live", "t-free", gpu_required=False))
-    )
+    result = asyncio.run(sched.execute_job(_job("j-live", "t-free", gpu_required=False)))
     assert result["status"] == "success", result
     assert sched._local_calls == ["j-live"], sched._local_calls
 
@@ -310,9 +296,7 @@ def test_executor_submit_returns_rejection_without_execution(monkeypatch):
     executor = ROMAJobExecutor.__new__(ROMAJobExecutor)
     executor.results = {}
     executor._job_ownership = {}
-    executor.scheduler = SimpleNamespace(
-        route_job=lambda job: {"status": "rejected", "reason": GATE_UNAVAILABLE}
-    )
+    executor.scheduler = SimpleNamespace(route_job=lambda job: {"status": "rejected", "reason": GATE_UNAVAILABLE})
     executed: list = []
 
     async def boom(job):
@@ -320,9 +304,7 @@ def test_executor_submit_returns_rejection_without_execution(monkeypatch):
 
     executor.scheduler.execute_job = boom
 
-    result = asyncio.run(
-        executor.submit(_job("j-submit", "t-free", gpu_required=False))
-    )
+    result = asyncio.run(executor.submit(_job("j-submit", "t-free", gpu_required=False)))
 
     assert result["status"] == "rejected", result
     assert executed == [], executed
@@ -335,9 +317,7 @@ def test_ledger_down_blocks_both_branches_before_execution(monkeypatch):
     sched = _scheduler(gpu_available=True)
 
     for gpu_required in (True, False):
-        route = sched.route_job(
-            _job(f"j-fc-{gpu_required}", "t-free", gpu_required=gpu_required)
-        )
+        route = sched.route_job(_job(f"j-fc-{gpu_required}", "t-free", gpu_required=gpu_required))
         assert route["status"] == "rejected", route
         assert route["reason"] == GATE_UNAVAILABLE, route
         assert "execution_target" not in route, route

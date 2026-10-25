@@ -34,9 +34,7 @@ class ConnectionManager:
         rooms.discard(ticket_id)
         logger.info("ws_disconnected", ticket_id=ticket_id, user_id=user_id)
 
-    async def broadcast(
-        self, ticket_id: str, message: dict, exclude_user: str | None = None
-    ) -> None:
+    async def broadcast(self, ticket_id: str, message: dict, exclude_user: str | None = None) -> None:
         room = self._rooms.get(ticket_id, {})
         payload = json.dumps(message)
         for uid, ws in list(room.items()):
@@ -80,20 +78,14 @@ class ChatService:
         msgs = self._messages.get(ticket_id, [])
         return msgs[-limit:]
 
-    def get_visible_messages(
-        self, ticket_id: str, user_role: str, limit: int = 100
-    ) -> list[ChatMessage]:
+    def get_visible_messages(self, ticket_id: str, user_role: str, limit: int = 100) -> list[ChatMessage]:
         msgs = self.get_messages(ticket_id, limit)
         if user_role in (
             ParticipantRole.SUPPORT_AGENT.value,
             ParticipantRole.SUPER_ADMIN.value,
         ):
             return msgs
-        return [
-            m
-            for m in msgs
-            if not m.is_internal and m.message_type != MessageType.INTERNAL_NOTE
-        ]
+        return [m for m in msgs if not m.is_internal and m.message_type != MessageType.INTERNAL_NOTE]
 
     async def add_system_message(self, ticket_id: UUID, body: str) -> ChatMessage:
         msg = ChatMessage(
@@ -105,9 +97,7 @@ class ChatService:
         )
         return await self.add_message(msg)
 
-    async def add_internal_note(
-        self, ticket_id: UUID, agent_id: str, note: str
-    ) -> ChatMessage:
+    async def add_internal_note(self, ticket_id: UUID, agent_id: str, note: str) -> ChatMessage:
         msg = ChatMessage(
             ticket_id=ticket_id,
             sender_id=agent_id,

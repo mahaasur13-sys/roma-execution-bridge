@@ -28,9 +28,7 @@ def get_backend(name: str | None = None) -> BaseBackend:
 
         _backend = VastaiBackend()
         if not _backend.enabled:
-            logger.warning(
-                "VASTAI selected but VAST_KEY (or VASTAI_API_KEY) not configured — falling back to local"
-            )
+            logger.warning("VASTAI selected but VAST_KEY (or VASTAI_API_KEY) not configured — falling back to local")
             _backend = LocalBackend()
             _backend_name = "local"
     elif current == "gpu_worker":
@@ -80,9 +78,7 @@ def list_backends() -> dict:
     return backends
 
 
-async def dispatch_job(
-    job_id: str = "", tenant_id: str = "", payload: dict = None
-) -> dict:
+async def dispatch_job(job_id: str = "", tenant_id: str = "", payload: dict = None) -> dict:
     """Route job to active backend."""
     p = payload or {}
     ctx = JobContext(

@@ -59,9 +59,7 @@ class TierFeatureTogglePlugin:
         if action == "get_features":
             return self._get_features(kwargs["tenant_id"], kwargs.get("plan", "free"))
         elif action == "check_feature":
-            return self._check_feature(
-                kwargs["tenant_id"], kwargs.get("plan", "free"), kwargs["feature"]
-            )
+            return self._check_feature(kwargs["tenant_id"], kwargs.get("plan", "free"), kwargs["feature"])
         elif action == "compare_tiers":
             return self._compare_tiers()
         else:
@@ -88,11 +86,7 @@ class TierFeatureTogglePlugin:
             "plan": plan,
             "feature": feature,
             "enabled": enabled,
-            "reason": (
-                "Feature available in your tier"
-                if enabled
-                else f"Upgrade to unlock '{feature}'"
-            ),
+            "reason": ("Feature available in your tier" if enabled else f"Upgrade to unlock '{feature}'"),
         }
 
     def _compare_tiers(self) -> dict[str, Any]:

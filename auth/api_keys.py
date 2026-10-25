@@ -12,9 +12,7 @@ class APIKeyManager:
         self._keys = {}
         self._counter = 0
 
-    def create_key(
-        self, org_id: str, project_id: str, permissions: List[str], expires_in: int = 0
-    ) -> str:
+    def create_key(self, org_id: str, project_id: str, permissions: List[str], expires_in: int = 0) -> str:
         self._counter += 1
         key_id = f"kid_{org_id}_{project_id}_{self._counter}"
         raw = f"{PREFIX}{key_id}_{secrets.token_urlsafe(32)}"
@@ -63,16 +61,12 @@ class APIKeyManager:
         v = self.validate_key(old_key)
         if not v:
             return None
-        return self.create_key(
-            v["org_id"], v["project_id"], v["permissions"], expires_in
-        )
+        return self.create_key(v["org_id"], v["project_id"], v["permissions"], expires_in)
 
 
 if __name__ == "__main__":
     km = APIKeyManager()
-    key = km.create_key(
-        "org_acme", "proj_ml", permissions=["job:execute", "job:read"], expires_in=86400
-    )
+    key = km.create_key("org_acme", "proj_ml", permissions=["job:execute", "job:read"], expires_in=86400)
     print(f"Key: {key[:60]}...")
     v = km.validate_key(key)
     print(f"Valid: {v}")

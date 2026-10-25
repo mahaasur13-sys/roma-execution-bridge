@@ -51,9 +51,7 @@ def _increment_usage(
 
     gpu_cost = round(gpu_sec * gpu_rate, 8) if gpu_sec > 0 else 0.0
     token_cost = (
-        round(input_tokens * in_rate + output_tokens * out_rate, 8)
-        if (input_tokens > 0 or output_tokens > 0)
-        else 0.0
+        round(input_tokens * in_rate + output_tokens * out_rate, 8) if (input_tokens > 0 or output_tokens > 0) else 0.0
     )
     total_cost = round(gpu_cost + token_cost, 8)
     if total_cost <= 0:
@@ -93,9 +91,7 @@ def _increment_usage(
             cost_usd=gpu_cost,
         )
         gpu_seconds_total.labels(tenant_id=tenant_id, plan=plan_name).inc(gpu_sec)
-        billing_cost_total.labels(
-            tenant_id=tenant_id, plan=plan_name, cost_type="gpu"
-        ).inc(gpu_cost)
+        billing_cost_total.labels(tenant_id=tenant_id, plan=plan_name, cost_type="gpu").inc(gpu_cost)
 
     if input_tokens > 0 or output_tokens > 0:
         # R15: фактическое число токенов как value.
@@ -109,32 +105,22 @@ def _increment_usage(
             value=float(input_tokens + output_tokens),
         )
         if input_tokens > 0:
-            tokens_total.labels(
-                tenant_id=tenant_id, plan=plan_name, direction="input"
-            ).inc(input_tokens)
+            tokens_total.labels(tenant_id=tenant_id, plan=plan_name, direction="input").inc(input_tokens)
         if output_tokens > 0:
-            tokens_total.labels(
-                tenant_id=tenant_id, plan=plan_name, direction="output"
-            ).inc(output_tokens)
+            tokens_total.labels(tenant_id=tenant_id, plan=plan_name, direction="output").inc(output_tokens)
         token_cost_input = input_tokens * in_rate
         token_cost_output = output_tokens * out_rate
         if token_cost_input > 0:
-            billing_cost_total.labels(
-                tenant_id=tenant_id, plan=plan_name, cost_type="tokens"
-            ).inc(token_cost_input)
+            billing_cost_total.labels(tenant_id=tenant_id, plan=plan_name, cost_type="tokens").inc(token_cost_input)
         if token_cost_output > 0:
-            billing_cost_total.labels(
-                tenant_id=tenant_id, plan=plan_name, cost_type="tokens"
-            ).inc(token_cost_output)
+            billing_cost_total.labels(tenant_id=tenant_id, plan=plan_name, cost_type="tokens").inc(token_cost_output)
 
     if total_cost > 0:
         job_cost.labels(tenant_id=tenant_id, plan=plan_name).observe(total_cost)
 
     # Burn-rate tracking: alert if >$1/hour over recent window
     _burn_tracker.setdefault(tenant_id, []).append((time.time(), total_cost))
-    _burn_tracker[tenant_id] = [
-        (t, c) for t, c in _burn_tracker[tenant_id] if time.time() - t < 3600
-    ]
+    _burn_tracker[tenant_id] = [(t, c) for t, c in _burn_tracker[tenant_id] if time.time() - t < 3600]
     recent_cost = sum(c for t, c in _burn_tracker[tenant_id] if time.time() - t < 600)
     burn_rate_hourly = recent_cost * 6 if recent_cost > 0 else 0
     if burn_rate_hourly > 1.0:
@@ -155,9 +141,7 @@ def _increment_usage(
 
     roma_debit_total.labels(tenant_id=tenant_id, status="ok").inc()
     roma_debit_amount.labels(tenant_id=tenant_id).observe(total_cost)
-    roma_tenant_balance.labels(tenant_id=tenant_id).set(
-        billing_ledger.get_tenant_balance(tenant_id)
-    )
+    roma_tenant_balance.labels(tenant_id=tenant_id).set(billing_ledger.get_tenant_balance(tenant_id))
 
     return total_cost, True
 
@@ -182,7 +166,5 @@ def finalize_job_billing(
         return "skip"
     if job.get("status") in ("completed", "cancelled", "failed", "timeout"):
         return "skip"
-    _total_cost, debited = _increment_usage(
-        tenant_id, gpu_sec, plan_name=plan_name, job_id=job_id, backend=backend
-    )
+    _total_cost, debited = _increment_usage(tenant_id, gpu_sec, plan_name=plan_name, job_id=job_id, backend=backend)
     return "ok" if debited else "no_funds"

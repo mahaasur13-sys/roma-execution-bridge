@@ -31,9 +31,7 @@ def submit_job_through_gate(
     request_id = str(uuid.uuid4())
 
     # 1. Create DecisionRequest
-    db.insert_decision_request(
-        request_id, tenant_id, request_type, payload, idempotency_key
-    )
+    db.insert_decision_request(request_id, tenant_id, request_type, payload, idempotency_key)
 
     # 2. Idempotency check
     if idempotency_key:
@@ -124,9 +122,7 @@ def submit_job_through_gate(
     # 9. Audit
     from audit.event_store import on_decision_allowed, on_job_created
 
-    on_decision_allowed(
-        tenant_id, decision_id, request_id, job_count + 1, estimated_cost
-    )
+    on_decision_allowed(tenant_id, decision_id, request_id, job_count + 1, estimated_cost)
     on_job_created(tenant_id, job_id, decision_id, "job_submit")
 
     # NOTE (RaaS-01): submit-time cost is an ESTIMATE, not actual metering.
@@ -167,9 +163,7 @@ def complete_job(job_id: str, tenant_id: str) -> dict | None:
         return None
     import datetime
 
-    db.update_job_status(
-        job_id, "completed", completed_at=datetime.datetime.utcnow().isoformat()
-    )
+    db.update_job_status(job_id, "completed", completed_at=datetime.datetime.utcnow().isoformat())
     return db.get_job(job_id, tenant_id)
 
 
@@ -189,9 +183,7 @@ def get_tenant_usage(tenant_id: str) -> dict:
         from monitoring import metrics as _metrics
 
         _metrics.track_gate_unavailable("decision_store.usage")
-        logger.error(
-            "GATE_UNAVAILABLE: лимит тарифа %r не установлен — %s", plan_name, exc
-        )
+        logger.error("GATE_UNAVAILABLE: лимит тарифа %r не установлен — %s", plan_name, exc)
         max_jobs = None
     if max_jobs is None:
         display = "unavailable"

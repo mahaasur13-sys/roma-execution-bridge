@@ -74,7 +74,9 @@ def _payload(gate: float, choice: str, run_probability: float, risk: int, confid
     }
 
 
-def _risk_payload(risk_value: Any, gate: float = 0.99, choice: str = "run", run_probability: float = 0.99, confidence: float = 0.99) -> dict[str, Any]:
+def _risk_payload(
+    risk_value: Any, gate: float = 0.99, choice: str = "run", run_probability: float = 0.99, confidence: float = 0.99
+) -> dict[str, Any]:
     """Ответ Jev, где все прочие сигналы на уровне execute: решение задаёт только risk."""
     payload = _payload(gate, choice, run_probability, 1, confidence)
     payload["answers"]["risk"]["score"] = risk_value
@@ -379,7 +381,12 @@ def test_cli_forbidden_domain_wins_over_disabled_and_costs_no_network(tmp_path: 
         capture_output=True,
         text=True,
         cwd=str(REPO_ROOT),
-        env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO_ROOT), "JEV_ENABLED": "0", "OPENROUTER_API_KEY": ""},
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "PYTHONPATH": str(REPO_ROOT),
+            "JEV_ENABLED": "0",
+            "OPENROUTER_API_KEY": "",
+        },
         timeout=60,
     )
     verdict = json.loads(proc.stdout)
@@ -524,7 +531,9 @@ class _AdapterSpy:
         }
         _AdapterSpy.instances.append(self)
 
-    def decide(self, raw_state: Any, question_ids: Any = None, domain: str | None = None, **kwargs: Any) -> dict[str, Any]:
+    def decide(
+        self, raw_state: Any, question_ids: Any = None, domain: str | None = None, **kwargs: Any
+    ) -> dict[str, Any]:
         self.decide_calls += 1
         return dict(self.verdict)
 
@@ -617,7 +626,12 @@ def test_out_real_write_failure_leaves_no_partial_and_no_temp(tmp_path: Path) ->
         capture_output=True,
         text=True,
         cwd=str(REPO_ROOT),
-        env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO_ROOT), "JEV_ENABLED": "0", "OPENROUTER_API_KEY": ""},
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "PYTHONPATH": str(REPO_ROOT),
+            "JEV_ENABLED": "0",
+            "OPENROUTER_API_KEY": "",
+        },
         timeout=60,
     )
     assert proc.returncode == 5
@@ -680,11 +694,40 @@ MALFORMED_ANSWERS: list[dict[str, Any]] = [
     {"answers": {}},
     {"answers": {"gate": {"type": "noul", "noul": 0.99}}},
     {"answers": {"gate": {"type": "noul", "noul": 0.99}, "next": {"type": "choice", "choice": "run"}}},
-    {"answers": {"gate": {"type": "noul", "noul": 0.99}, "next": {"type": "choice", "choice": "run", "confidence": 0.99}}},
-    {"answers": {"gate": {"type": "noul", "noul": "yes"}, "next": {"type": "choice", "choice": "run", "confidence": 0.99}, "risk": {"type": "score", "score": 1}}},
-    {"answers": {"gate": {"type": "noul", "noul": 0.99}, "next": {"type": "choice", "choice": "explode", "confidence": 0.99}, "risk": {"type": "score", "score": 1}}},
-    {"answers": {"gate": {"type": "noul", "noul": 0.99}, "next": {"type": "choice", "choice": "run", "confidence": "high"}, "risk": {"type": "score", "score": 1}}},
-    {"answers": {"gate": {"type": "noul", "noul": 0.99}, "next": {"type": "choice", "choice": "run", "confidence": 0.99}, "risk": {"type": "score"}}},
+    {
+        "answers": {
+            "gate": {"type": "noul", "noul": 0.99},
+            "next": {"type": "choice", "choice": "run", "confidence": 0.99},
+        }
+    },
+    {
+        "answers": {
+            "gate": {"type": "noul", "noul": "yes"},
+            "next": {"type": "choice", "choice": "run", "confidence": 0.99},
+            "risk": {"type": "score", "score": 1},
+        }
+    },
+    {
+        "answers": {
+            "gate": {"type": "noul", "noul": 0.99},
+            "next": {"type": "choice", "choice": "explode", "confidence": 0.99},
+            "risk": {"type": "score", "score": 1},
+        }
+    },
+    {
+        "answers": {
+            "gate": {"type": "noul", "noul": 0.99},
+            "next": {"type": "choice", "choice": "run", "confidence": "high"},
+            "risk": {"type": "score", "score": 1},
+        }
+    },
+    {
+        "answers": {
+            "gate": {"type": "noul", "noul": 0.99},
+            "next": {"type": "choice", "choice": "run", "confidence": 0.99},
+            "risk": {"type": "score"},
+        }
+    },
 ]
 
 
@@ -767,12 +810,12 @@ def test_response_with_dated_snapshot_model_is_accepted() -> None:
 @pytest.mark.parametrize(
     "bad_model",
     [
-        "typesafe/jev-1.13-2026",       # не 8 цифр
+        "typesafe/jev-1.13-2026",  # не 8 цифр
         "typesafe/jev-1.13-20260917x",  # хвостовой символ
-        "typesafe/jev-1.130",           # префикс без даты
-        "typesafe/jev-1.14-20260917",   # другая версия
-        "other/jev-1.13-20260917",      # чужой неймспейс
-        "",                             # пусто
+        "typesafe/jev-1.130",  # префикс без даты
+        "typesafe/jev-1.14-20260917",  # другая версия
+        "other/jev-1.13-20260917",  # чужой неймспейс
+        "",  # пусто
         "typesafe/jev-1.13-٢٠٢٦٠٩١٧",  # восточно-арабские цифры (не ASCII)
     ],
 )

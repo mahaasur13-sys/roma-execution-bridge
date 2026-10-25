@@ -127,9 +127,7 @@ PLAIN_TEXT_TEMPLATE = """Здравствуйте, {{ name }}!
 # ============================================
 
 
-def _render(
-    template: str, name: str, email: str, invitation_link: str, demo_key: str
-) -> str:
+def _render(template: str, name: str, email: str, invitation_link: str, demo_key: str) -> str:
     return (
         template.replace("{{ name }}", name or "Valued Tester")
         .replace("{{ email }}", email)
@@ -209,13 +207,9 @@ def send_email_via_sendgrid(to_email: str, to_name: str, html_content: str) -> d
             if response.status_code in (200, 201, 202):
                 logger.debug(f"SendGrid OK: {to_email} (attempt {attempt})")
                 return {"success": True}
-            logger.warning(
-                f"SendGrid HTTP {response.status_code} for {to_email} (attempt {attempt})"
-            )
+            logger.warning(f"SendGrid HTTP {response.status_code} for {to_email} (attempt {attempt})")
         except Exception as e:
-            logger.warning(
-                f"SendGrid attempt {attempt}/{MAX_RETRIES} failed for {to_email}: {e}"
-            )
+            logger.warning(f"SendGrid attempt {attempt}/{MAX_RETRIES} failed for {to_email}: {e}")
 
         if attempt < MAX_RETRIES:
             backoff = 2**attempt
@@ -232,18 +226,14 @@ def send_email_via_sendgrid(to_email: str, to_name: str, html_content: str) -> d
 
 def main():
     parser = argparse.ArgumentParser(description="ROMA Beta Invitation Sender")
-    parser.add_argument(
-        "--limit", type=int, default=0, help="Max emails to send (0 = all)"
-    )
+    parser.add_argument("--limit", type=int, default=0, help="Max emails to send (0 = all)")
     parser.add_argument(
         "--dry-run",
         action="store_true",
         default=False,
         help="Simulate without sending real emails",
     )
-    parser.add_argument(
-        "--csv", type=str, default="", help="Load leads from CSV instead of DB"
-    )
+    parser.add_argument("--csv", type=str, default="", help="Load leads from CSV instead of DB")
     args = parser.parse_args()
 
     import db
@@ -262,9 +252,7 @@ def main():
         sys.exit(1)
 
     if not DEMO_API_KEY:
-        logger.warning(
-            "⚠ ROMA_DEMO_API_KEY is not set — invitation links will not include a demo key"
-        )
+        logger.warning("⚠ ROMA_DEMO_API_KEY is not set — invitation links will not include a demo key")
 
     # Load leads
     if args.csv:
@@ -292,8 +280,7 @@ def main():
 
         name = lead.get("company", "") or lead.get("role", "") or ""
         invitation_link = (
-            f"{DASHBOARD_URL}?api_key={DEMO_API_KEY}"
-            f"&ref=beta&utm_source=email&utm_medium=invite&email={email}"
+            f"{DASHBOARD_URL}?api_key={DEMO_API_KEY}&ref=beta&utm_source=email&utm_medium=invite&email={email}"
         )
 
         html, _ = generate_email_content(name, email, invitation_link, DEMO_API_KEY)
@@ -301,10 +288,7 @@ def main():
 
         if dry_run:
             # Simulate send
-            logger.info(
-                f"DRY-RUN [{i+1}/{len(leads)}] ✉ {email} ({name or 'no name'}) "
-                f"— would send via SendGrid"
-            )
+            logger.info(f"DRY-RUN [{i + 1}/{len(leads)}] ✉ {email} ({name or 'no name'}) — would send via SendGrid")
             try:
                 db.log_email_sent(email, name, "tenant-demo", invitation_link)
                 if lead_id:
@@ -322,7 +306,7 @@ def main():
                     if lead_id:
                         db.update_lead_status(lead_id, "invited")
                     sent_count += 1
-                    logger.info(f"[{i+1}/{len(leads)}] ✅ {email} ({name})")
+                    logger.info(f"[{i + 1}/{len(leads)}] ✅ {email} ({name})")
                 except Exception as e:
                     logger.error(f"DB error for {email}: {e}")
                     fail_count += 1
@@ -333,7 +317,7 @@ def main():
                 except Exception:
                     pass
                 fail_count += 1
-                logger.error(f"[{i+1}/{len(leads)}] ❌ {email} — {err}")
+                logger.error(f"[{i + 1}/{len(leads)}] ❌ {email} — {err}")
 
         # Rate limiting
         if (i + 1) % BATCH_SIZE == 0 and i + 1 < len(leads):

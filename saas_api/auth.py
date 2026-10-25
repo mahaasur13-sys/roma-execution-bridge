@@ -40,9 +40,7 @@ def verify_api_key(token: str) -> dict:
     tier_gpu_hours = {"free": 10, "pro": 1000, "enterprise": 864000}
     limit = tier_gpu_hours.get(tier, 1000) * 3600
     if gpu_seconds_used >= limit:
-        raise QuotaExceeded(
-            f"GPU quota exceeded: {gpu_seconds_used/3600:.1f}hr used / {limit/3600:.0f}hr limit"
-        )
+        raise QuotaExceeded(f"GPU quota exceeded: {gpu_seconds_used / 3600:.1f}hr used / {limit / 3600:.0f}hr limit")
     window = {"free": 60, "pro": 10, "enterprise": 1}[tier]
     now = time.time()
     last = _last_call.get(org_id, 0)

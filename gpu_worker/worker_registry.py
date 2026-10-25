@@ -75,9 +75,7 @@ class WorkerRegistry:
             return [
                 w
                 for w in self._workers.values()
-                if w.status == "healthy"
-                and (w.vram_total_gb - w.vram_used_gb) >= min_vram_gb
-                and w.current_job is None
+                if w.status == "healthy" and (w.vram_total_gb - w.vram_used_gb) >= min_vram_gb and w.current_job is None
             ]
 
     def mark_worker_dead(self, worker_id: str):
@@ -98,9 +96,7 @@ class WorkerRegistry:
 
     def cleanup_dead_workers(self):
         with self._mu:
-            self._workers = {
-                wid: ws for wid, ws in self._workers.items() if ws.status != "dead"
-            }
+            self._workers = {wid: ws for wid, ws in self._workers.items() if ws.status != "dead"}
 
     def acquire_gpu_lock(self, worker_id: str, job_id: str) -> bool:
         with self._mu:
@@ -146,9 +142,7 @@ class WorkerRegistry:
                 "avg_gpu_util": total_util / len(self._workers) if self._workers else 0,
                 "total_vram_used_gb": round(total_vram, 2),
                 "total_vram_gb": round(total_cap, 2),
-                "utilization_pct": round(
-                    (total_vram / total_cap * 100) if total_cap else 0, 1
-                ),
+                "utilization_pct": round((total_vram / total_cap * 100) if total_cap else 0, 1),
             }
 
     def to_dict(self) -> dict:

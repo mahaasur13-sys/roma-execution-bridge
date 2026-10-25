@@ -44,18 +44,14 @@ async def top_up_balance(request: Request, payload: dict):
     admin = _admin_only(request)
     target_tenant_id = (payload.get("tenant_id") or "").strip()
     if not target_tenant_id:
-        raise HTTPException(
-            status_code=400, detail="tenant_id is required for admin top-up"
-        )
+        raise HTTPException(status_code=400, detail="tenant_id is required for admin top-up")
     try:
         amount = float(payload.get("amount", 0))
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Amount must be a number")
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
-    entry_id = billing_ledger.credit(
-        target_tenant_id, amount, note=f"Admin top-up by {admin['tenant_id']}"
-    )
+    entry_id = billing_ledger.credit(target_tenant_id, amount, note=f"Admin top-up by {admin['tenant_id']}")
     try:
         write_event(
             admin["tenant_id"],

@@ -19,27 +19,21 @@ def init_db(conn) -> None:
         )
     """)
     cur.execute("CREATE INDEX IF NOT EXISTS idx_tenants_api_key ON tenants(api_key)")
-    cur.execute(
-        "CREATE INDEX IF NOT EXISTS idx_tenants_stripe ON tenants(stripe_customer_id)"
-    )
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_tenants_stripe ON tenants(stripe_customer_id)")
     cur.execute("""
         CREATE TABLE IF NOT EXISTS webhook_events (
             id SERIAL PRIMARY KEY, stripe_event_id TEXT, event_type TEXT DEFAULT '',
             tenant_id TEXT DEFAULT '', payload TEXT DEFAULT '', created_at TIMESTAMP DEFAULT now()
         )
     """)
-    cur.execute(
-        "CREATE INDEX IF NOT EXISTS idx_webhook_events_stripe ON webhook_events(stripe_event_id)"
-    )
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_webhook_events_stripe ON webhook_events(stripe_event_id)")
     cur.execute("""
         CREATE TABLE IF NOT EXISTS processed_invoices (
             id SERIAL PRIMARY KEY, invoice_id TEXT UNIQUE, event_type TEXT DEFAULT '',
             tenant_id TEXT DEFAULT '', created_at TIMESTAMP DEFAULT now()
         )
     """)
-    cur.execute(
-        "CREATE INDEX IF NOT EXISTS idx_processed_invoices_inv ON processed_invoices(invoice_id)"
-    )
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_processed_invoices_inv ON processed_invoices(invoice_id)")
     cur.execute("""
         CREATE TABLE IF NOT EXISTS leads (
             id SERIAL PRIMARY KEY, email TEXT, company TEXT DEFAULT '',
@@ -65,9 +59,7 @@ def init_db(conn) -> None:
             created_at TIMESTAMP DEFAULT now()
         )
     """)
-    cur.execute(
-        "CREATE INDEX IF NOT EXISTS idx_user_events_tenant ON user_events(tenant_id)"
-    )
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_user_events_tenant ON user_events(tenant_id)")
     cur.execute("""
         CREATE TABLE IF NOT EXISTS feedback (
             id SERIAL PRIMARY KEY, tenant_id TEXT, user_id TEXT DEFAULT '',
@@ -95,12 +87,8 @@ def init_db(conn) -> None:
     """)
     # Legacy clusters have `workers` without these columns (register_worker writes
     # both) — keep the bootstrap idempotent instead of failing on an old schema.
-    cur.execute(
-        "ALTER TABLE workers ADD COLUMN IF NOT EXISTS capabilities JSONB DEFAULT '{}'::jsonb"
-    )
-    cur.execute(
-        "ALTER TABLE workers ADD COLUMN IF NOT EXISTS last_heartbeat TIMESTAMPTZ"
-    )
+    cur.execute("ALTER TABLE workers ADD COLUMN IF NOT EXISTS capabilities JSONB DEFAULT '{}'::jsonb")
+    cur.execute("ALTER TABLE workers ADD COLUMN IF NOT EXISTS last_heartbeat TIMESTAMPTZ")
     cur.execute("""
         CREATE TABLE IF NOT EXISTS submit_idempotency_keys (
             tenant_id TEXT NOT NULL,
@@ -176,9 +164,7 @@ def set_tenant_inactive(conn, tenant_id: str) -> None:
     conn.commit()
 
 
-def record_webhook_event(
-    conn, stripe_event_id: str, event_type: str, tenant_id: str, payload: str
-) -> None:
+def record_webhook_event(conn, stripe_event_id: str, event_type: str, tenant_id: str, payload: str) -> None:
     cur = conn.cursor()
     cur.execute(
         "INSERT INTO webhook_events (stripe_event_id, event_type, tenant_id, payload) VALUES (%s,%s,%s,%s)",
@@ -189,9 +175,7 @@ def record_webhook_event(
 
 def list_webhook_events(conn, limit: int = 20) -> list[dict]:
     cur = conn.cursor()
-    cur.execute(
-        "SELECT * FROM webhook_events ORDER BY created_at DESC LIMIT %s", (limit,)
-    )
+    cur.execute("SELECT * FROM webhook_events ORDER BY created_at DESC LIMIT %s", (limit,))
     cols = [desc[0] for desc in cur.description]
     return [dict(zip(cols, row)) for row in cur.fetchall()]
 
@@ -199,16 +183,13 @@ def list_webhook_events(conn, limit: int = 20) -> list[dict]:
 def is_invoice_processed(conn, invoice_id: str, tenant_id: str = "") -> bool:
     cur = conn.cursor()
     cur.execute(
-        "SELECT 1 FROM processed_invoices WHERE invoice_id = %s "
-        "AND (%s = '' OR tenant_id = %s)",
+        "SELECT 1 FROM processed_invoices WHERE invoice_id = %s AND (%s = '' OR tenant_id = %s)",
         (invoice_id, tenant_id, tenant_id),
     )
     return cur.fetchone() is not None
 
 
-def mark_invoice_processed(
-    conn, invoice_id: str, event_type: str = "", tenant_id: str = ""
-) -> None:
+def mark_invoice_processed(conn, invoice_id: str, event_type: str = "", tenant_id: str = "") -> None:
     cur = conn.cursor()
     cur.execute(
         "INSERT INTO processed_invoices (invoice_id, event_type, tenant_id) VALUES (%s,%s,%s) ON CONFLICT (invoice_id) DO NOTHING",
@@ -238,9 +219,7 @@ def add_lead(
 def list_leads(conn, status: str = "") -> list[dict]:
     cur = conn.cursor()
     if status:
-        cur.execute(
-            "SELECT * FROM leads WHERE status = %s ORDER BY created_at DESC", (status,)
-        )
+        cur.execute("SELECT * FROM leads WHERE status = %s ORDER BY created_at DESC", (status,))
     else:
         cur.execute("SELECT * FROM leads ORDER BY created_at DESC")
     cols = [desc[0] for desc in cur.description]
@@ -328,8 +307,7 @@ def log_email_sent(
 def log_email_failed(conn, recipient_email: str, error_message: str) -> int:
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO email_logs (recipient_email, status, error_message) "
-        "VALUES (%s,'failed',%s) RETURNING id",
+        "INSERT INTO email_logs (recipient_email, status, error_message) VALUES (%s,'failed',%s) RETURNING id",
         (recipient_email, error_message),
     )
     eid = cur.fetchone()[0]
@@ -503,15 +481,11 @@ def get_tenant_workers(conn, tenant_id: str) -> list[dict]:
 
 def drain_worker(conn, worker_id: str) -> None:
     cur = conn.cursor()
-    cur.execute(
-        "UPDATE workers SET drained=true, updated_at=now() WHERE id=%s", (worker_id,)
-    )
+    cur.execute("UPDATE workers SET drained=true, updated_at=now() WHERE id=%s", (worker_id,))
     conn.commit()
 
 
-def register_worker(
-    conn, worker_id: str, tenant_id: str, capabilities: dict = None
-) -> None:
+def register_worker(conn, worker_id: str, tenant_id: str, capabilities: dict = None) -> None:
     import json
 
     cur = conn.cursor()
@@ -537,9 +511,7 @@ def update_worker_heartbeat(conn, worker_id: str) -> None:
 
 def release_worker(conn, worker_id: str) -> None:
     cur = conn.cursor()
-    cur.execute(
-        "UPDATE workers SET status='idle', updated_at=now() WHERE id=%s", (worker_id,)
-    )
+    cur.execute("UPDATE workers SET status='idle', updated_at=now() WHERE id=%s", (worker_id,))
     conn.commit()
 
 
@@ -580,9 +552,7 @@ def find_job_by_idempotency(conn, tenant_id: str, idempotency_key: str):
     return row[0] if row else None
 
 
-def create_job_idempotency(
-    conn, tenant_id: str, idempotency_key: str, job_id: str
-) -> bool:
+def create_job_idempotency(conn, tenant_id: str, idempotency_key: str, job_id: str) -> bool:
     """Atomically reserve (tenant_id, idempotency_key) -> job_id.
 
     Returns True if this call created the mapping, False if the key already
@@ -736,16 +706,13 @@ def verify_user_email(conn, user_id: str) -> None:
 def set_verification_token(conn, user_id: str, token: str, expires_at: str) -> None:
     cur = conn.cursor()
     cur.execute(
-        "UPDATE users SET verification_token=%s, verification_token_expires_at=%s, "
-        "updated_at=now() WHERE id=%s",
+        "UPDATE users SET verification_token=%s, verification_token_expires_at=%s, updated_at=now() WHERE id=%s",
         (token, expires_at, user_id),
     )
     conn.commit()
 
 
-def create_email_user(
-    conn, email: str, password_hash: str, name: str, tenant_id: str, api_key: str
-) -> dict:
+def create_email_user(conn, email: str, password_hash: str, name: str, tenant_id: str, api_key: str) -> dict:
     user_id = f"user-{email}"
     cur = conn.cursor()
     cur.execute(
@@ -774,8 +741,7 @@ def mark_email_verified_pg(conn, email: str) -> None:
 def get_user_by_verification_token(conn, token_hash: str) -> dict | None:
     cur = conn.cursor()
     cur.execute(
-        "SELECT * FROM users WHERE verification_token = %s "
-        "AND verification_token_expires_at > now()",
+        "SELECT * FROM users WHERE verification_token = %s AND verification_token_expires_at > now()",
         (token_hash,),
     )
     row = cur.fetchone()
@@ -785,9 +751,7 @@ def get_user_by_verification_token(conn, token_hash: str) -> dict | None:
     return None
 
 
-def store_verification_token(
-    conn, email: str, token_hash: str, expires_at: str
-) -> None:
+def store_verification_token(conn, email: str, token_hash: str, expires_at: str) -> None:
     cur = conn.cursor()
     cur.execute(
         "UPDATE users SET verification_token = %s, verification_token_expires_at = %s, "
@@ -824,8 +788,7 @@ def create_email_user(
 def set_verification_token(conn, email: str, token: str, expires_at):
     cur = conn.cursor()
     cur.execute(
-        "UPDATE users SET verification_token=%s, verification_token_expires_at=%s, updated_at=now() "
-        "WHERE email=%s",
+        "UPDATE users SET verification_token=%s, verification_token_expires_at=%s, updated_at=now() WHERE email=%s",
         (token, expires_at, email),
     )
 
@@ -881,8 +844,7 @@ def create_invite_code(
 ) -> dict:
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO invite_codes (code, created_by, max_uses, note, expires_at) "
-        "VALUES (%s,%s,%s,%s,%s) RETURNING *",
+        "INSERT INTO invite_codes (code, created_by, max_uses, note, expires_at) VALUES (%s,%s,%s,%s,%s) RETURNING *",
         (code, created_by, max_uses, note, expires_at),
     )
     cols = [desc[0] for desc in cur.description]

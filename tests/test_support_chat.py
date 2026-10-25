@@ -53,9 +53,7 @@ RAW_KEY = "tenant-a-key"
 
 def _tenant(tenant_id: str) -> TenantContext:
     """Tenant context exactly as the HTTP boundary derives it from a principal."""
-    return TenantContext.from_principal(
-        {"tenant_id": tenant_id, "name": tenant_id, "plan": "free"}
-    )
+    return TenantContext.from_principal({"tenant_id": tenant_id, "name": tenant_id, "plan": "free"})
 
 
 class _ForbiddenService:
@@ -112,11 +110,8 @@ def tenant_b() -> TenantContext:
 
 
 class TestTicketCreation:
-
     @pytest.mark.asyncio
-    async def test_01_create_basic_ticket(
-        self, service: SupportTicketService, tenant_a: TenantContext
-    ) -> None:
+    async def test_01_create_basic_ticket(self, service: SupportTicketService, tenant_a: TenantContext) -> None:
         """Smoke 1: Create basic support ticket."""
         req = CreateTicketRequest(
             subject="Payment issue",
@@ -194,11 +189,8 @@ class TestTicketCreation:
 
 
 class TestMessages:
-
     @pytest.mark.asyncio
-    async def test_05_add_message(
-        self, service: SupportTicketService, tenant_a: TenantContext
-    ) -> None:
+    async def test_05_add_message(self, service: SupportTicketService, tenant_a: TenantContext) -> None:
         """Smoke 5: Add message to ticket."""
         req = CreateTicketRequest(subject="Test")
         ticket = await service.create_ticket(req, tenant_a)
@@ -219,92 +211,60 @@ class TestMessages:
         req = CreateTicketRequest(subject="Test")
         ticket = await service.create_ticket(req, tenant_a)
 
-        await service.assign_agent(
-            str(ticket.ticket_id), AssignTicketRequest(agent_id="agent1"), tenant_a
-        )
-        await chat_service.add_internal_note(
-            ticket.ticket_id, "agent1", "Customer might be fraud"
-        )
+        await service.assign_agent(str(ticket.ticket_id), AssignTicketRequest(agent_id="agent1"), tenant_a)
+        await chat_service.add_internal_note(ticket.ticket_id, "agent1", "Customer might be fraud")
 
-        visible_msgs = chat_service.get_visible_messages(
-            str(ticket.ticket_id), ParticipantRole.TENANT_USER.value
-        )
+        visible_msgs = chat_service.get_visible_messages(str(ticket.ticket_id), ParticipantRole.TENANT_USER.value)
         assert not any(m.is_internal for m in visible_msgs)
 
-        agent_msgs = chat_service.get_visible_messages(
-            str(ticket.ticket_id), ParticipantRole.SUPPORT_AGENT.value
-        )
+        agent_msgs = chat_service.get_visible_messages(str(ticket.ticket_id), ParticipantRole.SUPPORT_AGENT.value)
         assert any(m.is_internal for m in agent_msgs)
 
 
 class TestStatusTransitions:
-
     @pytest.mark.asyncio
-    async def test_07_valid_transition(
-        self, service: SupportTicketService, tenant_a: TenantContext
-    ) -> None:
+    async def test_07_valid_transition(self, service: SupportTicketService, tenant_a: TenantContext) -> None:
         """Smoke 7: Valid status transition open → in_progress."""
         req = CreateTicketRequest(subject="Test")
         ticket = await service.create_ticket(req, tenant_a)
-        updated = await service.transition_status(
-            str(ticket.ticket_id), TicketStatus.IN_PROGRESS, tenant_a
-        )
+        updated = await service.transition_status(str(ticket.ticket_id), TicketStatus.IN_PROGRESS, tenant_a)
         assert updated.status == TicketStatus.IN_PROGRESS
 
     @pytest.mark.asyncio
-    async def test_08_invalid_transition_blocked(
-        self, service: SupportTicketService, tenant_a: TenantContext
-    ) -> None:
+    async def test_08_invalid_transition_blocked(self, service: SupportTicketService, tenant_a: TenantContext) -> None:
         """Smoke 8: Invalid transition open → resolved blocked."""
         req = CreateTicketRequest(subject="Test")
         ticket = await service.create_ticket(req, tenant_a)
         with pytest.raises(ValueError, match="Cannot transition from open"):
-            await service.transition_status(
-                str(ticket.ticket_id), TicketStatus.RESOLVED, tenant_a
-            )
+            await service.transition_status(str(ticket.ticket_id), TicketStatus.RESOLVED, tenant_a)
 
 
 class TestAgentAssignment:
-
     @pytest.mark.asyncio
-    async def test_09_assign_agent(
-        self, service: SupportTicketService, tenant_a: TenantContext
-    ) -> None:
+    async def test_09_assign_agent(self, service: SupportTicketService, tenant_a: TenantContext) -> None:
         """Smoke 9: Assign agent to ticket."""
         req = CreateTicketRequest(subject="Test")
         ticket = await service.create_ticket(req, tenant_a)
-        updated = await service.assign_agent(
-            str(ticket.ticket_id), AssignTicketRequest(agent_id="agent42"), tenant_a
-        )
+        updated = await service.assign_agent(str(ticket.ticket_id), AssignTicketRequest(agent_id="agent42"), tenant_a)
         assert updated.assigned_agent_id == "agent42"
         assert updated.status == TicketStatus.IN_PROGRESS
 
 
 class TestCSAT:
-
     @pytest.mark.asyncio
-    async def test_10_submit_csat(
-        self, service: SupportTicketService, tenant_a: TenantContext
-    ) -> None:
+    async def test_10_submit_csat(self, service: SupportTicketService, tenant_a: TenantContext) -> None:
         """Smoke 10: Submit CSAT rating after resolution."""
         req = CreateTicketRequest(subject="Test")
         ticket = await service.create_ticket(req, tenant_a)
-        await service.transition_status(
-            str(ticket.ticket_id), TicketStatus.IN_PROGRESS, tenant_a
-        )
-        await service.transition_status(
-            str(ticket.ticket_id), TicketStatus.RESOLVED, tenant_a
-        )
+        await service.transition_status(str(ticket.ticket_id), TicketStatus.IN_PROGRESS, tenant_a)
+        await service.transition_status(str(ticket.ticket_id), TicketStatus.RESOLVED, tenant_a)
 
-        csat = await service.submit_csat(
-            str(ticket.ticket_id), CsatSubmitRequest(score=5, comment="Great!"), tenant_a
-        )
+        csat = await service.submit_csat(str(ticket.ticket_id), CsatSubmitRequest(score=5, comment="Great!"), tenant_a)
         assert csat.score == 5
         assert csat.comment == "Great!"
 
 
 class TestModels:
-
     def test_11_ticket_status_enum_values(self) -> None:
         """TicketStatus enum has all 5 values."""
         assert len(TicketStatus) == 5
@@ -322,7 +282,6 @@ class TestModels:
 
 
 class TestPersistence:
-
     @pytest.mark.asyncio
     async def test_13_restart_persistence(self, tmp_path, tenant_a) -> None:
         """P-1 БЛОКЕР-4: ticket survives a service restart (new engine, same DB)."""
@@ -372,9 +331,7 @@ class TestPersistence:
         tid = str(ticket.ticket_id)
 
         # 1) successful transition → exactly one winner
-        updated = await service.transition_status(
-            tid, TicketStatus.IN_PROGRESS, tenant_a
-        )
+        updated = await service.transition_status(tid, TicketStatus.IN_PROGRESS, tenant_a)
         assert updated.status == TicketStatus.IN_PROGRESS
 
         # 2) concurrent winner moves in_progress → waiting_customer
@@ -402,9 +359,7 @@ class TestPersistence:
             session.commit()
             assert result.rowcount == 0
 
-        assert (await service.get_ticket(tid, tenant_a)).status == (
-            TicketStatus.WAITING_CUSTOMER
-        )
+        assert (await service.get_ticket(tid, tenant_a)).status == (TicketStatus.WAITING_CUSTOMER)
 
     @pytest.mark.asyncio
     async def test_16_utc_roundtrip(self, service, tenant_a) -> None:
@@ -451,9 +406,7 @@ class TestRuntimeBlockers:
     """BLOCKER-1 (sync I/O on the loop) and BLOCKER-2 (silent SQLite fallback)."""
 
     @pytest.mark.asyncio
-    async def test_17_db_io_runs_off_the_event_loop_thread(
-        self, chat_service, tenant_a
-    ) -> None:
+    async def test_17_db_io_runs_off_the_event_loop_thread(self, chat_service, tenant_a) -> None:
         """Sync SQLAlchemy work must happen in a worker, never on the loop thread."""
         loop_thread = threading.get_ident()
         sf = _RecordingFactory(get_session_factory("sqlite:///:memory:"))
@@ -465,9 +418,7 @@ class TestRuntimeBlockers:
         assert all(tid != loop_thread for tid in sf.thread_ids), sf.thread_ids
 
     @pytest.mark.asyncio
-    async def test_18_loop_stays_responsive_while_db_call_is_parked(
-        self, chat_service, tenant_a
-    ) -> None:
+    async def test_18_loop_stays_responsive_while_db_call_is_parked(self, chat_service, tenant_a) -> None:
         """Deterministic responsiveness proof (no wall-clock-only assertion)."""
         entered = threading.Event()
         release = threading.Event()
@@ -476,9 +427,7 @@ class TestRuntimeBlockers:
             entered.set()
             release.wait(5)
 
-        sf = _RecordingFactory(
-            get_session_factory("sqlite:///:memory:"), on_call=_park
-        )
+        sf = _RecordingFactory(get_session_factory("sqlite:///:memory:"), on_call=_park)
         service = SupportTicketService(chat_service=chat_service, session_factory=sf)
         req = CreateTicketRequest(subject="parked")
 
@@ -503,17 +452,13 @@ class TestRuntimeBlockers:
         assert created.ticket_id is not None
 
     @pytest.mark.asyncio
-    async def test_19_every_async_mutation_is_offloaded(
-        self, chat_service, tenant_a
-    ) -> None:
+    async def test_19_every_async_mutation_is_offloaded(self, chat_service, tenant_a) -> None:
         """create / add_message / assign_agent / transition_status all offload."""
         loop_thread = threading.get_ident()
         sf = _RecordingFactory(get_session_factory("sqlite:///:memory:"))
         service = SupportTicketService(chat_service=chat_service, session_factory=sf)
 
-        ticket = await service.create_ticket(
-            CreateTicketRequest(subject="mutations"), tenant_a
-        )
+        ticket = await service.create_ticket(CreateTicketRequest(subject="mutations"), tenant_a)
         tid = str(ticket.ticket_id)
 
         sf.thread_ids.clear()
@@ -533,9 +478,7 @@ class TestRuntimeBlockers:
         assert sf.thread_ids and all(t != loop_thread for t in sf.thread_ids), "transition"
 
     @pytest.mark.asyncio
-    async def test_20_session_is_opened_and_closed_inside_worker(
-        self, chat_service, tenant_a
-    ) -> None:
+    async def test_20_session_is_opened_and_closed_inside_worker(self, chat_service, tenant_a) -> None:
         """Every Session is created and closed in the worker thread."""
         loop_thread = threading.get_ident()
         sf = _RecordingFactory(get_session_factory("sqlite:///:memory:"))
@@ -551,9 +494,7 @@ class TestRuntimeBlockers:
         """A failure raised inside the worker must reach the caller."""
         orphan = str(uuid4())
         with pytest.raises(ValueError, match="not found"):
-            await service.add_message(
-                orphan, CreateMessageRequest(body="orphan"), tenant_a
-            )
+            await service.add_message(orphan, CreateMessageRequest(body="orphan"), tenant_a)
 
     @pytest.mark.asyncio
     async def test_22_production_without_pg_or_injection_fails_closed(
@@ -590,14 +531,10 @@ class TestRuntimeBlockers:
         sf = get_session_factory(f"sqlite:///{tmp_path}/explicit.db")
         service = SupportTicketService(chat_service=chat_service, session_factory=sf)
 
-        created = await service.create_ticket(
-            CreateTicketRequest(subject="explicit"), tenant_a
-        )
+        created = await service.create_ticket(CreateTicketRequest(subject="explicit"), tenant_a)
         assert await service.get_ticket(str(created.ticket_id), tenant_a) is not None
 
-    def test_24_construction_without_pg_never_touches_the_db(
-        self, monkeypatch
-    ) -> None:
+    def test_24_construction_without_pg_never_touches_the_db(self, monkeypatch) -> None:
         """No DB resolution, no connection and no file until the first DB call."""
         monkeypatch.delenv("PG_DSN", raising=False)
         monkeypatch.setenv("ENV", "production")
@@ -611,9 +548,7 @@ class TestRuntimeBlockers:
         assert db_file.exists() is existed_before
 
     @pytest.mark.asyncio
-    async def test_25_concurrent_schema_init_runs_once(
-        self, chat_service, tmp_path, monkeypatch
-    ) -> None:
+    async def test_25_concurrent_schema_init_runs_once(self, chat_service, tmp_path, monkeypatch) -> None:
         """Lock + double check: concurrent workers initialise SQLite DDL once."""
         from support_chat.db_models import Base
 
@@ -656,9 +591,7 @@ class TestAssignStatusRace:
             messages_before = len(chat_service.get_messages(tid))
 
             with pytest.raises(TicketStatusConflictError):
-                await service.assign_agent(
-                    tid, AssignTicketRequest(agent_id="a1"), tenant_a
-                )
+                await service.assign_agent(tid, AssignTicketRequest(agent_id="a1"), tenant_a)
 
             stored = await service.get_ticket(tid, tenant_a)
             assert stored is not None
@@ -668,8 +601,7 @@ class TestAssignStatusRace:
             # assignment must not add a support-agent participant or a system note.
             assert len(service._participants.get(tid, [])) == participants_before
             assert all(
-                participant.role != ParticipantRole.SUPPORT_AGENT
-                for participant in service._participants.get(tid, [])
+                participant.role != ParticipantRole.SUPPORT_AGENT for participant in service._participants.get(tid, [])
             )
             assert len(chat_service.get_messages(tid)) == messages_before
 
@@ -681,15 +613,11 @@ class TestAssignStatusRace:
         tid = str(ticket.ticket_id)
         await service.transition_status(tid, TicketStatus.IN_PROGRESS, tenant_a)
 
-        first = await service.assign_agent(
-            tid, AssignTicketRequest(agent_id="a1"), tenant_a
-        )
+        first = await service.assign_agent(tid, AssignTicketRequest(agent_id="a1"), tenant_a)
         assert first.assigned_agent_id == "a1"
         assert first.status == TicketStatus.IN_PROGRESS
 
-        second = await service.assign_agent(
-            tid, AssignTicketRequest(agent_id="a2"), tenant_a
-        )
+        second = await service.assign_agent(tid, AssignTicketRequest(agent_id="a2"), tenant_a)
         assert second.assigned_agent_id == "a2"
         assert second.status == TicketStatus.IN_PROGRESS
 
@@ -749,9 +677,7 @@ class TestAssignStatusRace:
                 )
                 session.commit()
 
-        task = asyncio.create_task(
-            service.assign_agent(tid, AssignTicketRequest(agent_id="a2"), tenant_a)
-        )
+        task = asyncio.create_task(service.assign_agent(tid, AssignTicketRequest(agent_id="a2"), tenant_a))
         try:
             assert await asyncio.to_thread(read_seen.wait, 10), "assignment never read the row"
             await asyncio.to_thread(_winner_transition)
@@ -774,9 +700,7 @@ class TestAssignStatusRace:
         """A missing ticket is a typed not-found, distinct from a status conflict."""
         missing = str(uuid4())
         with pytest.raises(TicketNotFoundError) as excinfo:
-            await service.assign_agent(
-                missing, AssignTicketRequest(agent_id="a1"), tenant_a
-            )
+            await service.assign_agent(missing, AssignTicketRequest(agent_id="a1"), tenant_a)
         assert not isinstance(excinfo.value, TicketStatusConflictError)
         assert missing in str(excinfo.value)
 
@@ -788,9 +712,7 @@ class TestTenantAuthBoundary:
         self,
     ) -> None:
         """The sanitised context keeps the tenant and drops the credential."""
-        ctx = TenantContext.from_principal(
-            {"tenant_id": "  t1  ", "name": "T", "plan": "pro", "api_key": RAW_KEY}
-        )
+        ctx = TenantContext.from_principal({"tenant_id": "  t1  ", "name": "T", "plan": "pro", "api_key": RAW_KEY})
         assert ctx.tenant_id == "t1"
         assert ctx.actor_id == "tenant:t1"
         assert RAW_KEY not in ctx.actor_id
@@ -822,9 +744,7 @@ class TestTenantAuthBoundary:
                 found.extend(_calls(sub))
             return found
 
-        http_routes = [
-            r for r in support_router.router.routes if isinstance(r, APIRoute)
-        ]
+        http_routes = [r for r in support_router.router.routes if isinstance(r, APIRoute)]
         assert http_routes, "no HTTP routes found on the support router"
 
         auth_paths = {
@@ -856,26 +776,20 @@ class TestTenantAuthBoundary:
             assert any(call in calls for call in canonical), route.path
         assert seen_auth == auth_paths, sorted(auth_paths - seen_auth)
 
-    def test_32_missing_api_key_is_rejected_before_any_service_call(
-        self, monkeypatch
-    ) -> None:
+    def test_32_missing_api_key_is_rejected_before_any_service_call(self, monkeypatch) -> None:
         """Canonical missing-key behaviour: 401 and no service work."""
         client = _http_client(monkeypatch, _ForbiddenService())
         resp = client.get("/v1/support/tickets")
         assert resp.status_code == 401
         assert "X-API-Key" in resp.json()["detail"]
 
-    def test_33_invalid_api_key_is_rejected_before_any_service_call(
-        self, monkeypatch
-    ) -> None:
+    def test_33_invalid_api_key_is_rejected_before_any_service_call(self, monkeypatch) -> None:
         """Canonical invalid-key behaviour: 401 and no service work."""
         import db_adapter
 
         monkeypatch.setattr(db_adapter, "find_tenant_by_key", lambda key: None)
         client = _http_client(monkeypatch, _ForbiddenService())
-        resp = client.get(
-            "/v1/support/tickets", headers={"X-API-Key": "not-a-real-key"}
-        )
+        resp = client.get("/v1/support/tickets", headers={"X-API-Key": "not-a-real-key"})
         assert resp.status_code == 401
         assert resp.json()["detail"] == "Invalid API key"
 
@@ -887,9 +801,7 @@ class TestTenantAuthBoundary:
         service = SupportTicketService(chat_service=chat_service, session_factory=factory)
         client = _http_client(monkeypatch, service, principal=_principal("t1"))
 
-        spoof = client.post(
-            "/v1/support/tickets", json={"tenant_id": "t2", "subject": "spoof"}
-        )
+        spoof = client.post("/v1/support/tickets", json={"tenant_id": "t2", "subject": "spoof"})
         assert spoof.status_code == 422
 
         created = client.post(
@@ -906,9 +818,7 @@ class TestTenantAuthBoundary:
         assert RAW_KEY not in created.text
 
         tid = created.json()["ticket_id"]
-        fetched = client.get(
-            f"/v1/support/tickets/{tid}", headers={"x-user-role": "super_admin"}
-        )
+        fetched = client.get(f"/v1/support/tickets/{tid}", headers={"x-user-role": "super_admin"})
         assert fetched.status_code == 200
         assert fetched.json()["ticket"]["tenant_id"] == "t1"
         assert all(not m["is_internal"] for m in fetched.json()["messages"])
@@ -932,14 +842,10 @@ class TestTenantAuthBoundary:
         assert listing.status_code == 200
         assert listing.json()["total"] == 0
 
-        message = client.post(
-            f"/v1/support/tickets/{foreign.ticket_id}/messages", json={"body": "cross"}
-        )
+        message = client.post(f"/v1/support/tickets/{foreign.ticket_id}/messages", json={"body": "cross"})
         assert message.status_code == 404
 
-        csat = client.post(
-            f"/v1/support/tickets/{foreign.ticket_id}/csat", json={"score": 5}
-        )
+        csat = client.post(f"/v1/support/tickets/{foreign.ticket_id}/csat", json={"score": 5})
         assert csat.status_code == 404
 
     @pytest.mark.asyncio
@@ -965,30 +871,19 @@ class TestTenantAuthBoundary:
         def _tenant_key_or_none(request: Request):
             return _principal("t1") if request.headers.get("x-api-key") else None
 
-        client.app.dependency_overrides[
-            support_router._optional_tenant_principal
-        ] = _tenant_key_or_none
+        client.app.dependency_overrides[support_router._optional_tenant_principal] = _tenant_key_or_none
 
         # No credential at all: still a 401 before any service call.
-        assert (
-            client.post(f"/v1/support/tickets/{tid}/assign", json={}).status_code
-            == 401
-        )
+        assert client.post(f"/v1/support/tickets/{tid}/assign", json={}).status_code == 401
 
-        assign = client.post(
-            f"/v1/support/tickets/{tid}/assign", json={}, headers=tenant_key
-        )
+        assign = client.post(f"/v1/support/tickets/{tid}/assign", json={}, headers=tenant_key)
         assert assign.status_code == 403
 
-        transition = client.post(
-            f"/v1/support/tickets/{tid}/transition?status=closed", headers=tenant_key
-        )
+        transition = client.post(f"/v1/support/tickets/{tid}/transition?status=closed", headers=tenant_key)
         assert transition.status_code == 403
 
         # An unknown ticket answers identically: no existence/status disclosure.
-        unknown = client.post(
-            f"/v1/support/tickets/{uuid4()}/assign", json={}, headers=tenant_key
-        )
+        unknown = client.post(f"/v1/support/tickets/{uuid4()}/assign", json={}, headers=tenant_key)
         assert unknown.status_code == 403
 
         stored = await service.get_ticket(tid, tenant_a)
@@ -1004,9 +899,7 @@ class TestTenantAuthBoundary:
         """Author/role come from the principal; sender/role/visibility fields are 422."""
         factory = get_session_factory(f"sqlite:///{tmp_path}/h1-msg.db")
         service = SupportTicketService(chat_service=chat_service, session_factory=factory)
-        ticket = await service.create_ticket(
-            CreateTicketRequest(subject="msg", body="first"), tenant_a
-        )
+        ticket = await service.create_ticket(CreateTicketRequest(subject="msg", body="first"), tenant_a)
         tid = str(ticket.ticket_id)
 
         client = _http_client(monkeypatch, service, principal=_principal("t1"))
@@ -1062,13 +955,9 @@ class TestTenantAuthBoundary:
         self, service, chat_service, tenant_a, tenant_b
     ) -> None:
         """Every read/mutation is constrained by ticket_id AND tenant_id."""
-        b_ticket = await service.create_ticket(
-            CreateTicketRequest(subject="B ticket", body="b"), tenant_b
-        )
+        b_ticket = await service.create_ticket(CreateTicketRequest(subject="B ticket", body="b"), tenant_b)
         b_tid = str(b_ticket.ticket_id)
-        a_ticket = await service.create_ticket(
-            CreateTicketRequest(subject="A ticket"), tenant_a
-        )
+        a_ticket = await service.create_ticket(CreateTicketRequest(subject="A ticket"), tenant_a)
         a_tid = str(a_ticket.ticket_id)
 
         # reads
@@ -1081,16 +970,12 @@ class TestTenantAuthBoundary:
         # message: foreign ticket is not found and nothing is stored
         messages_before = len(chat_service.get_messages(b_tid))
         with pytest.raises(ValueError, match="not found"):
-            await service.add_message(
-                b_tid, CreateMessageRequest(body="cross"), tenant_a
-            )
+            await service.add_message(b_tid, CreateMessageRequest(body="cross"), tenant_a)
         assert len(chat_service.get_messages(b_tid)) == messages_before
 
         # assign: typed not-found, row untouched
         with pytest.raises(TicketNotFoundError):
-            await service.assign_agent(
-                b_tid, AssignTicketRequest(agent_id="a1"), tenant_a
-            )
+            await service.assign_agent(b_tid, AssignTicketRequest(agent_id="a1"), tenant_a)
         foreign = await service.get_ticket(b_tid, tenant_b)
         assert foreign is not None
         assert foreign.status == TicketStatus.OPEN
@@ -1109,20 +994,14 @@ class TestTenantAuthBoundary:
         # same-tenant CSAT still succeeds and is attributed to the tenant actor
         await service.transition_status(a_tid, TicketStatus.IN_PROGRESS, tenant_a)
         await service.transition_status(a_tid, TicketStatus.RESOLVED, tenant_a)
-        rating = await service.submit_csat(
-            a_tid, CsatSubmitRequest(score=4, comment="ok"), tenant_a
-        )
+        rating = await service.submit_csat(a_tid, CsatSubmitRequest(score=4, comment="ok"), tenant_a)
         assert rating.tenant_id == "t1"
         assert rating.rated_by == "tenant:t1"
 
     @pytest.mark.asyncio
-    async def test_40_internal_notes_are_never_visible_to_a_tenant_key(
-        self, service, chat_service, tenant_a
-    ) -> None:
+    async def test_40_internal_notes_are_never_visible_to_a_tenant_key(self, service, chat_service, tenant_a) -> None:
         """A tenant key sees only the customer-visible thread and cannot forge notes."""
-        ticket = await service.create_ticket(
-            CreateTicketRequest(subject="notes", body="hello"), tenant_a
-        )
+        ticket = await service.create_ticket(CreateTicketRequest(subject="notes", body="hello"), tenant_a)
         tid = str(ticket.ticket_id)
         await service.assign_agent(tid, AssignTicketRequest(agent_id="agent1"), tenant_a)
         await chat_service.add_internal_note(ticket.ticket_id, "agent1", "internal only")

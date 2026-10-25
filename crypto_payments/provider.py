@@ -63,9 +63,7 @@ class NOWPaymentsProvider(CryptoPaymentProvider):
         resp = await self._http.post("/invoice", json=payload)
         resp.raise_for_status()
         data = resp.json()
-        logger.info(
-            "nowpayments_invoice_created", order_id=order_id, invoice_id=data.get("id")
-        )
+        logger.info("nowpayments_invoice_created", order_id=order_id, invoice_id=data.get("id"))
         return {
             "provider_invoice_id": str(data["id"]),
             "pay_address": data["pay_address"],

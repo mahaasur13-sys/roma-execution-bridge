@@ -53,9 +53,7 @@ class PluginInstance:
 
 
 class PluginRuntime:
-    def __init__(
-        self, plugin_dir: str = "/home/workspace/roma-execution-bridge/plugins"
-    ):
+    def __init__(self, plugin_dir: str = "/home/workspace/roma-execution-bridge/plugins"):
         self.plugin_dir = Path(plugin_dir)
         self._loaded: Dict[str, PluginInstance] = {}
         self._hooks: Dict[str, List] = {
@@ -71,9 +69,7 @@ class PluginRuntime:
             raise ValueError(f"Unknown hook: {hook_name}")
         self._hooks[hook_name].append(callback)
 
-    def load_from_class(
-        self, plugin_class: Type, plugin_name: str, version: str = "1.0.0"
-    ) -> PluginInstance:
+    def load_from_class(self, plugin_class: Type, plugin_name: str, version: str = "1.0.0") -> PluginInstance:
         spec = PluginSpec(
             name=plugin_name,
             version=PluginVersion(*map(int, version.split("."))),
@@ -85,9 +81,7 @@ class PluginRuntime:
             checksum="builtin",
         )
         instance_obj = plugin_class()
-        plugin_inst = PluginInstance(
-            spec=spec, plugin_class=plugin_class, instance=instance_obj
-        )
+        plugin_inst = PluginInstance(spec=spec, plugin_class=plugin_class, instance=instance_obj)
         self._loaded[plugin_name] = plugin_inst
         for cb in self._hooks["on_load"]:
             cb(plugin_inst)
@@ -137,9 +131,7 @@ def main():
 
     print("\nLoaded plugins:")
     for p in runtime.list_loaded():
-        print(
-            f"  {p['name']} v{p['version']} | phase={p['phase']} | executions={p['executions']}"
-        )
+        print(f"  {p['name']} v{p['version']} | phase={p['phase']} | executions={p['executions']}")
 
     class DemoTask:
         task_id = "task-001"

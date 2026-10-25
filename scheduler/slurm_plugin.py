@@ -57,9 +57,7 @@ class SlurmPlugin:
             self._ssh_client.connect(self.head_node, **connect_kwargs)
             logger.info("Slurm SSH connected to %s", self.head_node)
         except Exception as e:
-            logger.error(
-                "Failed to connect to Slurm head node %s: %s", self.head_node, e
-            )
+            logger.error("Failed to connect to Slurm head node %s: %s", self.head_node, e)
             raise RuntimeError(f"Slurm SSH unavailable: {e}")
 
     def _ssh_exec(self, cmd: str, timeout: int = 30) -> tuple[int, str, str]:
@@ -69,9 +67,7 @@ class SlurmPlugin:
         exit_code = stdout.channel.recv_exit_status()
         return exit_code, stdout.read().decode().strip(), stderr.read().decode().strip()
 
-    def _rest_call(
-        self, endpoint: str, method: str = "GET", data: dict | None = None
-    ) -> dict:
+    def _rest_call(self, endpoint: str, method: str = "GET", data: dict | None = None) -> dict:
         """Call Slurm REST API if configured."""
         import requests as _r
 
@@ -116,20 +112,13 @@ class SlurmPlugin:
         try:
             script = self._generate_sbatch_script(job)
             # Write script to temp file, scp to cluster, and sbatch
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".sh", delete=False, prefix="roma-"
-            ) as f:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False, prefix="roma-") as f:
                 f.write(script)
                 f.flush()
                 script_path = f.name
 
             sftp = self._ssh_client.open_sftp()
-            safe_job_id = (
-                re.sub(
-                    r"[^A-Za-z0-9._-]", "_", str(job.get("job_id", "tmp"))[:8]
-                ).lstrip("._-")
-                or "job"
-            )
+            safe_job_id = re.sub(r"[^A-Za-z0-9._-]", "_", str(job.get("job_id", "tmp"))[:8]).lstrip("._-") or "job"
             remote_path = f"/tmp/roma-{safe_job_id}.sh"
             sftp.put(script_path, remote_path)
             sftp.close()
@@ -175,9 +164,7 @@ class SlurmPlugin:
 
         try:
             # Try squeue first (running/pending), then sacct (completed)
-            _, stdout, _ = self._ssh_exec(
-                f"squeue -j {slurm_job_id} -o '%T' --noheader", timeout=10
-            )
+            _, stdout, _ = self._ssh_exec(f"squeue -j {slurm_job_id} -o '%T' --noheader", timeout=10)
             if stdout:
                 return {
                     "slurm_job_id": slurm_job_id,
@@ -185,9 +172,7 @@ class SlurmPlugin:
                     "source": "squeue",
                 }
 
-            _, stdout, _ = self._ssh_exec(
-                f"sacct -j {slurm_job_id} -o 'State' --noheader -P", timeout=10
-            )
+            _, stdout, _ = self._ssh_exec(f"sacct -j {slurm_job_id} -o 'State' --noheader -P", timeout=10)
             if stdout:
                 status = stdout.strip().split("\n")[0].lower()
                 return {
@@ -222,9 +207,7 @@ class SlurmPlugin:
             }
 
         try:
-            exit_code, stdout, stderr = self._ssh_exec(
-                f"scancel {slurm_job_id}", timeout=10
-            )
+            exit_code, stdout, stderr = self._ssh_exec(f"scancel {slurm_job_id}", timeout=10)
             if exit_code == 0:
                 logger.info("Slurm job cancelled: %s", slurm_job_id)
                 return {

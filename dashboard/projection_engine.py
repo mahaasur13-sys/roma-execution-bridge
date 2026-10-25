@@ -109,15 +109,11 @@ class ProjectionEngine:
         if not j:
             return None
         d = asdict(j)
-        d["events"] = [
-            e for e in self.events if e.get("payload", {}).get("job_id") == job_id
-        ]
+        d["events"] = [e for e in self.events if e.get("payload", {}).get("job_id") == job_id]
         return d
 
     def project_execution_timeline(self, tenant_id: str = None) -> List[Dict]:
-        jobs = [
-            j for j in self.jobs.values() if not tenant_id or j.tenant_id == tenant_id
-        ]
+        jobs = [j for j in self.jobs.values() if not tenant_id or j.tenant_id == tenant_id]
         return [
             {
                 "job_id": j.job_id,
@@ -205,24 +201,16 @@ if __name__ == "__main__":
 
     print("=== Job Timeline ===")
     for j in pe.project_execution_timeline():
-        print(
-            f"  {j['job_id']} | {j['status']:10} | gpu={j['gpu']} | cost=${j['cost']}"
-        )
+        print(f"  {j['job_id']} | {j['status']:10} | gpu={j['gpu']} | cost=${j['cost']}")
 
     print("\n=== GPU Heatmap ===")
     for node, s in pe.project_gpu_heatmap().items():
-        bar = "█" * int(s["utilization_pct"] / 10) + "░" * (
-            10 - int(s["utilization_pct"] / 10)
-        )
-        print(
-            f"  {node}: [{bar}] {s['utilization_pct']}% VRAM {s['vram_used_gb']}/{s['vram_total_gb']}GB"
-        )
+        bar = "█" * int(s["utilization_pct"] / 10) + "░" * (10 - int(s["utilization_pct"] / 10))
+        print(f"  {node}: [{bar}] {s['utilization_pct']}% VRAM {s['vram_used_gb']}/{s['vram_total_gb']}GB")
 
     print("\n=== Raft Cluster ===")
     rs = pe.project_raft_cluster()
-    print(
-        f"  Leader: {rs.get('leader')} | Term: {rs.get('term')} | CommitIndex: {rs.get('commit_index')}"
-    )
+    print(f"  Leader: {rs.get('leader')} | Term: {rs.get('term')} | CommitIndex: {rs.get('commit_index')}")
 
     print("\n=== Job Forensic (job-001) ===")
     jp = pe.project_job("job-001")

@@ -80,9 +80,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 request.state.auth_type = "jwt"
                 payload = self._decode_jwt(jwt_token)
                 if not payload:
-                    return JSONResponse(
-                        {"detail": "Invalid or expired JWT"}, status_code=401
-                    )
+                    return JSONResponse({"detail": "Invalid or expired JWT"}, status_code=401)
                 request.state.jwt_payload = payload
 
             response = await call_next(request)

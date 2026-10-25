@@ -40,6 +40,7 @@ def test_iter_records_empty_when_missing(tmp_path, monkeypatch):
     monkeypatch.setenv("JEV_SHADOW_LOG", str(tmp_path / "nope.jsonl"))
     assert list(iter_records()) == []
 
+
 def _journal_lines(live: Path) -> list[str]:
     """Живой файл + бэкапы ``.1..N`` — все непустые строки журнала."""
     files = [live, *sorted(live.parent.glob(live.name + ".*"))]

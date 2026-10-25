@@ -88,9 +88,7 @@ def test_instance_creation():
 def test_manager_lifecycle():
     mgr = PluginManager()
     m = _m("test-lifecycle")
-    mgr._registry["test-lifecycle"] = PluginInstance(
-        manifest=m, state=PluginState.LOADED
-    )
+    mgr._registry["test-lifecycle"] = PluginInstance(manifest=m, state=PluginState.LOADED)
     assert mgr.get("test-lifecycle").state == PluginState.LOADED
 
 
@@ -113,9 +111,7 @@ def test_sandbox_violation():
 
 # ── 8: ThoughtStep ──
 def test_thought_step():
-    s = ThoughtStep(
-        agent="PE", thought="Checking policy for tenant", data={"r": 1}, confidence=0.9
-    )
+    s = ThoughtStep(agent="PE", thought="Checking policy for tenant", data={"r": 1}, confidence=0.9)
     assert s.agent == "PE"
     assert s.confidence == 0.9
     assert "Checking policy" in s.thought
@@ -150,30 +146,22 @@ def test_manager_trace():
 def test_manager_list_all():
     mgr = PluginManager()
     mgr._registry["a1"] = PluginInstance(manifest=_m("a1"), state=PluginState.LOADED)
-    mgr._registry["a2"] = PluginInstance(
-        manifest=_m("a2", PluginCategory.CRYPTO), state=PluginState.LOADED
-    )
+    mgr._registry["a2"] = PluginInstance(manifest=_m("a2", PluginCategory.CRYPTO), state=PluginState.LOADED)
     assert len(mgr.list_all()) == 2
 
 
 # ── 12: Manager list_by_category ──
 def test_manager_list_by_category():
     mgr = PluginManager()
-    mgr._registry["c1"] = PluginInstance(
-        manifest=_m("c1", PluginCategory.POLICY), state=PluginState.LOADED
-    )
-    mgr._registry["c2"] = PluginInstance(
-        manifest=_m("c2", PluginCategory.CRYPTO), state=PluginState.LOADED
-    )
+    mgr._registry["c1"] = PluginInstance(manifest=_m("c1", PluginCategory.POLICY), state=PluginState.LOADED)
+    mgr._registry["c2"] = PluginInstance(manifest=_m("c2", PluginCategory.CRYPTO), state=PluginState.LOADED)
     assert len(mgr.list_by_category(PluginCategory.POLICY)) == 1
 
 
 # ── 13: Manager exists ──
 def test_manager_exists():
     mgr = PluginManager()
-    mgr._registry["exists-test"] = PluginInstance(
-        manifest=_m("exists-test"), state=PluginState.LOADED
-    )
+    mgr._registry["exists-test"] = PluginInstance(manifest=_m("exists-test"), state=PluginState.LOADED)
     assert mgr.exists("exists-test")
     assert not mgr.exists("nope")
 
@@ -181,9 +169,7 @@ def test_manager_exists():
 # ── 14: Marketplace item ──
 def test_marketplace_item():
     m = _m("market-plugin")
-    item = PluginMarketplaceItem(
-        slug="cool-plugin", manifest=m, downloads=500, rating=4.2
-    )
+    item = PluginMarketplaceItem(slug="cool-plugin", manifest=m, downloads=500, rating=4.2)
     assert item.rating == 4.2
     assert item.slug == "cool-plugin"
     js = item.model_dump_json()

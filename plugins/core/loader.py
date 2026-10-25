@@ -45,9 +45,7 @@ class PluginLoader:
                     manifest = self.load_manifest(str(manifest_file))
                     manifests.append(manifest)
                 except Exception as e:
-                    logger.warning(
-                        "Failed to load manifest from %s: %s", manifest_file, e
-                    )
+                    logger.warning("Failed to load manifest from %s: %s", manifest_file, e)
 
         return manifests
 
@@ -79,22 +77,17 @@ class PluginLoader:
         try:
             module = importlib.import_module(module_path)
         except ImportError as e:
-            raise ImportError(
-                f"Failed to import module '{module_path}' for plugin '{manifest.name}': {e}"
-            ) from e
+            raise ImportError(f"Failed to import module '{module_path}' for plugin '{manifest.name}': {e}") from e
 
         if not hasattr(module, class_name):
             raise AttributeError(
-                f"Module '{module_path}' has no class '{class_name}' "
-                f"required by plugin '{manifest.name}'"
+                f"Module '{module_path}' has no class '{class_name}' required by plugin '{manifest.name}'"
             )
 
         plugin_class = getattr(module, class_name)
         return plugin_class
 
-    def validate_permissions(
-        self, manifest: PluginManifest, allowed_permissions: set[str]
-    ) -> list[str]:
+    def validate_permissions(self, manifest: PluginManifest, allowed_permissions: set[str]) -> list[str]:
         """Check requested permissions against allowed set. Returns denials."""
         requested = set(manifest.permissions)
         denied = requested - allowed_permissions

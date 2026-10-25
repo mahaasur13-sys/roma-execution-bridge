@@ -212,10 +212,7 @@ from slowapi.errors import RateLimitExceeded
 class JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         log_entry = {
-            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[
-                :-3
-            ]
-            + "Z",
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
             "level": record.levelname,
             "logger": record.name,
         }
@@ -279,6 +276,7 @@ def _save_json(filename: str, data: dict) -> None:
 # API KEY AUTH + MULTI-TENANCY
 # ============================================
 
+
 def _init_db_with_retry(
     timeout_s: float | None = None,
     delay_s: float = 2.0,
@@ -309,9 +307,7 @@ def _init_db_with_retry(
             return
         except Exception as exc:
             if time.monotonic() >= deadline:
-                logger.error(
-                    "db init failed after %d attempt(s): %s", attempt, type(exc).__name__
-                )
+                logger.error("db init failed after %d attempt(s): %s", attempt, type(exc).__name__)
                 raise
             logger.warning(
                 "db init attempt %d failed (%s) — retry in %.1fs",
@@ -376,10 +372,7 @@ def _get_gate() -> EnterpriseDecisionGate:
 # CLOUDPAYMENTS BILLING INTEGRATION
 # ============================================
 
-CLOUDPAYMENTS_ENABLED = bool(
-    os.environ.get("CLOUDPAYMENTS_PUBLIC_ID")
-    and os.environ.get("CLOUDPAYMENTS_API_SECRET")
-)
+CLOUDPAYMENTS_ENABLED = bool(os.environ.get("CLOUDPAYMENTS_PUBLIC_ID") and os.environ.get("CLOUDPAYMENTS_API_SECRET"))
 WORKER_WS_ENABLED = os.environ.get("WORKER_WS_ENABLED", "false").lower() == "true"
 
 CLOUDPAYMENTS_PLANS = {
@@ -563,13 +556,9 @@ async def _reconciliation_loop():
                     cost_sum = ledger.get_tenant_usage_cost(tenant_id)
                     count = ledger.get_tenant_entry_count(tenant_id)
                     diff = abs(debit_sum - cost_sum)
-                    roma_ledger_computed_balance.labels(tenant_id=tenant_id).set(
-                        debit_sum
-                    )
+                    roma_ledger_computed_balance.labels(tenant_id=tenant_id).set(debit_sum)
                     roma_api_balance.labels(tenant_id=tenant_id).set(cost_sum)
-                    roma_ledger_reconciliation_diff.labels(tenant_id=tenant_id).set(
-                        diff
-                    )
+                    roma_ledger_reconciliation_diff.labels(tenant_id=tenant_id).set(diff)
                     roma_ledger_entry_count.labels(tenant_id=tenant_id).set(count)
                 except Exception as e:
                     logger.warning("reconciliation failed tenant=%s: %s", tenant_id, e)
@@ -603,8 +592,7 @@ async def lifespan(app):
         pending = [
             getattr(app.state, name)
             for name in ("worker_task", "reconciliation_task")
-            if getattr(app.state, name, None) is not None
-            and not getattr(app.state, name).done()
+            if getattr(app.state, name, None) is not None and not getattr(app.state, name).done()
         ]
         if pending:
             try:
@@ -713,9 +701,7 @@ async def landing_page():
     return FileResponse(STATIC_INDEX, media_type="text/html")
 
 
-roma_jobs_total = Counter(
-    "roma_jobs_total", "Total number of submitted jobs", ["tenant_id"]
-)
+roma_jobs_total = Counter("roma_jobs_total", "Total number of submitted jobs", ["tenant_id"])
 roma_jobs_active = Gauge(
     "roma_jobs_active",
     "Active (non-terminal: queued/running/pending) jobs",
@@ -724,9 +710,7 @@ roma_jobs_active = Gauge(
 roma_queue_depth = Gauge("roma_queue_depth", "Current queue depth", ["tenant_id"])
 queue_depth = 0
 jobs: dict = {}  # in-memory job registry for the demo/dashboard path
-roma_requests_total = Counter(
-    "roma_requests_total", "Total HTTP requests", ["endpoint", "method", "status"]
-)
+roma_requests_total = Counter("roma_requests_total", "Total HTTP requests", ["endpoint", "method", "status"])
 roma_request_duration = Histogram(
     "roma_request_duration_seconds",
     "Request duration in seconds",
@@ -734,20 +718,12 @@ roma_request_duration = Histogram(
 )
 
 # Business metrics (P2-4)
-roma_billing_events = Counter(
-    "roma_billing_events_total", "Billing events", ["event_type", "plan"]
-)
-roma_errors_total = Counter(
-    "roma_errors_total", "Errors by endpoint", ["endpoint", "status_code"]
-)
+roma_billing_events = Counter("roma_billing_events_total", "Billing events", ["event_type", "plan"])
+roma_errors_total = Counter("roma_errors_total", "Errors by endpoint", ["endpoint", "status_code"])
 
 VERIFICATION_METRICS_LOADED = True
-roma_cloudpayments_success = Counter(
-    "roma_cloudpayments_success_total", "CloudPayments successful payments"
-)
-roma_cloudpayments_failure = Counter(
-    "roma_cloudpayments_failure_total", "CloudPayments failed payments"
-)
+roma_cloudpayments_success = Counter("roma_cloudpayments_success_total", "CloudPayments successful payments")
+roma_cloudpayments_failure = Counter("roma_cloudpayments_failure_total", "CloudPayments failed payments")
 
 # Business metrics (P2-4)
 # ============================================
@@ -769,12 +745,8 @@ async def tracking_middleware(request: Request, call_next) -> Response:
     method = request.method
     status = response.status_code
 
-    roma_requests_total.labels(
-        endpoint=endpoint, method=method, status=str(status)
-    ).inc()
-    roma_request_duration.labels(endpoint=endpoint, method=method).observe(
-        duration_ms / 1000
-    )
+    roma_requests_total.labels(endpoint=endpoint, method=method, status=str(status)).inc()
+    roma_request_duration.labels(endpoint=endpoint, method=method).observe(duration_ms / 1000)
 
     global _http_request_count
     _http_request_count += 1
@@ -904,9 +876,7 @@ SYSTEM_PROMPT = """Ты — ROMA AI, дружелюбный и честный п
 Enter — отправить | Shift+Enter — новая строка | Stop — остановить | 🗑 — очистить"""
 
 
-def _tool_schema(
-    name: str, description: str, properties: dict, required: list[str] | None = None
-) -> dict:
+def _tool_schema(name: str, description: str, properties: dict, required: list[str] | None = None) -> dict:
     schema = {"type": "object", "properties": properties}
     if required:
         schema["required"] = required
@@ -939,9 +909,7 @@ ROMA_TOOLS = [
         "Получить задачи текущего tenant.",
         {"limit": {"type": "integer", "minimum": 1, "maximum": 50}},
     ),
-    _tool_schema(
-        "cancel_job", "Отменить задачу.", {"job_id": {"type": "string"}}, ["job_id"]
-    ),
+    _tool_schema("cancel_job", "Отменить задачу.", {"job_id": {"type": "string"}}, ["job_id"]),
     _tool_schema("list_workers", "Получить список воркеров.", {}),
     _tool_schema(
         "drain_worker",
@@ -1014,12 +982,8 @@ async def execute_tool(name: str, arguments: dict, api_key: str | None = None) -
         path = template.format(**arguments)
         payload = arguments if method == "POST" else None
         params = arguments if method == "GET" and "{" not in template else None
-        async with httpx.AsyncClient(
-            base_url=ROMA_INTERNAL_BASE_URL, timeout=45.0
-        ) as http:
-            response = await http.request(
-                method, path, json=payload, params=params, headers=headers
-            )
+        async with httpx.AsyncClient(base_url=ROMA_INTERNAL_BASE_URL, timeout=45.0) as http:
+            response = await http.request(method, path, json=payload, params=params, headers=headers)
         if response.status_code >= 400:
             return json.dumps(
                 {
@@ -1107,9 +1071,7 @@ async def stream_with_tools(
                 )
 
         if stream is None:
-            logger.error(
-                "DeepSeek failed on tool loop %d: %s", iteration + 1, last_error
-            )
+            logger.error("DeepSeek failed on tool loop %d: %s", iteration + 1, last_error)
             yield "\n\n❌ DeepSeek временно недоступен. Попробуйте ещё раз позже."
             return
 
@@ -1157,9 +1119,7 @@ async def stream_with_tools(
                 args = {}
             logger.info("Chat tool call: %s", call["function"]["name"])
             result = await execute_tool(call["function"]["name"], args, api_key)
-            messages.append(
-                {"role": "tool", "tool_call_id": call["id"], "content": result}
-            )
+            messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
 
     yield "\n\nДостигнут лимит последовательных вызовов инструментов."
 
@@ -1176,11 +1136,7 @@ async def chat_stream(
         raise HTTPException(status_code=400, detail="Сообщение пустое")
     api_key = x_api_key
     if not api_key and authorization:
-        api_key = (
-            authorization[7:].strip()
-            if authorization.lower().startswith("bearer ")
-            else authorization.strip()
-        )
+        api_key = authorization[7:].strip() if authorization.lower().startswith("bearer ") else authorization.strip()
     logger.info(
         "Chat request: message=%r history=%d api_key_present=%s",
         message[:100],
@@ -1230,9 +1186,7 @@ async def ready():
 
     pg_status = pg_health()
     pg_ok = bool(pg_status.get("connected"))
-    pool_ok = (
-        bool(pg_status.get("pool_configured")) and pg_status.get("status") == "healthy"
-    )
+    pool_ok = bool(pg_status.get("pool_configured")) and pg_status.get("status") == "healthy"
     ready = pg_ok and pool_ok and int(pg_status.get("error_count", 0)) < 5
     return JSONResponse(
         status_code=200 if ready else 503,
@@ -1311,9 +1265,7 @@ async def get_usage(key_info: dict = Depends(verify_api_key)):
         "limits": {
             "max_jobs_per_month": max_jobs,
             "max_jobs_per_month_display": (
-                refusal
-                if max_jobs is None
-                else "unlimited" if max_jobs == -1 else str(max_jobs)
+                refusal if max_jobs is None else "unlimited" if max_jobs == -1 else str(max_jobs)
             ),
         },
     }
@@ -1375,9 +1327,7 @@ async def submit_job(payload: RomaTaskInput, key_info: dict) -> RomaTaskResponse
         raise HTTPException(status_code=402, detail=reason)
     # RaaS-04: spend-cap guard (fail-closed) before creating the job.
     plan_name = (db.get_tenant(tenant_id) or {}).get("plan", "free")
-    allowed, reason = _check_spend_cap(
-        tenant_id, estimate_cost({"gpu_required": payload.gpu_required}), plan_name
-    )
+    allowed, reason = _check_spend_cap(tenant_id, estimate_cost({"gpu_required": payload.gpu_required}), plan_name)
     if not allowed:
         raise HTTPException(status_code=402, detail=reason)
     try:
@@ -1398,9 +1348,7 @@ async def submit_job(payload: RomaTaskInput, key_info: dict) -> RomaTaskResponse
         roma_jobs_total.labels(tenant_id=tenant_id).inc()
         # No debit at demo submit — billing is finalized exactly once via
         # finalize_job_billing() (see /complete and execute_and_bill).
-        roma_jobs_active.labels(tenant_id=tenant_id).set(
-            db.count_jobs_active_for_tenant(tenant_id)
-        )
+        roma_jobs_active.labels(tenant_id=tenant_id).set(db.count_jobs_active_for_tenant(tenant_id))
         return RomaTaskResponse(
             status="queued",
             job_id=job_id,
@@ -1582,14 +1530,8 @@ def _render_dashboard(tenant_id: str, plan_name: str, api_key: str) -> str:
     plan, refusal = _plan_limits_or_refusal(plan_name)
     max_jobs = plan["max_jobs_per_month"] if plan else None
     used = usage_data["total_jobs"]
-    pct = (
-        min(100, round(used / max_jobs * 100, 1))
-        if max_jobs is not None and max_jobs > 0
-        else 0
-    )
-    limit_display = (
-        refusal if max_jobs is None else "∞" if max_jobs == -1 else str(max_jobs)
-    )
+    pct = min(100, round(used / max_jobs * 100, 1)) if max_jobs is not None and max_jobs > 0 else 0
+    limit_display = refusal if max_jobs is None else "∞" if max_jobs == -1 else str(max_jobs)
     bar_color = "#22c55e" if pct < 60 else "#f59e0b" if pct < 85 else "#ef4444"
 
     my_jobs = [j for j in jobs.values() if j.get("tenant_id") == tenant_id]
@@ -1606,11 +1548,13 @@ def _render_dashboard(tenant_id: str, plan_name: str, api_key: str) -> str:
             jobs_html += f"""<tr>
                 <td style="font-family:monospace;font-size:13px">{j['job_id'][:8]}...</td>
                 <td><span style="background:{status_cls};color:#fff;padding:2px 8px;border-radius:10px;font-size:12px">{j['status']}</span></td>
-                <td style="font-size:13px">{j.get('submitted_at','—')[:19]}</td>
+                <td style="font-size:13px">{j.get('submitted_at', '—')[:19]}</td>
                 <td><a href="/status/{j['job_id']}?api_key=' + api_key + '" style="color:#3b82f6">details →</a></td>
             </tr>"""
     else:
-        jobs_html = '<tr><td colspan="4" style="color:#9ca3af;padding:20px">No jobs yet. Send your first task!</td></tr>'
+        jobs_html = (
+            '<tr><td colspan="4" style="color:#9ca3af;padding:20px">No jobs yet. Send your first task!</td></tr>'
+        )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -1824,9 +1768,7 @@ async def dashboard(request: Request):
             return Response(content=html, media_type="text/html")
 
     # 2. Fall back to query param or header
-    api_key_raw = request.headers.get("X-API-Key") or request.query_params.get(
-        "api_key"
-    )
+    api_key_raw = request.headers.get("X-API-Key") or request.query_params.get("api_key")
     if api_key_raw and api_key_raw in API_KEYS:
         info = API_KEYS[api_key_raw]
         tenant_id = info["tenant_id"]
@@ -1872,9 +1814,7 @@ async def submit_feedback(request: Request):
             tenant_id = info["tenant_id"]
 
     try:
-        fid = db.save_feedback(
-            tenant_id, user_id, rating, liked, improvement, bug, user_agent
-        )
+        fid = db.save_feedback(tenant_id, user_id, rating, liked, improvement, bug, user_agent)
         logger.info(
             "Feedback saved",
             extra={"feedback_id": fid, "tenant_id": tenant_id, "rating": rating},

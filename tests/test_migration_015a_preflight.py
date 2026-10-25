@@ -58,9 +58,7 @@ def _run_migrations() -> None:
 def _apply_body(conn, path: Path) -> None:
     """Apply one migration body in its own transaction, like run_migrations.py."""
     body = "\n".join(
-        line
-        for line in path.read_text().splitlines()
-        if line.strip().upper() not in ("BEGIN;", "COMMIT;")
+        line for line in path.read_text().splitlines() if line.strip().upper() not in ("BEGIN;", "COMMIT;")
     )
     conn.autocommit = False
     try:
@@ -87,10 +85,7 @@ def _index_present(conn) -> bool:
 def test_preflight_applied_without_duplicates():
     """015a applied (before 016) and the 016 index still gets created."""
     if not _pg_reachable():
-        pytest.skip(
-            "PG not reachable — 015a preflight requires live PG; "
-            "issue: RaaS-01 · expiry: 2026-12-31"
-        )
+        pytest.skip("PG not reachable — 015a preflight requires live PG; issue: RaaS-01 · expiry: 2026-12-31")
     _run_migrations()
 
     import psycopg2
@@ -98,9 +93,7 @@ def test_preflight_applied_without_duplicates():
     conn = psycopg2.connect(_pg_dsn())
     try:
         cur = conn.cursor()
-        cur.execute(
-            "SELECT 1 FROM schema_migrations WHERE filename = %s", (FILENAME_015A,)
-        )
+        cur.execute("SELECT 1 FROM schema_migrations WHERE filename = %s", (FILENAME_015A,))
         assert cur.fetchone() is not None, "015a не отмечена в schema_migrations"
         assert _index_present(conn), "016 index должен существовать после 015a"
     finally:
@@ -118,11 +111,20 @@ def _start_own_container() -> tuple[str | None, str | None]:
     try:
         subprocess.run(
             [
-                "docker", "run", "-d", "--name", name,
-                "-e", "POSTGRES_USER=roma",
-                "-e", "POSTGRES_PASSWORD=ci-ephemeral-localhost",
-                "-e", "POSTGRES_DB=roma_test",
-                "-p", "127.0.0.1::5432", "postgres:15-alpine",
+                "docker",
+                "run",
+                "-d",
+                "--name",
+                name,
+                "-e",
+                "POSTGRES_USER=roma",
+                "-e",
+                "POSTGRES_PASSWORD=ci-ephemeral-localhost",
+                "-e",
+                "POSTGRES_DB=roma_test",
+                "-p",
+                "127.0.0.1::5432",
+                "postgres:15-alpine",
             ],
             check=True,
             capture_output=True,
@@ -130,9 +132,7 @@ def _start_own_container() -> tuple[str | None, str | None]:
     except Exception:
         return None, None
     try:
-        port = subprocess.check_output(
-            ["docker", "port", name, "5432/tcp"], text=True
-        ).strip().split(":")[-1]
+        port = subprocess.check_output(["docker", "port", name, "5432/tcp"], text=True).strip().split(":")[-1]
     except Exception:
         _stop_container(name)
         return None, None
@@ -174,10 +174,7 @@ def _same_db(a: str, b: str) -> bool:
 def test_preflight_fails_on_duplicate_group_and_index_intact():
     """Two identical real-job rows → 015a raises; read-only (never on shared PG)."""
     if not _pg_reachable():
-        pytest.skip(
-            "PG not reachable — 015a preflight requires live PG; "
-            "issue: RaaS-01 · expiry: 2026-12-31"
-        )
+        pytest.skip("PG not reachable — 015a preflight requires live PG; issue: RaaS-01 · expiry: 2026-12-31")
     dsn, name = _start_own_container()
     if dsn is None:
         pytest.skip(

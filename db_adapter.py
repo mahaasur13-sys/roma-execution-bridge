@@ -51,9 +51,7 @@ def _pg_enabled() -> bool:
     if _USE_PG is None:
         _USE_PG = bool(os.environ.get("PG_DSN"))
         if _USE_PG:
-            logger.info(
-                "Using PostgreSQL (PG_DSN=%s)", _redact_dsn(os.environ["PG_DSN"])
-            )
+            logger.info("Using PostgreSQL (PG_DSN=%s)", _redact_dsn(os.environ["PG_DSN"]))
         else:
             logger.info("Using SQLite (PG_DSN not set)")
     return _USE_PG
@@ -107,8 +105,7 @@ def _pg_conn():
             if _PG_POOL is None:
                 # Append keepalive + timeout params to DSN
                 _pg_keepalive = (
-                    "keepalives=1&keepalives_idle=60&keepalives_interval=10"
-                    "&keepalives_count=3&connect_timeout=10"
+                    "keepalives=1&keepalives_idle=60&keepalives_interval=10&keepalives_count=3&connect_timeout=10"
                 )
                 _dsn = pg_dsn if "?" in pg_dsn else pg_dsn + "?"
                 _dsn = (
@@ -258,9 +255,7 @@ def set_tenant_inactive(tenant_id: str) -> None:
         db.set_tenant_inactive(tenant_id)
 
 
-def record_webhook_event(
-    stripe_event_id: str, event_type: str, tenant_id: str, payload: str
-) -> None:
+def record_webhook_event(stripe_event_id: str, event_type: str, tenant_id: str, payload: str) -> None:
     if _pg_enabled():
         from db_pg_sync import record_webhook_event as pg_fn
 
@@ -304,9 +299,7 @@ def is_invoice_processed(invoice_id: str, tenant_id: str = "") -> bool:
     return db.is_invoice_processed(invoice_id, tenant_id)
 
 
-def mark_invoice_processed(
-    invoice_id: str, event_type: str = "", tenant_id: str = ""
-) -> None:
+def mark_invoice_processed(invoice_id: str, event_type: str = "", tenant_id: str = "") -> None:
     if _pg_enabled():
         from db_pg_sync import mark_invoice_processed as pg_fn
 
@@ -322,9 +315,7 @@ def mark_invoice_processed(
         db.mark_invoice_processed(invoice_id, event_type, tenant_id)
 
 
-def add_lead(
-    email: str, company: str = "", role: str = "", use_case: str = "", source: str = ""
-) -> int:
+def add_lead(email: str, company: str = "", role: str = "", use_case: str = "", source: str = "") -> int:
     if _pg_enabled():
         from db_pg_sync import add_lead as pg_fn
 
@@ -370,9 +361,7 @@ def update_lead_status(lead_id: int, status: str, notes: str = "") -> None:
         db.update_lead_status(lead_id, status, notes)
 
 
-def upsert_oauth_user(
-    user_id: str, email: str, name: str, provider: str, tenant_id: str, api_key: str
-) -> dict:
+def upsert_oauth_user(user_id: str, email: str, name: str, provider: str, tenant_id: str, api_key: str) -> dict:
     if _pg_enabled():
         from db_pg_sync import upsert_oauth_user as pg_fn
 
@@ -430,26 +419,20 @@ def get_user_by_api_key(api_key: str) -> dict | None:
     return db.get_user_by_api_key(api_key)
 
 
-def log_email_sent(
-    recipient_email: str, recipient_name: str, tenant_id: str, invitation_link: str
-) -> int:
+def log_email_sent(recipient_email: str, recipient_name: str, tenant_id: str, invitation_link: str) -> int:
     if _pg_enabled():
         from db_pg_sync import log_email_sent as pg_fn
 
         conn = _pg_conn()
         try:
-            result = pg_fn(
-                conn, recipient_email, recipient_name, tenant_id, invitation_link
-            )
+            result = pg_fn(conn, recipient_email, recipient_name, tenant_id, invitation_link)
             conn.commit()
             return result
         finally:
             _pg_return(conn)
     import db
 
-    return db.log_email_sent(
-        recipient_email, recipient_name, tenant_id, invitation_link
-    )
+    return db.log_email_sent(recipient_email, recipient_name, tenant_id, invitation_link)
 
 
 def log_email_failed(recipient_email: str, error_message: str) -> int:
@@ -511,18 +494,14 @@ def log_user_event(
 
         conn = _pg_conn()
         try:
-            result = pg_fn(
-                conn, tenant_id, event_type, user_id, event_data, ip_address, user_agent
-            )
+            result = pg_fn(conn, tenant_id, event_type, user_id, event_data, ip_address, user_agent)
             conn.commit()
             return result
         finally:
             _pg_return(conn)
     import db
 
-    return db.log_user_event(
-        tenant_id, event_type, user_id, event_data, ip_address, user_agent
-    )
+    return db.log_user_event(tenant_id, event_type, user_id, event_data, ip_address, user_agent)
 
 
 def get_analytics_overview(days: int = 30) -> dict:
@@ -539,9 +518,7 @@ def get_analytics_overview(days: int = 30) -> dict:
     return db.get_analytics_overview(days)
 
 
-def get_analytics_users(
-    start_date: str = "", end_date: str = "", sort_by: str = "last_seen"
-) -> list[dict]:
+def get_analytics_users(start_date: str = "", end_date: str = "", sort_by: str = "last_seen") -> list[dict]:
     import db
 
     return db.get_analytics_users(start_date, end_date, sort_by)
@@ -565,9 +542,7 @@ def get_analytics_events(
             _pg_return(conn)
     import db
 
-    return db.get_analytics_events(
-        limit, offset, event_type, tenant_id, from_date, to_date
-    )
+    return db.get_analytics_events(limit, offset, event_type, tenant_id, from_date, to_date)
 
 
 def save_feedback(
@@ -584,18 +559,14 @@ def save_feedback(
 
         conn = _pg_conn()
         try:
-            result = pg_fn(
-                conn, tenant_id, user_id, rating, liked, improvement, bug, user_agent
-            )
+            result = pg_fn(conn, tenant_id, user_id, rating, liked, improvement, bug, user_agent)
             conn.commit()
             return result
         finally:
             _pg_return(conn)
     import db
 
-    return db.save_feedback(
-        tenant_id, user_id, rating, liked, improvement, bug, user_agent
-    )
+    return db.save_feedback(tenant_id, user_id, rating, liked, improvement, bug, user_agent)
 
 
 def get_feedback(
@@ -735,9 +706,7 @@ def _ensure_execution_jobs_table(c) -> None:
             error           TEXT
         )
     """)
-    existing = {
-        row[1] for row in c.execute("PRAGMA table_info(execution_jobs)").fetchall()
-    }
+    existing = {row[1] for row in c.execute("PRAGMA table_info(execution_jobs)").fetchall()}
     for column, ddl in (
         ("cost_usd", "REAL NOT NULL DEFAULT 0.0"),
         ("backend", "TEXT"),
@@ -1047,18 +1016,12 @@ def get_worker_by_id(worker_id: str) -> dict | None:
 # ────────────────────────────────────────────────
 
 
-def insert_job(
-    job_id: str, tenant_id: str, status: str, decision_id: str, payload: dict
-) -> dict:
+def insert_job(job_id: str, tenant_id: str, status: str, decision_id: str, payload: dict) -> dict:
     import json
 
     if _pg_enabled():
-        return _run_async(
-            _insert_job_pg(job_id, tenant_id, status, decision_id, json.dumps(payload))
-        )
-    return _insert_job_sqlite(
-        job_id, tenant_id, status, decision_id, json.dumps(payload)
-    )
+        return _run_async(_insert_job_pg(job_id, tenant_id, status, decision_id, json.dumps(payload)))
+    return _insert_job_sqlite(job_id, tenant_id, status, decision_id, json.dumps(payload))
 
 
 async def _insert_job_pg(job_id, tenant_id, status, decision_id, payload_json):
@@ -1104,9 +1067,7 @@ def insert_job_raw(job_id: str, tenant_id: str, status: str, payload: dict) -> d
     import json
 
     if _pg_enabled():
-        return _run_async(
-            _insert_job_raw_pg(job_id, tenant_id, status, json.dumps(payload))
-        )
+        return _run_async(_insert_job_raw_pg(job_id, tenant_id, status, json.dumps(payload)))
     return _insert_job_raw_sqlite(job_id, tenant_id, status, json.dumps(payload))
 
 
@@ -1159,11 +1120,7 @@ async def _get_job_pg(job_id, tenant_id):
             d = dict(zip(cols, row))
             for dt_col in ("created_at", "started_at", "completed_at"):
                 if d.get(dt_col):
-                    d[dt_col] = (
-                        d[dt_col].isoformat()
-                        if hasattr(d[dt_col], "isoformat")
-                        else str(d[dt_col])
-                    )
+                    d[dt_col] = d[dt_col].isoformat() if hasattr(d[dt_col], "isoformat") else str(d[dt_col])
             d["payload"] = _json_col(d.get("payload"), {})
             return d
     finally:
@@ -1191,9 +1148,7 @@ def update_job_status(
     tenant_id: str | None = None,
 ):
     if _pg_enabled():
-        return _run_async(
-            _update_job_status_pg(job_id, status, completed_at, error, tenant_id)
-        )
+        return _run_async(_update_job_status_pg(job_id, status, completed_at, error, tenant_id))
     return _update_job_status_sqlite(job_id, status, completed_at, error, tenant_id)
 
 
@@ -1319,9 +1274,7 @@ def _count_jobs_by_tenant_sqlite(tenant_id):
     c = _sqlite_conn()
     try:
         _ensure_execution_jobs_table(c)
-        row = c.execute(
-            "SELECT COUNT(*) FROM execution_jobs WHERE tenant_id=?", (tenant_id,)
-        ).fetchone()
+        row = c.execute("SELECT COUNT(*) FROM execution_jobs WHERE tenant_id=?", (tenant_id,)).fetchone()
         return row[0] if row else 0
     finally:
         c.close()
@@ -1362,9 +1315,7 @@ def insert_decision_record(
     )
 
 
-async def _insert_decision_record_pg(
-    did, rid, tid, result, reason, quota, cost, policy
-):
+async def _insert_decision_record_pg(did, rid, tid, result, reason, quota, cost, policy):
     conn = _pg_conn()
     try:
         with conn.cursor() as cur:
@@ -1394,9 +1345,7 @@ def _insert_decision_record_sqlite(did, rid, tid, result, reason, quota, cost, p
         c.close()
 
 
-def insert_decision_request(
-    request_id, tenant_id, request_type, payload, idempotency_key
-):
+def insert_decision_request(request_id, tenant_id, request_type, payload, idempotency_key):
     import json
 
     if _pg_enabled():
@@ -1409,9 +1358,7 @@ def insert_decision_request(
                 idempotency_key,
             )
         )
-    return _insert_decision_request_sqlite(
-        request_id, tenant_id, request_type, json.dumps(payload), idempotency_key
-    )
+    return _insert_decision_request_sqlite(request_id, tenant_id, request_type, json.dumps(payload), idempotency_key)
 
 
 async def _insert_decision_request_pg(rid, tid, rtype, payload_json, idemp_key):
@@ -1433,8 +1380,7 @@ def _insert_decision_request_sqlite(rid, tid, rtype, payload_json, idemp_key):
     c = _sqlite_conn()
     try:
         c.execute(
-            "INSERT INTO decision_requests (id, tenant_id, request_type, payload, idempotency_key)"
-            " VALUES (?,?,?,?,?)",
+            "INSERT INTO decision_requests (id, tenant_id, request_type, payload, idempotency_key) VALUES (?,?,?,?,?)",
             (rid, tid, rtype, payload_json, idemp_key),
         )
         c.commit()
@@ -1498,9 +1444,7 @@ def insert_audit_event(event_id, tenant_id, event_type, entity_type, entity_id, 
                 json.dumps(data),
             )
         )
-    return _insert_audit_event_sqlite(
-        event_id, tenant_id, event_type, entity_type, entity_id, json.dumps(data)
-    )
+    return _insert_audit_event_sqlite(event_id, tenant_id, event_type, entity_type, entity_id, json.dumps(data))
 
 
 async def _insert_audit_event_pg(eid, tid, etype, ent_type, ent_id, data_json):
@@ -1560,8 +1504,7 @@ async def _audit_event_exists_pg(tid, etype, ent_id) -> bool:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT 1 FROM audit_events"
-                " WHERE tenant_id=%s AND event_type=%s AND entity_id=%s LIMIT 1",
+                "SELECT 1 FROM audit_events WHERE tenant_id=%s AND event_type=%s AND entity_id=%s LIMIT 1",
                 (tid, etype, ent_id),
             )
             return cur.fetchone() is not None
@@ -1574,8 +1517,7 @@ def _audit_event_exists_sqlite(tid, etype, ent_id) -> bool:
     try:
         _ensure_audit_events_table(c)
         cur = c.execute(
-            "SELECT 1 FROM audit_events"
-            " WHERE tenant_id=? AND event_type=? AND entity_id=? LIMIT 1",
+            "SELECT 1 FROM audit_events WHERE tenant_id=? AND event_type=? AND entity_id=? LIMIT 1",
             (tid, etype, ent_id),
         )
         return cur.fetchone() is not None
@@ -1633,9 +1575,7 @@ def insert_usage_event(event_id, tenant_id, job_id, gpu_seconds, cost):
     billed). Left unused; do not rewire onto the metering contract.
     """
     if _pg_enabled():
-        return _run_async(
-            _insert_usage_event_pg(event_id, tenant_id, job_id, gpu_seconds, cost)
-        )
+        return _run_async(_insert_usage_event_pg(event_id, tenant_id, job_id, gpu_seconds, cost))
     return _insert_usage_event_sqlite(event_id, tenant_id, job_id, gpu_seconds, cost)
 
 
@@ -1644,8 +1584,7 @@ async def _insert_usage_event_pg(eid, tid, jid, gpu_sec, cost):
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO usage_events (id, tenant_id, job_id, gpu_seconds, cost)"
-                " VALUES (%s,%s,%s,%s,%s)",
+                "INSERT INTO usage_events (id, tenant_id, job_id, gpu_seconds, cost) VALUES (%s,%s,%s,%s,%s)",
                 (eid, tid, jid, gpu_sec, cost),
             )
         conn.commit()
@@ -1658,8 +1597,7 @@ def _insert_usage_event_sqlite(eid, tid, jid, gpu_sec, cost):
     c = _sqlite_conn()
     try:
         c.execute(
-            "INSERT INTO usage_events (id, tenant_id, job_id, gpu_seconds, cost)"
-            " VALUES (?,?,?,?,?)",
+            "INSERT INTO usage_events (id, tenant_id, job_id, gpu_seconds, cost) VALUES (?,?,?,?,?)",
             (eid, tid, jid, gpu_sec, cost),
         )
         c.commit()
@@ -1668,9 +1606,7 @@ def _insert_usage_event_sqlite(eid, tid, jid, gpu_sec, cost):
         c.close()
 
 
-def insert_tenant(
-    tenant_id: str, name: str, api_key_hash: str, tier: str = "start"
-) -> dict:
+def insert_tenant(tenant_id: str, name: str, api_key_hash: str, tier: str = "start") -> dict:
     if _pg_enabled():
         return _run_async(_insert_tenant_pg(tenant_id, name, api_key_hash, tier))
     return _insert_tenant_sqlite(tenant_id, name, api_key_hash, tier)
@@ -1737,9 +1673,7 @@ async def _count_jobs_for_tenant_pg(tenant_id):
     conn = _pg_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT COUNT(*) FROM execution_jobs WHERE tenant_id=%s", (tenant_id,)
-            )
+            cur.execute("SELECT COUNT(*) FROM execution_jobs WHERE tenant_id=%s", (tenant_id,))
             return cur.fetchone()[0]
     finally:
         _pg_return(conn)
@@ -1749,33 +1683,21 @@ def _count_jobs_for_tenant_sqlite(tenant_id):
     c = _sqlite_conn()
     try:
         _ensure_execution_jobs_table(c)
-        row = c.execute(
-            "SELECT COUNT(*) FROM execution_jobs WHERE tenant_id=?", (tenant_id,)
-        ).fetchone()
+        row = c.execute("SELECT COUNT(*) FROM execution_jobs WHERE tenant_id=?", (tenant_id,)).fetchone()
         return row[0] if row else 0
     finally:
         c.close()
 
 
-def insert_execution_job(
-    job_id: str, decision_id: str, tenant_id: str, status: str, payload: dict
-) -> dict:
+def insert_execution_job(job_id: str, decision_id: str, tenant_id: str, status: str, payload: dict) -> dict:
     import json
 
     if _pg_enabled():
-        return _run_async(
-            _insert_execution_job_pg(
-                job_id, decision_id, tenant_id, status, json.dumps(payload)
-            )
-        )
-    return _insert_execution_job_sqlite(
-        job_id, decision_id, tenant_id, status, json.dumps(payload)
-    )
+        return _run_async(_insert_execution_job_pg(job_id, decision_id, tenant_id, status, json.dumps(payload)))
+    return _insert_execution_job_sqlite(job_id, decision_id, tenant_id, status, json.dumps(payload))
 
 
-async def _insert_execution_job_pg(
-    job_id, decision_id, tenant_id, status, payload_json
-):
+async def _insert_execution_job_pg(job_id, decision_id, tenant_id, status, payload_json):
     conn = _pg_conn()
     try:
         with conn.cursor() as cur:
@@ -2089,11 +2011,7 @@ async def _update_execution_job_pg(
                     where += " AND tenant_id = %s"
                     extra.append(tenant_id)
                 if if_status_not_in:
-                    where += (
-                        " AND status NOT IN ("
-                        + ",".join(["%s"] * len(if_status_not_in))
-                        + ")"
-                    )
+                    where += " AND status NOT IN (" + ",".join(["%s"] * len(if_status_not_in)) + ")"
                     extra.extend(list(if_status_not_in))
                 params.extend(extra)
                 # B608-safe: SET/WHERE-фрагменты — внутренние литералы, значения — bound params (issue: G-SEC-SCAN/B608).
@@ -2156,11 +2074,7 @@ def _update_execution_job_sqlite(
                 where += " AND tenant_id = ?"
                 extra.append(tenant_id)
             if if_status_not_in:
-                where += (
-                    " AND status NOT IN ("
-                    + ",".join(["?"] * len(if_status_not_in))
-                    + ")"
-                )
+                where += " AND status NOT IN (" + ",".join(["?"] * len(if_status_not_in)) + ")"
                 extra.extend(list(if_status_not_in))
             params.extend(extra)
             cur = c.cursor()
@@ -2242,9 +2156,7 @@ async def _get_decision_record_pg(decision_id):
 def _get_decision_record_sqlite(decision_id):
     c = _sqlite_conn()
     try:
-        row = c.execute(
-            "SELECT * FROM decision_records WHERE id=?", (decision_id,)
-        ).fetchone()
+        row = c.execute("SELECT * FROM decision_records WHERE id=?", (decision_id,)).fetchone()
         return dict(row) if row else None
     finally:
         c.close()
@@ -2260,19 +2172,11 @@ def list_decision_records(
 ) -> tuple[list[dict], int]:
     """Returns (items, total_count)."""
     if _pg_enabled():
-        return _run_async(
-            _list_decision_records_pg(
-                tenant_id, result, date_from, date_to, limit, offset
-            )
-        )
-    return _list_decision_records_sqlite(
-        tenant_id, result, date_from, date_to, limit, offset
-    )
+        return _run_async(_list_decision_records_pg(tenant_id, result, date_from, date_to, limit, offset))
+    return _list_decision_records_sqlite(tenant_id, result, date_from, date_to, limit, offset)
 
 
-async def _list_decision_records_pg(
-    tenant_id, result, date_from, date_to, limit, offset
-):
+async def _list_decision_records_pg(tenant_id, result, date_from, date_to, limit, offset):
     conn = _pg_conn()
     try:
         with conn.cursor() as cur:
@@ -2722,9 +2626,7 @@ def set_verification_token(user_id: str, token: str, expires_at) -> None:
         logger.info("set_verification_token user_id=%s (no PG)", user_id)
 
 
-def create_user_with_email(
-    email: str, password_hash: str, name: str, tenant_id: str, api_key: str
-) -> dict:
+def create_user_with_email(email: str, password_hash: str, name: str, tenant_id: str, api_key: str) -> dict:
     if _pg_enabled():
         from db_pg_sync import create_email_user as pg_fn
 
@@ -2788,9 +2690,7 @@ def create_email_user(
 
         conn = _pg_conn()
         try:
-            result = pg_fn(
-                conn, user_id, email, name, tenant_id, api_key, password_hash
-            )
+            result = pg_fn(conn, user_id, email, name, tenant_id, api_key, password_hash)
             conn.commit()
             return result
         finally:
@@ -2967,9 +2867,7 @@ def record_usage_event(
 
         conn = _pg_conn()
         try:
-            eid = pg_fn(
-                conn, tenant_id, event_type, value, cost_usd, job_id, metadata, billed
-            )
+            eid = pg_fn(conn, tenant_id, event_type, value, cost_usd, job_id, metadata, billed)
             conn.commit()
             return eid
         finally:

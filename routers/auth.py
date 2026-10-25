@@ -42,16 +42,13 @@ GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 GITHUB_CLIENT_ID = os.environ.get("GITHUB_CLIENT_ID", "")
 GITHUB_CLIENT_SECRET = os.environ.get("GITHUB_CLIENT_SECRET", "")
 OAUTH_ENABLED = bool(GOOGLE_CLIENT_ID or GITHUB_CLIENT_ID)
-OAUTH_REDIRECT_BASE = os.environ.get(
-    "OAUTH_REDIRECT_BASE", "https://roma-execution-bridge-asurdev.zocomputer.io"
-)
+OAUTH_REDIRECT_BASE = os.environ.get("OAUTH_REDIRECT_BASE", "https://roma-execution-bridge-asurdev.zocomputer.io")
 
 # ── Email service singleton ────────────────────────────────────────────
 email_service = EmailService(
     provider=(
         _EmailProvider[os.environ.get("EMAIL_PROVIDER", "console").upper()]
-        if os.environ.get("EMAIL_PROVIDER", "console").upper()
-        in ("SMTP", "SENDGRID", "RESEND", "CONSOLE")
+        if os.environ.get("EMAIL_PROVIDER", "console").upper() in ("SMTP", "SENDGRID", "RESEND", "CONSOLE")
         else _EmailProvider.CONSOLE
     ),
     smtp_host=os.environ.get("EMAIL_SMTP_HOST", "smtp.gmail.com"),
@@ -63,12 +60,8 @@ email_service = EmailService(
     sendgrid_api_key=os.environ.get("SENDGRID_API_KEY", ""),
 )
 
-VERIFICATION_TOKEN_EXPIRY_HOURS = int(
-    os.environ.get("VERIFICATION_TOKEN_EXPIRY_HOURS", "24")
-)
-VERIFICATION_BASE_URL = os.environ.get(
-    "VERIFICATION_BASE_URL", "https://roma-execution-bridge-asurdev.zocomputer.io"
-)
+VERIFICATION_TOKEN_EXPIRY_HOURS = int(os.environ.get("VERIFICATION_TOKEN_EXPIRY_HOURS", "24"))
+VERIFICATION_BASE_URL = os.environ.get("VERIFICATION_BASE_URL", "https://roma-execution-bridge-asurdev.zocomputer.io")
 DEMO_API_KEY = os.environ.get("ROMA_DEMO_API_KEY", "YOUR_API_KEY")
 
 LOGIN_PAGE = """<!DOCTYPE html>
@@ -178,9 +171,7 @@ async def signup(payload: dict, request: Request):
     if not email or not password:
         raise HTTPException(status_code=400, detail="Email and password are required")
     if len(password) < 8:
-        raise HTTPException(
-            status_code=400, detail="Password must be at least 8 characters"
-        )
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
 
     # Beta capacity check
     if BETA_MODE:
@@ -188,22 +179,17 @@ async def signup(payload: dict, request: Request):
         if not cap["allowed"]:
             raise HTTPException(
                 status_code=423,
-                detail="Beta is currently full. Slots: %d/%d"
-                % (cap["current_users"], cap["max_users"]),
+                detail="Beta is currently full. Slots: %d/%d" % (cap["current_users"], cap["max_users"]),
             )
 
     # Invite code validation (if required)
     invite_code = payload.get("invite_code")
     if BETA_MODE and BETA_REQUIRE_INVITE:
         if not invite_code:
-            raise HTTPException(
-                status_code=400, detail="Invite code is required for beta access"
-            )
+            raise HTTPException(status_code=400, detail="Invite code is required for beta access")
         inv = validate_invite(invite_code)
         if inv is None:
-            raise HTTPException(
-                status_code=400, detail="Invalid or expired invite code"
-            )
+            raise HTTPException(status_code=400, detail="Invalid or expired invite code")
 
     existing = db.get_user_by_email(email)
     if existing:
@@ -217,16 +203,12 @@ async def signup(payload: dict, request: Request):
     from auth.verification import generate_token
 
     token = generate_token()
-    expires_at = (
-        datetime.now(timezone.utc) + timedelta(hours=VERIFICATION_TOKEN_EXPIRY_HOURS)
-    ).isoformat()
+    expires_at = (datetime.now(timezone.utc) + timedelta(hours=VERIFICATION_TOKEN_EXPIRY_HOURS)).isoformat()
     verification_url = f"{VERIFICATION_BASE_URL}/auth/verify-email?token={token}"
 
     db.seed_tenants({api_key: {"tenant_id": tenant_id, "plan": plan}})
     API_KEYS[api_key] = {"tenant_id": tenant_id, "plan": plan, "email_verified": False}
-    db.create_user_with_password(
-        user_id, email, name, tenant_id, api_key, password_hash, token, expires_at
-    )
+    db.create_user_with_password(user_id, email, name, tenant_id, api_key, password_hash, token, expires_at)
 
     try:
         email_service.send_verification_email(
@@ -236,13 +218,9 @@ async def signup(payload: dict, request: Request):
             brand={"app_name": "ROMA", "primary_color": "#6366f1"},
             expiry_hours=VERIFICATION_TOKEN_EXPIRY_HOURS,
         )
-        logger.info(
-            "verification_email_sent", extra={"email": email, "tenant_id": tenant_id}
-        )
+        logger.info("verification_email_sent", extra={"email": email, "tenant_id": tenant_id})
     except Exception as e:
-        logger.warning(
-            "verification_email_failed", extra={"email": email, "error": str(e)}
-        )
+        logger.warning("verification_email_failed", extra={"email": email, "error": str(e)})
 
     # Mark invite as used
     if invite_code:
@@ -266,9 +244,7 @@ async def signup(payload: dict, request: Request):
 
                 _return_conn(conn)
         except Exception as e:
-            logger.warning(
-                "beta_spend_cap_failed", extra={"tenant_id": tenant_id, "error": str(e)}
-            )
+            logger.warning("beta_spend_cap_failed", extra={"tenant_id": tenant_id, "error": str(e)})
 
     return {
         "status": "pending",
@@ -282,9 +258,7 @@ async def verify_email_endpoint(token: str):
     """Verify email address. Can be called via browser (GET) or API (POST)."""
     result, reason = verify_token(token)
     if reason != "success":
-        raise HTTPException(
-            status_code=400, detail="Invalid or expired verification token"
-        )
+        raise HTTPException(status_code=400, detail="Invalid or expired verification token")
 
     user_id = result["user_id"]
     user = db.get_user_by_id(user_id)
@@ -330,9 +304,7 @@ async def resend_verification(payload: dict):
         )
         logger.info("verification_resent", extra={"email": email})
     except Exception as e:
-        logger.warning(
-            "resend_verification_failed", extra={"email": email, "error": str(e)}
-        )
+        logger.warning("resend_verification_failed", extra={"email": email, "error": str(e)})
 
     return {
         "status": "sent",
@@ -398,9 +370,7 @@ async def _oauth_google_callback(code: str) -> dict:
         )
         token_data = token_resp.json()
         if "error" in token_data:
-            raise ValueError(
-                f"Google token error: {token_data.get('error_description', token_data['error'])}"
-            )
+            raise ValueError(f"Google token error: {token_data.get('error_description', token_data['error'])}")
 
         access_token = token_data["access_token"]
         user_resp = await client.get(
@@ -431,9 +401,7 @@ async def _oauth_github_callback(code: str) -> dict:
         )
         token_data = token_resp.json()
         if "error" in token_data:
-            raise ValueError(
-                f"GitHub token error: {token_data.get('error_description', token_data['error'])}"
-            )
+            raise ValueError(f"GitHub token error: {token_data.get('error_description', token_data['error'])}")
 
         access_token = token_data["access_token"]
         user_resp = await client.get(
@@ -453,9 +421,7 @@ async def _oauth_github_callback(code: str) -> dict:
                 headers={"Authorization": f"Bearer {access_token}"},
             )
             emails = emails_resp.json()
-            primary = next(
-                (e for e in emails if e.get("primary")), emails[0] if emails else {}
-            )
+            primary = next((e for e in emails if e.get("primary")), emails[0] if emails else {})
             email = primary.get("email", "")
 
         return {
@@ -468,9 +434,7 @@ async def _oauth_github_callback(code: str) -> dict:
 
 @limiter.limit("10/minute")
 @router.get("/oauth/callback/{provider}")
-async def oauth_callback(
-    provider: str, code: str = "", error: str = "", request: Request = None
-):
+async def oauth_callback(provider: str, code: str = "", error: str = "", request: Request = None):
     """Handle OAuth callback — exchange code, create/update user, start session."""
     if error:
         return Response(
@@ -539,15 +503,11 @@ async def oauth_callback(
             "plan": "free",
             "subscription_status": "active",
         }
-        logger.info(
-            f"OAuth login: NEW user {email} → tenant={tenant_id}, api_key={api_key[:8]}***"
-        )
+        logger.info(f"OAuth login: NEW user {email} → tenant={tenant_id}, api_key={api_key[:8]}***")
 
     session_id = create_session(tenant_id, api_key)
     resp = RedirectResponse(url="/dashboard", status_code=302)
-    resp.set_cookie(
-        "session_id", session_id, httponly=True, max_age=3600, samesite="lax"
-    )
+    resp.set_cookie("session_id", session_id, httponly=True, max_age=3600, samesite="lax")
     return resp
 
 

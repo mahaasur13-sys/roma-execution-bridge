@@ -200,6 +200,7 @@ def test_cascade_run_keeps_allow_when_not_confident(monkeypatch):
     result = asyncio.run(shadow.cascade_run(_FakePlugin("allow"), "t1", {}, {"plan": "free"}))
     assert str(result.action) == "allow"
 
+
 # ── cascade_run: fail-closed + escalate-only (любая ошибка Jev → baseline) ─
 
 
@@ -208,17 +209,13 @@ def _run_cascade(monkeypatch, *, action="allow", client=None, escalate=None):
     monkeypatch.setenv(shadow._CASCADE_ENV_FLAG, "1")
     if escalate is not None:
         monkeypatch.setattr(shadow, "_escalate_for_review", escalate)
-    return asyncio.run(
-        shadow.cascade_run(_FakePlugin(action), "t1", {}, {"plan": "free"}, client=client)
-    )
+    return asyncio.run(shadow.cascade_run(_FakePlugin(action), "t1", {}, {"plan": "free"}, client=client))
 
 
 def test_cascade_run_flag_off_never_calls_jev(monkeypatch):
     monkeypatch.delenv(shadow._CASCADE_ENV_FLAG, raising=False)
     client = _FakeClient(payload=_choice_payload("violation", 0.99, 0.99))
-    result = asyncio.run(
-        shadow.cascade_run(_FakePlugin("allow"), "t1", {}, {"plan": "free"}, client=client)
-    )
+    result = asyncio.run(shadow.cascade_run(_FakePlugin("allow"), "t1", {}, {"plan": "free"}, client=client))
     assert str(result.action) == "allow"
     assert client.calls == []  # при выключенном каскаде Jev не вызывается
 
@@ -280,6 +277,7 @@ def test_cascade_run_escalate_only_never_downgrades_deny(monkeypatch):
     client = _FakeClient(payload=_choice_payload("violation", 0.99, 0.99))
     result = _run_cascade(monkeypatch, action="deny", client=client)
     assert str(result.action) == "deny"
+
 
 # ── shadow_policy: non-dict / None evaluate_policies result ───────────────
 

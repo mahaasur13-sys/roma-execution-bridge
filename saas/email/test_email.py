@@ -22,15 +22,9 @@ def test_console_welcome():
 
 def test_console_all_types():
     svc = EmailService(provider=EmailProvider.CONSOLE)
-    assert svc.send_usage_alert(
-        "ops@vega.kz", "VEGA Cloud", 75.0, 15.0, 5.0, _brand()
-    ), "usage_alert"
-    assert svc.send_invoice(
-        "ops@vega.kz", "INV-001", "April 2026", 20.0, 10.00, 15.0, 1.50, 8.50, _brand()
-    ), "invoice"
-    assert svc.send_low_balance(
-        "ops@vega.kz", "VEGA Cloud", 2.50, _brand()
-    ), "low_balance"
+    assert svc.send_usage_alert("ops@vega.kz", "VEGA Cloud", 75.0, 15.0, 5.0, _brand()), "usage_alert"
+    assert svc.send_invoice("ops@vega.kz", "INV-001", "April 2026", 20.0, 10.00, 15.0, 1.50, 8.50, _brand()), "invoice"
+    assert svc.send_low_balance("ops@vega.kz", "VEGA Cloud", 2.50, _brand()), "low_balance"
     print("PASS: all_email_types")
 
 

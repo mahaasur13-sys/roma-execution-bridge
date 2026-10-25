@@ -49,12 +49,8 @@ async def generate_address(wallet_id: str, request: GenerateAddressRequest):
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@router.post(
-    "/{wallet_id}/monero/subaddress", response_model=GenerateMoneroSubaddressResponse
-)
-async def generate_monero_subaddress(
-    wallet_id: str, request: GenerateMoneroSubaddressRequest
-):
+@router.post("/{wallet_id}/monero/subaddress", response_model=GenerateMoneroSubaddressResponse)
+async def generate_monero_subaddress(wallet_id: str, request: GenerateMoneroSubaddressRequest):
     try:
         return await _service.generate_monero_subaddress(wallet_id, request)
     except ValueError as e:

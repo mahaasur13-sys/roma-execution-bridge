@@ -9,9 +9,7 @@ MIGRATIONS_DIR = REPO_ROOT / "migrations"
 
 
 def _load_runner():
-    spec = importlib.util.spec_from_file_location(
-        "run_migrations", str(REPO_ROOT / "scripts" / "run_migrations.py")
-    )
+    spec = importlib.util.spec_from_file_location("run_migrations", str(REPO_ROOT / "scripts" / "run_migrations.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod

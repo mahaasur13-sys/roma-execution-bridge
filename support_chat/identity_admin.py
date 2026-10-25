@@ -87,11 +87,7 @@ def create_identity(
     raw_credential = generate_token(CREDENTIAL_BYTES)
 
     with factory() as session:
-        existing = (
-            session.query(SupportIdentityModel)
-            .filter(SupportIdentityModel.subject == subject)
-            .one_or_none()
-        )
+        existing = session.query(SupportIdentityModel).filter(SupportIdentityModel.subject == subject).one_or_none()
         if existing is not None:
             raise SupportAuthError(f"support identity already exists: {subject}")
         identity = SupportIdentityModel(
@@ -147,14 +143,10 @@ def revoke_credential(factory, credential_id: str | None = None, subject: str | 
         raise SupportAuthError("provide --credential-id or --subject")
     now = datetime.now(timezone.utc)
     with factory() as session:
-        query = session.query(SupportCredentialModel).filter(
-            SupportCredentialModel.revoked_at.is_(None)
-        )
+        query = session.query(SupportCredentialModel).filter(SupportCredentialModel.revoked_at.is_(None))
         if credential_id:
             try:
-                query = query.filter(
-                    SupportCredentialModel.credential_id == uuid.UUID(str(credential_id))
-                )
+                query = query.filter(SupportCredentialModel.credential_id == uuid.UUID(str(credential_id)))
             except (ValueError, AttributeError, TypeError) as exc:
                 raise SupportCredentialError("invalid --credential-id") from exc
         else:
@@ -165,9 +157,7 @@ def revoke_credential(factory, credential_id: str | None = None, subject: str | 
             )
             if identity is None:
                 raise SupportAuthError(f"support identity not found: {subject}")
-            query = query.filter(
-                SupportCredentialModel.identity_id == identity.identity_id
-            )
+            query = query.filter(SupportCredentialModel.identity_id == identity.identity_id)
         rows = query.all()
         for row in rows:
             row.revoked_at = now
@@ -180,11 +170,7 @@ def revoke_sessions(factory, subject: str) -> dict:
     subject = _clean_subject(subject)
     now = datetime.now(timezone.utc)
     with factory() as session:
-        identity = (
-            session.query(SupportIdentityModel)
-            .filter(SupportIdentityModel.subject == subject)
-            .one_or_none()
-        )
+        identity = session.query(SupportIdentityModel).filter(SupportIdentityModel.subject == subject).one_or_none()
         if identity is None:
             raise SupportAuthError(f"support identity not found: {subject}")
         identity.session_version = int(identity.session_version) + 1
@@ -212,11 +198,7 @@ def deactivate_identity(factory, subject: str) -> bool:
     subject = _clean_subject(subject)
     now = datetime.now(timezone.utc)
     with factory() as session:
-        identity = (
-            session.query(SupportIdentityModel)
-            .filter(SupportIdentityModel.subject == subject)
-            .one_or_none()
-        )
+        identity = session.query(SupportIdentityModel).filter(SupportIdentityModel.subject == subject).one_or_none()
         if identity is None:
             raise SupportAuthError(f"support identity not found: {subject}")
         identity.is_active = False

@@ -167,9 +167,7 @@ class SupportAuthService:
             self._session_factory = get_session_factory()
         return self._session_factory
 
-    async def login(
-        self, credential: str | SecretStr | None
-    ) -> tuple[SupportPrincipal, str, str]:
+    async def login(self, credential: str | SecretStr | None) -> tuple[SupportPrincipal, str, str]:
         """Exchange a credential for a session.
 
         Returns ``(principal, raw_session_token, raw_csrf_token)``. Raises
@@ -179,9 +177,7 @@ class SupportAuthService:
         return await asyncio.to_thread(self._login_sync, _raw_secret(credential))
 
     async def authenticate_session(self, raw_session_token: str | None) -> SupportPrincipal:
-        return await asyncio.to_thread(
-            self._authenticate_session_sync, raw_session_token
-        )
+        return await asyncio.to_thread(self._authenticate_session_sync, raw_session_token)
 
     async def logout(self, raw_session_token: str | None) -> bool:
         """Revoke exactly the presented session. Idempotent."""
@@ -189,9 +185,7 @@ class SupportAuthService:
 
     async def csrf_matches(self, raw_csrf_token: str | None, session_id: str) -> bool:
         """Constant-time check that a CSRF value belongs to this session row."""
-        return await asyncio.to_thread(
-            self._csrf_matches_sync, raw_csrf_token, session_id
-        )
+        return await asyncio.to_thread(self._csrf_matches_sync, raw_csrf_token, session_id)
 
     def _login_sync(self, raw_credential: str) -> tuple[SupportPrincipal, str, str]:
         if not raw_credential or not isinstance(raw_credential, str):
@@ -301,9 +295,7 @@ class SupportAuthService:
             session_row = session.get(SupportSessionModel, session_uuid)
             if session_row is None:
                 return False
-            return constant_time_equal(
-                str(session_row.csrf_hash), hash_token(raw_csrf_token)
-            )
+            return constant_time_equal(str(session_row.csrf_hash), hash_token(raw_csrf_token))
 
     def bump_session_version(self, identity_id) -> int:
         """Global invalidation: every existing session stops verifying."""
@@ -318,11 +310,7 @@ class SupportAuthService:
 
     @staticmethod
     def _session_by_hash(session, digest: str) -> SupportSessionModel | None:
-        return (
-            session.query(SupportSessionModel)
-            .filter(SupportSessionModel.session_hash == digest)
-            .one_or_none()
-        )
+        return session.query(SupportSessionModel).filter(SupportSessionModel.session_hash == digest).one_or_none()
 
     @staticmethod
     def _active_memberships(session, identity_id) -> list[SupportIdentityMembershipModel]:

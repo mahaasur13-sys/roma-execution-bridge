@@ -172,9 +172,7 @@ class ROMARaftNode:
         with self._lock:
             if last_included_index <= self.state.commit_index:
                 # Truncate log before snapshot
-                self.state.log = [
-                    e for e in self.state.log if e.index >= last_included_index
-                ]
+                self.state.log = [e for e in self.state.log if e.index >= last_included_index]
                 self.state.last_applied = last_included_index
                 return True
             return False
@@ -211,9 +209,7 @@ class ROMARaftCluster:
             election_results = {}
             for nid, node in self.nodes.items():
                 t = threading.Thread(
-                    target=lambda n: election_results.update(
-                        {n.node_id: n.start_election()}
-                    ),
+                    target=lambda n: election_results.update({n.node_id: n.start_election()}),
                     args=(node,),
                 )
                 t.start()
@@ -256,6 +252,4 @@ if __name__ == "__main__":
 
     status = cluster.get_cluster_status()
     for nid, s in status["nodes"].items():
-        print(
-            f"  {nid}: role={s['role']}, term={s['term']}, commit_index={s['commit_index']}"
-        )
+        print(f"  {nid}: role={s['role']}, term={s['term']}, commit_index={s['commit_index']}")

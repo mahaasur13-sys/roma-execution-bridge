@@ -38,9 +38,7 @@ class Event:
     event_type: str = ""
     job_id: Optional[str] = None
     payload: Dict[str, Any] = field(default_factory=dict)
-    timestamp: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     sequence: int = 0
 
     def to_dict(self) -> dict:
@@ -70,9 +68,7 @@ class EventStore:
         connection_string: Optional[str] = None,
     ):
         self.db_path = db_path
-        self.connection_string = (
-            connection_string  # Not used yet — PostgreSQL swap possible
-        )
+        self.connection_string = connection_string  # Not used yet — PostgreSQL swap possible
         self._lock = threading.RLock()
         self._sequence = 0
         # Fix B: reuse a single connection for the store's lifetime. The old
@@ -169,9 +165,7 @@ class EventStore:
         )
         return self.append(event)
 
-    def replay(
-        self, from_sequence: int = 0, event_filter: Optional[List[str]] = None
-    ) -> List[Event]:
+    def replay(self, from_sequence: int = 0, event_filter: Optional[List[str]] = None) -> List[Event]:
         """
         Replay all events from from_sequence (exclusive) to latest.
         Optionally filter by event types.
@@ -182,7 +176,9 @@ class EventStore:
 
             if event_filter:
                 placeholders = ",".join("?" * len(event_filter))
-                query = f"SELECT * FROM events WHERE sequence > ? AND event_type IN ({placeholders}) ORDER BY sequence ASC"
+                query = (
+                    f"SELECT * FROM events WHERE sequence > ? AND event_type IN ({placeholders}) ORDER BY sequence ASC"
+                )
                 args = [from_sequence] + event_filter
 
             rows = self._conn.execute(query, args).fetchall()
@@ -232,11 +228,7 @@ class EventStore:
         for event in events:
             if event.event_type in (
                 EventType.JOB_COMPLETED.value,
-                (
-                    EventType.JOB_SUCCEEDED.value
-                    if hasattr(EventType, 'JOB_SUCCEEDED')
-                    else "job.completed"
-                ),
+                (EventType.JOB_SUCCEEDED.value if hasattr(EventType, 'JOB_SUCCEEDED') else "job.completed"),
             ):
                 state["status"] = "completed"
             elif event.event_type == EventType.JOB_FAILED.value:
@@ -286,13 +278,9 @@ class DurabilityLayer:
         return self.events.emit(event_type, job_id, payload)
 
     def record_job_submitted(self, job_id: str, plan: dict, priority: int) -> Event:
-        return self.record(
-            EventType.JOB_SUBMITTED, job_id, {"plan": plan, "priority": priority}
-        )
+        return self.record(EventType.JOB_SUBMITTED, job_id, {"plan": plan, "priority": priority})
 
-    def record_job_dispatched(
-        self, job_id: str, manifest_name: str, execution_mode: str
-    ) -> Event:
+    def record_job_dispatched(self, job_id: str, manifest_name: str, execution_mode: str) -> Event:
         return self.record(
             EventType.JOB_DISPATCHED,
             job_id,

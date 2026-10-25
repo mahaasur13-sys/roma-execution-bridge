@@ -85,9 +85,7 @@ def main(argv: list[str] | None = None) -> int:
             print(result["credential"])
             return 0
         if args.command == "revoke-credential":
-            count = identity_admin.revoke_credential(
-                factory, credential_id=args.credential_id, subject=args.subject
-            )
+            count = identity_admin.revoke_credential(factory, credential_id=args.credential_id, subject=args.subject)
             print(f"revoked_credentials={count}")
             return 0
         if args.command == "revoke-sessions":

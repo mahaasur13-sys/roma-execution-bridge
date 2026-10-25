@@ -13,15 +13,11 @@ class GPULeaseManager:
         self._leases: dict[str, GPULease] = {}
         self._lock = threading.RLock()
 
-    def acquire(
-        self, gpu_id: str, job_id: str, worker_id: str, ttl: float = 30.0
-    ) -> bool:
+    def acquire(self, gpu_id: str, job_id: str, worker_id: str, ttl: float = 30.0) -> bool:
         with self._lock:
             lease = self._leases.get(gpu_id)
             if lease is None or lease.is_expired():
-                self._leases[gpu_id] = GPULease(
-                    gpu_id=gpu_id, job_id=job_id, worker_id=worker_id, ttl=ttl
-                )
+                self._leases[gpu_id] = GPULease(gpu_id=gpu_id, job_id=job_id, worker_id=worker_id, ttl=ttl)
                 log.debug(f"Lease acquired: {gpu_id} -> job {job_id}")
                 return True
             log.debug(f"Lease DENIED: {gpu_id} held by {lease.job_id}")

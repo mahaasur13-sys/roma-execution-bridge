@@ -45,9 +45,7 @@ class QuotaEngine:
     def get_limit(self, tenant_id: str, plan: str = "FREE") -> float:
         return self.PLAN_QUOTAS.get(plan, 0.0)
 
-    def check_quota(
-        self, tenant_id: str, requested: float, plan: str = "FREE"
-    ) -> tuple[bool, str]:
+    def check_quota(self, tenant_id: str, requested: float, plan: str = "FREE") -> tuple[bool, str]:
         used = self.get_usage(tenant_id)
         limit = self.get_limit(tenant_id, plan)
         # Отрицательное значение = безлимит (семантика источника), а не «0 остатка».

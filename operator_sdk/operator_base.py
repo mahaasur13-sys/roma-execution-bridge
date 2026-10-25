@@ -39,15 +39,9 @@ def plugin_to_crd(plugin_class) -> CRDSpec:
     """Auto-generate CRD spec from plugin capabilities."""
     name = plugin_class.__name__.replace("Plugin", "").lower()
     kind = plugin_class.__name__.replace("Plugin", "")
-    caps = (
-        list(plugin_class().capabilities)
-        if hasattr(plugin_class, 'capabilities')
-        else []
-    )
+    caps = list(plugin_class().capabilities) if hasattr(plugin_class, 'capabilities') else []
     resources = (
-        plugin_class().get_resource_requirements({})
-        if hasattr(plugin_class, 'get_resource_requirements')
-        else {}
+        plugin_class().get_resource_requirements({}) if hasattr(plugin_class, 'get_resource_requirements') else {}
     )
     gpu = any("GPU" in str(c) for c in caps)
     schema = {

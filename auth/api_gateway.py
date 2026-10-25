@@ -36,11 +36,7 @@ class RateLimiter:
             "tokens": round(b["tokens"], 2),
             "limit": rate_limit,
             "remaining": int(b["tokens"]),
-            "reset_in_sec": (
-                round((1 - b["tokens"]) * window / rate_limit, 1)
-                if b["tokens"] < 1
-                else 0
-            ),
+            "reset_in_sec": (round((1 - b["tokens"]) * window / rate_limit, 1) if b["tokens"] < 1 else 0),
         }
 
 
@@ -75,9 +71,7 @@ class APIGateway:
         auth_header = request.get("headers", {}).get("authorization", "")
         if auth_header.startswith("Bearer "):
             return auth_header[7:]
-        return request.get("query", {}).get("api_key") or request.get(
-            "headers", {}
-        ).get("x-api-key")
+        return request.get("query", {}).get("api_key") or request.get("headers", {}).get("x-api-key")
 
     def extract_tenant(self, request: dict) -> Optional[str]:
         return request.get("headers", {}).get("x-tenant-id") or request.get("tenant_id")
@@ -177,9 +171,7 @@ if __name__ == "__main__":
 
     auth = AuthEngine()
     auth.create_tenant("tenant-test", "Test Tenant", "PRO")
-    kid, sec = auth.create_key(
-        "tenant-test", "p1", KeyType.SERVER, "test", scopes=["submit"]
-    )
+    kid, sec = auth.create_key("tenant-test", "p1", KeyType.SERVER, "test", scopes=["submit"])
     auth.attach_key_to_tenant("tenant-test", kid)
     meter = MeteringEngine()
     quota = QuotaEngine(meter)
@@ -192,9 +184,7 @@ if __name__ == "__main__":
         return {"data": "ok"}
 
     resp = gw.middleware(handler)(req)
-    print(
-        f"Valid key → status={resp.get('status', 200)}, headers={list(resp.get('headers', {}).keys())}"
-    )
+    print(f"Valid key → status={resp.get('status', 200)}, headers={list(resp.get('headers', {}).keys())}")
 
     # Test: missing key
     req2 = {"headers": {}}

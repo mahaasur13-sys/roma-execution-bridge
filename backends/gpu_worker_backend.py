@@ -82,9 +82,7 @@ class GpuWorkerBackend(BaseBackend):
             "worker_id": data.get("worker_id"),
         }
 
-    async def run_command(
-        self, ctx: JobContext, command: str, timeout: int = 600
-    ) -> dict:
+    async def run_command(self, ctx: JobContext, command: str, timeout: int = 600) -> dict:
         url = _worker_url()
         payload = {"job_id": ctx.job_id, "command": command, "timeout": timeout}
         try:

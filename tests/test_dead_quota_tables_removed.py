@@ -29,9 +29,7 @@ def _spec_exists(dotted: str) -> bool:
 def test_cloudpayments_price_table_is_gone() -> None:
     """`PLANS` из cloudpayments-клиента удалён: модуль импортируется, таблицы нет."""
     module = importlib.import_module("billing.cloudpayments_client")
-    assert not hasattr(
-        module, "PLANS"
-    ), "мёртвая таблица квот вернулась в cloudpayments-клиент"
+    assert not hasattr(module, "PLANS"), "мёртвая таблица квот вернулась в cloudpayments-клиент"
 
 
 def test_cloudpayments_public_surface_intact() -> None:
@@ -39,9 +37,7 @@ def test_cloudpayments_public_surface_intact() -> None:
     module = importlib.import_module("billing.cloudpayments_client")
     assert hasattr(module, "CloudPaymentsConfig")
     assert hasattr(module, "CloudPaymentsClient")
-    cfg = module.CloudPaymentsConfig(
-        public_id="pk", api_secret="sk", webhook_secret="wh"
-    )
+    cfg = module.CloudPaymentsConfig(public_id="pk", api_secret="sk", webhook_secret="wh")
     assert cfg.public_id == "pk"
 
 
@@ -70,8 +66,6 @@ def test_cost_package_keeps_its_live_modules() -> None:
         "cost.estimator",
         "cost.enterprise_gate",
     ):
-        assert _spec_exists(
-            dotted
-        ), f"живой модуль {dotted} потерян при удалении мёртвых таблиц"
+        assert _spec_exists(dotted), f"живой модуль {dotted} потерян при удалении мёртвых таблиц"
     with pytest.raises(ModuleNotFoundError):
         importlib.import_module("cost.config")

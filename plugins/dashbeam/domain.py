@@ -70,9 +70,7 @@ class DashBeamTicket(BaseModel):
     visibility: TicketVisibility = TicketVisibility.SINGLE_RECIPIENT
 
     # Iroh ticket payload (opaque bytes, base64-encoded for storage)
-    iroh_ticket_b64: str = Field(
-        default="", description="Base64-encoded Iroh ticket blob"
-    )
+    iroh_ticket_b64: str = Field(default="", description="Base64-encoded Iroh ticket blob")
     iroh_hash: str = Field(default="", description="SHA-256 hash of the Iroh ticket")
 
     # Metadata (visible to server for audit)

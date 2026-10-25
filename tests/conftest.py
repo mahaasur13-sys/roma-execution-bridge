@@ -63,9 +63,7 @@ INVARIANT_FILES = (
     "test_p0_security.py",
 )
 ISSUE_MARK = "issue:"
-EXPIRY_MARK = (
-    "expiry:"  # A-3b: рантайм-бюджет требует ту же тройку, что статическая политика
-)
+EXPIRY_MARK = "expiry:"  # A-3b: рантайм-бюджет требует ту же тройку, что статическая политика
 LEDGER_PATH = Path("/tmp/roma_skip_ledger.json")
 
 # ---------------------------------------------------------------------------
@@ -114,14 +112,9 @@ def _apply_test_isolation() -> str | None:
         pytest.exit(str(exc), returncode=_isolation.REFUSED_EXIT_CODE)
 
     if dsn:
-        print(
-            f"[conftest] A1 test isolation: TEST DB pinned ({_isolation.describe(dsn)})"
-        )
+        print(f"[conftest] A1 test isolation: TEST DB pinned ({_isolation.describe(dsn)})")
     else:
-        print(
-            "[conftest] A1 test isolation: тестовый DSN не найден — "
-            "PG-инварианты скипнутся (см. skip-budget ниже)"
-        )
+        print("[conftest] A1 test isolation: тестовый DSN не найден — PG-инварианты скипнутся (см. skip-budget ниже)")
     return dsn
 
 
@@ -135,10 +128,7 @@ def _sweep_and_report() -> None:
         + " · ".join(f"{k}={v or '<unset>'}" for k, v in findings.items())
     )
     if problems:
-        message = (
-            f"{_isolation.REFUSED_MARKER}: после resolve db-ключи указывают на боевую БД: "
-            + "; ".join(problems)
-        )
+        message = f"{_isolation.REFUSED_MARKER}: после resolve db-ключи указывают на боевую БД: " + "; ".join(problems)
         print("\n" + message + "\n", flush=True)
         pytest.exit(message, returncode=_isolation.REFUSED_EXIT_CODE)
 
@@ -177,9 +167,7 @@ def pytest_sessionstart(session) -> None:
 
         loaded = env_loader.load_env()
         if loaded:
-            print(
-                f"[conftest] env loaded explicitly (PG_DSN set: {bool(os.environ.get('PG_DSN'))})"
-            )
+            print(f"[conftest] env loaded explicitly (PG_DSN set: {bool(os.environ.get('PG_DSN'))})")
     except Exception as exc:  # конфиг не критичен для unit-тестов
         print(f"[conftest] env_loader недоступен: {type(exc).__name__}: {exc}")
 
@@ -228,9 +216,7 @@ def pytest_sessionfinish(session, exitstatus) -> None:
         if any(f in s["nodeid"] for f in INVARIANT_FILES)
         and (ISSUE_MARK not in s["reason"] or EXPIRY_MARK not in s["reason"])
     ]
-    invariant_skips = [
-        s for s in _skips if any(f in s["nodeid"] for f in INVARIANT_FILES)
-    ]
+    invariant_skips = [s for s in _skips if any(f in s["nodeid"] for f in INVARIANT_FILES)]
 
     ledger = {
         "skips_total": len(_skips),
@@ -243,9 +229,7 @@ def pytest_sessionfinish(session, exitstatus) -> None:
     except Exception:
         pass
 
-    invariant_files_skipped = sorted(
-        {s["nodeid"].split("::")[0] for s in invariant_skips}
-    )
+    invariant_files_skipped = sorted({s["nodeid"].split("::")[0] for s in invariant_skips})
     print(
         "\n[conftest] skip-budget:"
         f" invariant files skipped: {len(invariant_files_skipped)}"
@@ -259,9 +243,7 @@ def pytest_sessionfinish(session, exitstatus) -> None:
         print(f"  - {s['nodeid']} :: {s['reason'][:120]}")
 
     if violations:
-        print(
-            "\n[conftest] SKIP BUDGET VIOLATION: инвариантный тест скипнут без тройки issue+expiry:"
-        )
+        print("\n[conftest] SKIP BUDGET VIOLATION: инвариантный тест скипнут без тройки issue+expiry:")
         for v in violations:
             print(f"  - {v['nodeid']} :: {v['reason'][:160]}")
         session.exitstatus = pytest.ExitCode.TESTS_FAILED

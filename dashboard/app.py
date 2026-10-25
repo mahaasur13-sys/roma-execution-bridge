@@ -102,12 +102,8 @@ def make_gpu_bar(node: str, state: dict) -> go.Figure:
     total = state["vram_total_gb"]
     free = total - used
     pct = state["utilization_pct"]
-    bar = go.Figure(
-        go.Bar(y=[node], x=[used], name="Used", marker_color="#e74c3c", orientation="h")
-    )
-    bar.add_trace(
-        go.Bar(y=[node], x=[free], name="Free", marker_color="#2ecc71", orientation="h")
-    )
+    bar = go.Figure(go.Bar(y=[node], x=[used], name="Used", marker_color="#e74c3c", orientation="h"))
+    bar.add_trace(go.Bar(y=[node], x=[free], name="Free", marker_color="#2ecc71", orientation="h"))
     bar.update_layout(
         barmode="stack",
         height=80,
@@ -192,11 +188,7 @@ app.layout = dbc.Container(
                         dbc.Card(
                             [
                                 dbc.CardHeader("📊 Execution Timeline"),
-                                dbc.CardBody(
-                                    dcc.Graph(
-                                        id="timeline-chart", figure=make_timeline()
-                                    )
-                                ),
+                                dbc.CardBody(dcc.Graph(id="timeline-chart", figure=make_timeline())),
                             ],
                             className="mb-3",
                         )
@@ -208,9 +200,7 @@ app.layout = dbc.Container(
                         dbc.Card(
                             [
                                 dbc.CardHeader("💰 Last Job Cost"),
-                                dbc.CardBody(
-                                    dcc.Graph(id="cost-gauge", figure=make_cost_gauge())
-                                ),
+                                dbc.CardBody(dcc.Graph(id="cost-gauge", figure=make_cost_gauge())),
                             ],
                             className="mb-3",
                         )
@@ -315,9 +305,7 @@ app.layout = dbc.Container(
                                         dbc.InputGroup(
                                             [
                                                 dbc.InputGroupText("Task"),
-                                                dbc.Input(
-                                                    id="sim-task", value="train YOLOv8"
-                                                ),
+                                                dbc.Input(id="sim-task", value="train YOLOv8"),
                                                 dbc.InputGroupText("GPU sec"),
                                                 dbc.Input(
                                                     id="sim-gpu",
@@ -409,18 +397,13 @@ def refresh(n):
     jobs = pe.project_execution_timeline()
     job_items = [
         html.Li(
-            html.Span(
-                j["job_id"], style={"color": STATUS_COLOR.get(j["status"], "#fff")}
-            ),
+            html.Span(j["job_id"], style={"color": STATUS_COLOR.get(j["status"], "#fff")}),
             f" | {j['status']} | gpu={j['gpu']} | ${j['cost']:.4f}",
         )
         for j in jobs
     ]
 
-    events = [
-        f"[{e['ts']}] {e['type']} → {list(e.get('payload',{}).keys())}"
-        for e in pe.events[-20:]
-    ]
+    events = [f"[{e['ts']}] {e['type']} → {list(e.get('payload', {}).keys())}" for e in pe.events[-20:]]
     audit_txt = "\n".join(events) if events else "No events yet"
 
     timeline = make_timeline()

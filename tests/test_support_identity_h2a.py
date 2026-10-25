@@ -113,9 +113,7 @@ def h2a(tmp_path, monkeypatch):
 
 def _login(client, credential: str, origin: str | None = ORIGIN):
     headers = {"Origin": origin} if origin else {}
-    resp = client.post(
-        "/v1/support/auth/login", json={"credential": credential}, headers=headers
-    )
+    resp = client.post("/v1/support/auth/login", json={"credential": credential}, headers=headers)
     return resp
 
 
@@ -169,12 +167,7 @@ class TestCredentialAndSessionPersistence:
                 SupportSessionModel,
             ):
                 rows = session.query(model).all()
-                blob = repr(
-                    [
-                        {c.name: getattr(r, c.name) for c in r.__table__.columns}
-                        for r in rows
-                    ]
-                )
+                blob = repr([{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in rows])
                 for secret in (raw, raw_session, raw_csrf):
                     assert secret not in blob, model.__tablename__
 
@@ -224,9 +217,11 @@ class TestCredentialAndSessionPersistence:
 
         info2 = _provision(h2a["factory"], "agent-06b", [TENANT_A])
         with h2a["factory"]() as session:
-            row = session.query(SupportCredentialModel).filter(
-                SupportCredentialModel.credential_hash == hash_token(info2["credential"])
-            ).one()
+            row = (
+                session.query(SupportCredentialModel)
+                .filter(SupportCredentialModel.credential_hash == hash_token(info2["credential"]))
+                .one()
+            )
             row.revoked_at = datetime.now(timezone.utc)
             session.commit()
         with pytest.raises(SupportCredentialError):
@@ -268,9 +263,7 @@ class TestCredentialAndSessionPersistence:
             after = session.query(SupportSessionModel).one().expires_at
         assert after == before
 
-    def test_11_expired_revoked_and_version_mismatched_sessions_fail_closed(
-        self, h2a
-    ) -> None:
+    def test_11_expired_revoked_and_version_mismatched_sessions_fail_closed(self, h2a) -> None:
         info = _provision(h2a["factory"], "agent-11", [TENANT_A])
         _, raw_session, _ = h2a["auth"]._login_sync(info["credential"])
 
@@ -340,10 +333,7 @@ class TestBrowserGuards:
     def test_16_login_requires_an_allowed_origin(self, h2a) -> None:
         info = _provision(h2a["factory"], "agent-16", [TENANT_A])
         assert _login(h2a["client"], info["credential"], origin=None).status_code == 403
-        assert (
-            _login(h2a["client"], info["credential"], origin="https://evil.test").status_code
-            == 403
-        )
+        assert _login(h2a["client"], info["credential"], origin="https://evil.test").status_code == 403
         ok = _login(h2a["client"], info["credential"])
         assert ok.status_code == 200
 
@@ -433,18 +423,14 @@ class TestBrowserGuards:
                     resp = client.post(path, headers=headers)
                 else:
                     resp = client.post(path, json=body, headers=headers)
-                assert resp.status_code == 403, (
-                    f"{name}/{label}: {resp.status_code} {resp.text}"
-                )
+                assert resp.status_code == 403, f"{name}/{label}: {resp.status_code} {resp.text}"
 
     def test_19_logout_needs_origin_and_csrf(self, h2a) -> None:
         info = _provision(h2a["factory"], "agent-19", [TENANT_A])
         login = _login(h2a["client"], info["credential"])
         csrf = login.json()["csrf_token"]
 
-        missing_csrf = h2a["client"].post(
-            "/v1/support/auth/logout", headers={"Origin": ORIGIN}
-        )
+        missing_csrf = h2a["client"].post("/v1/support/auth/logout", headers={"Origin": ORIGIN})
         assert missing_csrf.status_code == 403
 
         wrong_csrf = h2a["client"].post(
@@ -471,9 +457,7 @@ class TestProvisioningCli:
     """Offline provisioning: one-time credential output, atomic failures."""
 
     def test_20_create_returns_credential_once_and_stores_digests(self, h2a) -> None:
-        info = _provision(
-            h2a["factory"], "cli-agent", [TENANT_A, TENANT_B], expires_in_days=30
-        )
+        info = _provision(h2a["factory"], "cli-agent", [TENANT_A, TENANT_B], expires_in_days=30)
         assert info["credential"]
         assert info["role"] == SUPPORT_AGENT_ROLE
         assert info["tenant_ids"] == [TENANT_A, TENANT_B]
@@ -495,9 +479,7 @@ class TestProvisioningCli:
             )
         assert info["credential"] not in blob
 
-    def test_21_duplicate_subject_and_duplicate_membership_fail_atomically(
-        self, h2a
-    ) -> None:
+    def test_21_duplicate_subject_and_duplicate_membership_fail_atomically(self, h2a) -> None:
         _provision(h2a["factory"], "dupe", [TENANT_A])
         with pytest.raises(identity_admin.SupportAuthError):
             _provision(h2a["factory"], "dupe", [TENANT_B])
@@ -531,9 +513,7 @@ class TestProvisioningCli:
         first = _provision(h2a["factory"], "revoke-a", [TENANT_A])
         _provision(h2a["factory"], "revoke-b", [TENANT_A])
 
-        assert identity_admin.revoke_credential(
-            h2a["factory"], credential_id=first["credential_id"]
-        ) == 1
+        assert identity_admin.revoke_credential(h2a["factory"], credential_id=first["credential_id"]) == 1
         with pytest.raises(SupportCredentialError):
             h2a["auth"]._login_sync(first["credential"])
 
@@ -582,13 +562,9 @@ class TestProvisioningCli:
 class TestRestLeastPrivilege:
     """HTTP contract: 401/400/403 ordering, self-claim only, no caller agent id."""
 
-    def test_26_no_credentials_is_401_before_any_service_call(
-        self, h2a, monkeypatch
-    ) -> None:
+    def test_26_no_credentials_is_401_before_any_service_call(self, h2a, monkeypatch) -> None:
         monkeypatch.setattr(support_router, "_service", _ForbiddenService())
-        resp = h2a["client"].post(
-            f"/v1/support/tickets/{uuid.uuid4()}/assign", json={}
-        )
+        resp = h2a["client"].post(f"/v1/support/tickets/{uuid.uuid4()}/assign", json={})
         assert resp.status_code == 401
 
     def test_27_invalid_tenant_key_is_401(self, h2a, monkeypatch) -> None:
@@ -607,11 +583,7 @@ class TestRestLeastPrivilege:
         import support_chat.router as router_module
 
         def _fake_key(request: Request):
-            return (
-                {"tenant_id": TENANT_A, "name": TENANT_A}
-                if request.headers.get("x-api-key")
-                else None
-            )
+            return {"tenant_id": TENANT_A, "name": TENANT_A} if request.headers.get("x-api-key") else None
 
         h2a["app"].dependency_overrides[router_module._optional_tenant_principal] = _fake_key
         monkeypatch.setattr(support_router, "_service", _ForbiddenService())
@@ -619,9 +591,7 @@ class TestRestLeastPrivilege:
         # CR-1: the wrapper is deliberately synchronous, so FastAPI runs the
         # sync DB-backed canonical verifier in its dependency threadpool
         # instead of blocking the event loop.
-        assert inspect.iscoroutinefunction(
-            router_module._optional_tenant_principal
-        ) is False
+        assert inspect.iscoroutinefunction(router_module._optional_tenant_principal) is False
 
         assign = h2a["client"].post(
             f"/v1/support/tickets/{uuid.uuid4()}/assign",
@@ -635,18 +605,12 @@ class TestRestLeastPrivilege:
         )
         assert transition.status_code == 403
 
-    def test_29_both_credential_types_are_rejected_before_lookup(
-        self, h2a, monkeypatch
-    ) -> None:
+    def test_29_both_credential_types_are_rejected_before_lookup(self, h2a, monkeypatch) -> None:
         """A session cookie plus an API key is refused with 400, before lookup."""
         import support_chat.router as router_module
 
         def _fake_key(request: Request):
-            return (
-                {"tenant_id": TENANT_A, "name": TENANT_A}
-                if request.headers.get("x-api-key")
-                else None
-            )
+            return {"tenant_id": TENANT_A, "name": TENANT_A} if request.headers.get("x-api-key") else None
 
         h2a["app"].dependency_overrides[router_module._optional_tenant_principal] = _fake_key
         monkeypatch.setattr(support_router, "_service", _ForbiddenService())
@@ -666,9 +630,7 @@ class TestRestLeastPrivilege:
         csrf = login["csrf_token"]
         headers = {"Origin": ORIGIN, CSRF_HEADER_NAME: csrf}
 
-        ticket = await h2a["service"].create_ticket(
-            CreateTicketRequest(subject="assign-body"), _ctx(TENANT_A)
-        )
+        ticket = await h2a["service"].create_ticket(CreateTicketRequest(subject="assign-body"), _ctx(TENANT_A))
         tid = str(ticket.ticket_id)
 
         empty = client.post(f"/v1/support/tickets/{tid}/assign", json={}, headers=headers)
@@ -692,12 +654,8 @@ class TestRestLeastPrivilege:
         csrf = login["csrf_token"]
         headers = {"Origin": ORIGIN, CSRF_HEADER_NAME: csrf}
 
-        foreign = await h2a["service"].create_ticket(
-            CreateTicketRequest(subject="foreign"), _ctx(TENANT_B)
-        )
-        resp = client.post(
-            f"/v1/support/tickets/{foreign.ticket_id}/assign", json={}, headers=headers
-        )
+        foreign = await h2a["service"].create_ticket(CreateTicketRequest(subject="foreign"), _ctx(TENANT_B))
+        resp = client.post(f"/v1/support/tickets/{foreign.ticket_id}/assign", json={}, headers=headers)
         assert resp.status_code == 404
         stored = await h2a["service"].get_ticket(str(foreign.ticket_id), _ctx(TENANT_B))
         assert stored.assigned_agent_id is None
@@ -730,14 +688,10 @@ class TestRestLeastPrivilege:
         csrf = login["csrf_token"]
         headers = {"Origin": ORIGIN, CSRF_HEADER_NAME: csrf}
 
-        ticket = await h2a["service"].create_ticket(
-            CreateTicketRequest(subject="transition"), _ctx(TENANT_A)
-        )
+        ticket = await h2a["service"].create_ticket(CreateTicketRequest(subject="transition"), _ctx(TENANT_A))
         tid = str(ticket.ticket_id)
 
-        claimed = client.post(
-            f"/v1/support/tickets/{tid}/assign", json={}, headers=headers
-        )
+        claimed = client.post(f"/v1/support/tickets/{tid}/assign", json={}, headers=headers)
         assert claimed.status_code == 200
 
         moved = client.post(
@@ -753,9 +707,7 @@ class TestRestLeastPrivilege:
         other_login = _login(h2a["client"], other["credential"])
         other_principal, _, _ = h2a["auth"]._login_sync(other["credential"])
 
-        ticket = await h2a["service"].create_ticket(
-            CreateTicketRequest(subject="assigned-elsewhere"), _ctx(TENANT_A)
-        )
+        ticket = await h2a["service"].create_ticket(CreateTicketRequest(subject="assigned-elsewhere"), _ctx(TENANT_A))
         await h2a["service"].assign_agent_to_self(
             str(ticket.ticket_id), "support_agent:someone-else", frozenset({TENANT_A})
         )
@@ -767,9 +719,7 @@ class TestRestLeastPrivilege:
                 other_principal.actor_id,
                 frozenset({TENANT_A}),
             )
-        stored = await h2a["service"].get_ticket(
-            str(ticket.ticket_id), _ctx(TENANT_A)
-        )
+        stored = await h2a["service"].get_ticket(str(ticket.ticket_id), _ctx(TENANT_A))
         assert stored.status == TicketStatus.IN_PROGRESS
         assert other_login.status_code == 200
 
@@ -783,9 +733,7 @@ class TestRestLeastPrivilege:
         with pytest.raises(TicketNotFoundError):
             await service.assign_agent_to_self(str(missing), actor, scopes)
 
-        ticket = await service.create_ticket(
-            CreateTicketRequest(subject="e15"), _ctx(TENANT_A)
-        )
+        ticket = await service.create_ticket(CreateTicketRequest(subject="e15"), _ctx(TENANT_A))
         tid = str(ticket.ticket_id)
 
         first = await service.assign_agent_to_self(tid, actor, scopes)
@@ -793,16 +741,12 @@ class TestRestLeastPrivilege:
         assert first.assigned_agent_id == actor
 
         # An already-IN_PROGRESS ticket may be re-claimed (accepted E-15 rule).
-        again = await service.assign_agent_to_self(
-            tid, "support_agent:other", scopes
-        )
+        again = await service.assign_agent_to_self(tid, "support_agent:other", scopes)
         assert again.status == TicketStatus.IN_PROGRESS
         assert again.assigned_agent_id == "support_agent:other"
 
         # A terminal status refuses assignment with the typed conflict.
-        await service.transition_status_as_assignee(
-            tid, TicketStatus.RESOLVED, "support_agent:other", scopes
-        )
+        await service.transition_status_as_assignee(tid, TicketStatus.RESOLVED, "support_agent:other", scopes)
         with pytest.raises(TicketStatusConflictError):
             await service.assign_agent_to_self(tid, actor, scopes)
 
@@ -812,9 +756,7 @@ class TestRestLeastPrivilege:
 
     def test_36_websocket_still_closes_4401_before_accept(self, h2a) -> None:
         with pytest.raises(WebSocketDisconnect) as excinfo:
-            with h2a["client"].websocket_connect(
-                f"/v1/support/ws/{uuid.uuid4()}"
-            ) as ws:
+            with h2a["client"].websocket_connect(f"/v1/support/ws/{uuid.uuid4()}") as ws:
                 ws.receive_text()
         assert excinfo.value.code == 4401
 
@@ -894,9 +836,7 @@ class TestConcurrentCasConflicts:
             def __call__(self):
                 return _HookedSession(factory())
 
-        return SupportTicketService(
-            chat_service=ChatService(), session_factory=_HookedFactory()
-        )
+        return SupportTicketService(chat_service=ChatService(), session_factory=_HookedFactory())
 
     @staticmethod
     def _compete(session, tid, values) -> None:
@@ -918,9 +858,7 @@ class TestConcurrentCasConflicts:
     async def test_40_assignment_cas_loses_and_writes_nothing(self, h2a) -> None:
         scopes = frozenset({TENANT_A})
         actor = "support_agent:agent-40"
-        ticket = await h2a["service"].create_ticket(
-            CreateTicketRequest(subject="cas-assign"), _ctx(TENANT_A)
-        )
+        ticket = await h2a["service"].create_ticket(CreateTicketRequest(subject="cas-assign"), _ctx(TENANT_A))
         tid = ticket.ticket_id
 
         fired: list[str] = []
@@ -953,9 +891,7 @@ class TestConcurrentCasConflicts:
         scopes = frozenset({TENANT_A})
         owner = "support_agent:agent-41"
         other = "support_agent:agent-41b"
-        ticket = await h2a["service"].create_ticket(
-            CreateTicketRequest(subject="cas-transition"), _ctx(TENANT_A)
-        )
+        ticket = await h2a["service"].create_ticket(CreateTicketRequest(subject="cas-transition"), _ctx(TENANT_A))
         tid = ticket.ticket_id
         await h2a["service"].assign_agent_to_self(str(tid), owner, scopes)
 
@@ -969,9 +905,7 @@ class TestConcurrentCasConflicts:
 
         hooked = self._hooked_service(h2a["factory"], hook)
         with pytest.raises(ValueError) as excinfo:
-            await hooked.transition_status_as_assignee(
-                str(tid), TicketStatus.RESOLVED, owner, scopes
-            )
+            await hooked.transition_status_as_assignee(str(tid), TicketStatus.RESOLVED, owner, scopes)
         assert not isinstance(excinfo.value, TicketNotFoundError)
         assert "concurrently" in str(excinfo.value)
         assert fired == ["competing-write"]
@@ -1054,9 +988,7 @@ class TestAgentMembershipScopedReads:
         with h2a["factory"]() as session:
             return [
                 (str(r.ticket_id), r.tenant_id, r.status, r.assigned_agent_id, r.subject)
-                for r in session.query(SupportTicketModel)
-                .order_by(SupportTicketModel.ticket_id.asc())
-                .all()
+                for r in session.query(SupportTicketModel).order_by(SupportTicketModel.ticket_id.asc()).all()
             ]
 
     @staticmethod
@@ -1065,18 +997,14 @@ class TestAgentMembershipScopedReads:
 
     # --- credential ordering ---------------------------------------------
 
-    def test_42_no_credential_is_401_before_any_service_call(
-        self, h2a, monkeypatch
-    ) -> None:
+    def test_42_no_credential_is_401_before_any_service_call(self, h2a, monkeypatch) -> None:
         monkeypatch.setattr(support_router, "_service", _ForbiddenService())
         client = TestClient(h2a["app"], base_url="https://testserver")
         resp = client.get("/v1/support/agent/tickets")
         assert resp.status_code == 401
         assert "X-API-Key" in resp.json()["detail"]
 
-    def test_43_valid_tenant_key_is_403_before_any_service_call(
-        self, h2a, monkeypatch
-    ) -> None:
+    def test_43_valid_tenant_key_is_403_before_any_service_call(self, h2a, monkeypatch) -> None:
         """An API key identifies a tenant, never a support agent."""
         monkeypatch.setattr(support_router, "_service", _ForbiddenService())
         monkeypatch.setitem(
@@ -1089,9 +1017,7 @@ class TestAgentMembershipScopedReads:
         assert resp.status_code == 403
         assert RAW_KEY not in resp.text
 
-    def test_44_both_credential_types_are_400_before_any_service_call(
-        self, h2a, monkeypatch
-    ) -> None:
+    def test_44_both_credential_types_are_400_before_any_service_call(self, h2a, monkeypatch) -> None:
         monkeypatch.setattr(support_router, "_service", _ForbiddenService())
         monkeypatch.setitem(
             h2a["app"].dependency_overrides,
@@ -1134,9 +1060,7 @@ class TestAgentMembershipScopedReads:
         listing = client.get("/v1/support/agent/tickets", headers=forged)
         assert listing.status_code == 200
         assert self._ids(listing.json()) == [mine]
-        filtered = client.get(
-            "/v1/support/agent/tickets", params={"tenant_id": TENANT_B}, headers=forged
-        )
+        filtered = client.get("/v1/support/agent/tickets", params={"tenant_id": TENANT_B}, headers=forged)
         assert filtered.status_code == 404
 
     # --- membership-scoped listing ---------------------------------------
@@ -1164,22 +1088,16 @@ class TestAgentMembershipScopedReads:
         self._seed_ticket(h2a, TENANT_A)
         b = self._seed_ticket(h2a, TENANT_B)
         client = self._agent(h2a, "agent-c1-50", [TENANT_A, TENANT_B])
-        body = client.get(
-            "/v1/support/agent/tickets", params={"tenant_id": TENANT_B}
-        ).json()
+        body = client.get("/v1/support/agent/tickets", params={"tenant_id": TENANT_B}).json()
         assert body["total"] == 1
         assert self._ids(body) == [b]
         assert body["tickets"][0]["tenant_id"] == TENANT_B
 
-    def test_51_out_of_scope_tenant_filter_is_404_before_any_service_call(
-        self, h2a, monkeypatch
-    ) -> None:
+    def test_51_out_of_scope_tenant_filter_is_404_before_any_service_call(self, h2a, monkeypatch) -> None:
         client = self._agent(h2a, "agent-c1-51", [TENANT_A])
         monkeypatch.setattr(support_router, "_service", _ForbiddenService())
         for bogus in (TENANT_B, TENANT_C, "tenant-does-not-exist"):
-            resp = client.get(
-                "/v1/support/agent/tickets", params={"tenant_id": bogus}
-            )
+            resp = client.get("/v1/support/agent/tickets", params={"tenant_id": bogus})
             assert resp.status_code == 404, bogus
 
     def test_52_empty_authorized_result_is_200_and_empty(self, h2a) -> None:
@@ -1195,9 +1113,7 @@ class TestAgentMembershipScopedReads:
         opened = self._seed_ticket(h2a, TENANT_A, status=TicketStatus.OPEN.value)
         self._seed_ticket(h2a, TENANT_A, status=TicketStatus.RESOLVED.value)
         client = self._agent(h2a, "agent-c1-53", [TENANT_A])
-        filtered = client.get(
-            "/v1/support/agent/tickets", params={"status": TicketStatus.OPEN.value}
-        )
+        filtered = client.get("/v1/support/agent/tickets", params={"status": TicketStatus.OPEN.value})
         assert filtered.status_code == 200
         assert self._ids(filtered.json()) == [opened]
         assert filtered.json()["total"] == 1
@@ -1211,12 +1127,8 @@ class TestAgentMembershipScopedReads:
         oldest = self._seed_ticket(h2a, TENANT_A, created_at=base)
         self._seed_ticket(h2a, TENANT_B, created_at=base)
         client = self._agent(h2a, "agent-c1-54", [TENANT_A])
-        first = client.get(
-            "/v1/support/agent/tickets", params={"page": 1, "page_size": 2}
-        ).json()
-        second = client.get(
-            "/v1/support/agent/tickets", params={"page": 2, "page_size": 2}
-        ).json()
+        first = client.get("/v1/support/agent/tickets", params={"page": 1, "page_size": 2}).json()
+        second = client.get("/v1/support/agent/tickets", params={"page": 2, "page_size": 2}).json()
         assert first["total"] == second["total"] == 3
         assert (first["page"], first["page_size"]) == (1, 2)
         assert self._ids(first) == [oldest, middle]
@@ -1272,9 +1184,7 @@ class TestAgentMembershipScopedReads:
 
     def test_60_read_does_not_require_assignment(self, h2a) -> None:
         unassigned = self._seed_ticket(h2a, TENANT_A)
-        other_agent = self._seed_ticket(
-            h2a, TENANT_A, assigned_agent_id="support_agent:someone-else"
-        )
+        other_agent = self._seed_ticket(h2a, TENANT_A, assigned_agent_id="support_agent:someone-else")
         client = self._agent(h2a, "agent-c1-60", [TENANT_A])
         for ticket_id in (unassigned, other_agent):
             assert client.get(f"/v1/support/agent/tickets/{ticket_id}").status_code == 200
@@ -1304,9 +1214,7 @@ class TestAgentMembershipScopedReads:
 
     # --- regressions ------------------------------------------------------
 
-    def test_63_tenant_routes_keep_the_canonical_key_and_tenant_scope(
-        self, h2a, monkeypatch
-    ) -> None:
+    def test_63_tenant_routes_keep_the_canonical_key_and_tenant_scope(self, h2a, monkeypatch) -> None:
         mine = self._seed_ticket(h2a, TENANT_A)
         foreign = self._seed_ticket(h2a, TENANT_B)
         plain = TestClient(h2a["app"], base_url="https://testserver")

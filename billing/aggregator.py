@@ -56,11 +56,7 @@ def simulate_usage(aggregator: UsageAggregator) -> None:
             BillingEvent(
                 event_id=f"evt-{i:03d}",
                 tenant_id="tenant-abc",
-                event_type=(
-                    BillingEventType.JOB_STARTED
-                    if i % 2 == 0
-                    else BillingEventType.GPU_ALLOCATED
-                ),
+                event_type=(BillingEventType.JOB_STARTED if i % 2 == 0 else BillingEventType.GPU_ALLOCATED),
                 timestamp=now - (10 - i) * 3600,
                 gpu_seconds=3600.0 + i * 120,  # 1h + 2min increments
                 gpu_node=f"gpu-node-{i % 3}",
@@ -68,7 +64,5 @@ def simulate_usage(aggregator: UsageAggregator) -> None:
         )
     total = aggregator.aggregate_gpu_seconds("tenant-abc", now - 10 * 3600, now)
     summary = aggregator.monthly_summary("tenant-abc", now)
-    print(f"Aggregated GPU-seconds (10h window): {total:.1f}s = {total/3600:.2f}h")
-    print(
-        f"Monthly summary: {summary['gpu_seconds']:.1f}s = {summary['gpu_seconds']/3600:.2f}h"
-    )
+    print(f"Aggregated GPU-seconds (10h window): {total:.1f}s = {total / 3600:.2f}h")
+    print(f"Monthly summary: {summary['gpu_seconds']:.1f}s = {summary['gpu_seconds'] / 3600:.2f}h")

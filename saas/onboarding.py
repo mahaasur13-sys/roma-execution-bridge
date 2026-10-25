@@ -33,9 +33,7 @@ pred = CostPredictor().predict(
     plugin_type="ml_training",
     tenant_id=os.environ.get("ROMA_TENANT_ID") or None,
 )
-cost_note = (
-    "n/a" if pred["estimated_cost"] is None else f"${pred['estimated_cost']:.4f}"
-)
+cost_note = "n/a" if pred["estimated_cost"] is None else f"${pred['estimated_cost']:.4f}"
 print("\n[2/3] COST PREVIEW shown before execution")
 print("           task: train YOLOv8 on GPU")
 print(f"           cost: {cost_note}")

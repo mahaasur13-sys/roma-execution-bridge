@@ -12,6 +12,7 @@ import pytest
 import db_adapter
 from cost.estimator import RuntimeEstimator
 
+
 def _db(tmp_path, monkeypatch):
     """Временная execution_jobs: 3 completed + 1 running (running обязан быть отброшен)."""
     path = tmp_path / "jobs.db"
@@ -65,9 +66,7 @@ def test_estimate_blends_with_history(tmp_path, monkeypatch):
     """Оценка смешивается 0.7*бенчмарк + 0.3*история — поправка реально применяется."""
     with monkeypatch.context() as m:
         m.setattr(db_adapter, "list_completed_execution_jobs", lambda limit=1000: [])
-        baseline = RuntimeEstimator().estimate(
-            "ml_training", batch_size=4, model_size="large"
-        )
+        baseline = RuntimeEstimator().estimate("ml_training", batch_size=4, model_size="large")
     _db(tmp_path, monkeypatch)
     estimator = RuntimeEstimator()
 
@@ -93,10 +92,7 @@ def test_empty_history_keeps_estimate(tmp_path, monkeypatch):
 
     assert estimator.historical_events == []
     assert estimator._hist_avg() == 0.0
-    assert (
-        estimator.estimate("inference")["estimated_seconds"]
-        == baseline["estimated_seconds"]
-    )
+    assert estimator.estimate("inference")["estimated_seconds"] == baseline["estimated_seconds"]
 
 
 def test_db_error_logs_warning(monkeypatch):

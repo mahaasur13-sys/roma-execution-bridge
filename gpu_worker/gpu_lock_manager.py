@@ -79,9 +79,7 @@ class GPULockManager:
 
     def get_all_locks(self) -> List[GPULock]:
         with self._mu:
-            return [
-                lock for lock in self._locks.values() if self.is_locked(lock.gpu_id)
-            ]
+            return [lock for lock in self._locks.values() if self.is_locked(lock.gpu_id)]
 
     def cleanup_expired(self):
         """Remove expired locks."""

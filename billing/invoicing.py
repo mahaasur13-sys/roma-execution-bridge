@@ -24,9 +24,7 @@ class InvoicingEngine:
         self.tax_rate = tax_rate
         self.invoices: Dict[str, Invoice] = {}
 
-    def generate(
-        self, tenant_id: str, items: List[Dict], period_start: float, period_end: float
-    ) -> Invoice:
+    def generate(self, tenant_id: str, items: List[Dict], period_start: float, period_end: float) -> Invoice:
         subtotal = sum(i["cost"] for i in items)
         tax = subtotal * self.tax_rate
         inv = Invoice(

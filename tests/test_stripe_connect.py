@@ -28,7 +28,7 @@ def test_fee_boundaries():
         actual_rate = result['rate_used']
         passed = actual_rate == expected_rate
         print(
-            f"  [{'PASS' if passed else 'FAIL'}] ${gross:.2f} → {actual_rate*100:.0f}% (expected {expected_rate*100:.0f}%)"
+            f"  [{'PASS' if passed else 'FAIL'}] ${gross:.2f} → {actual_rate * 100:.0f}% (expected {expected_rate * 100:.0f}%)"
         )
         if not passed:
             all_passed = False
@@ -67,9 +67,7 @@ def test_application_fee():
     for cents, pct, expected_fee in cases:
         result = calculate_application_fee(cents, pct)
         passed = result['application_fee_cents'] == expected_fee
-        print(
-            f"  [{'PASS' if passed else 'FAIL'}] {cents/100:.2f} @ {pct}% → fee={expected_fee/100:.2f}"
-        )
+        print(f"  [{'PASS' if passed else 'FAIL'}] {cents / 100:.2f} @ {pct}% → fee={expected_fee / 100:.2f}")
         if not passed:
             all_passed = False
     return all_passed

@@ -70,12 +70,10 @@ check("stripe_meta app_name", meta["app_name"] == "AcmeAI GPU Cloud")
 check("stripe_meta powered_by", meta["powered_by"] == "mahaasur13-sys")
 
 inv = build_stripe_invoice_settings(b2)
-check(
-    "invoice custom_fields[0].name", inv["custom_fields"][0]["name"] == "Cloud Platform"
-)
+check("invoice custom_fields[0].name", inv["custom_fields"][0]["name"] == "Cloud Platform")
 check("invoice footer", "mahaasur13-sys" in inv["footer"])
 
-print(f"\n{'='*40}")
+print(f"\n{'=' * 40}")
 print(f"RESULTS: {passed} passed, {failed} failed")
 if failed:
     sys.exit(1)

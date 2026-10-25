@@ -13,9 +13,7 @@ def get_job(job_id: str):
     if not job:
         from fastapi import HTTPException
 
-        raise HTTPException(
-            404, {"error": {"code": "NOT_FOUND", "message": f"Job {job_id} not found"}}
-        )
+        raise HTTPException(404, {"error": {"code": "NOT_FOUND", "message": f"Job {job_id} not found"}})
     return {"job": job, "logs_url": f"/jobs/{job_id}/logs"}
 
 
@@ -33,9 +31,7 @@ def get_job_logs(job_id: str):
     if not job:
         from fastapi import HTTPException
 
-        raise HTTPException(
-            404, {"error": {"code": "NOT_FOUND", "message": f"Job {job_id} not found"}}
-        )
+        raise HTTPException(404, {"error": {"code": "NOT_FOUND", "message": f"Job {job_id} not found"}})
     return {
         "job_id": job_id,
         "stdout": "[SIMULATED] Running: " + job.get("task", ""),

@@ -127,9 +127,7 @@ async def update_tenant_subscription(
             params.append(subscription_end_date)
             idx += 1
         params.append(tenant_id)
-        await conn.execute(
-            f"UPDATE tenants SET {', '.join(parts)} WHERE id = ${idx}", params
-        )
+        await conn.execute(f"UPDATE tenants SET {', '.join(parts)} WHERE id = ${idx}", params)
 
 
 async def set_tenant_inactive(tenant_id: str) -> None:
@@ -153,9 +151,7 @@ async def list_tenants() -> list[dict]:
 # ── Webhook Events ──────────────────────────────────────────
 
 
-async def record_webhook_event(
-    stripe_event_id: str, event_type: str, tenant_id: str, payload: str
-) -> None:
+async def record_webhook_event(stripe_event_id: str, event_type: str, tenant_id: str, payload: str) -> None:
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
@@ -170,9 +166,7 @@ async def record_webhook_event(
 async def list_webhook_events(limit: int = 20) -> list[dict]:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT * FROM webhook_events ORDER BY received_at DESC LIMIT $1", limit
-        )
+        rows = await conn.fetch("SELECT * FROM webhook_events ORDER BY received_at DESC LIMIT $1", limit)
     return [dict(r) for r in rows]
 
 
@@ -186,17 +180,14 @@ async def is_invoice_processed(invoice_id: str, tenant_id: str = "") -> bool:
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT 1 FROM processed_invoices WHERE invoice_id = $1 "
-            "AND ($2 = '' OR tenant_id = $2) LIMIT 1",
+            "SELECT 1 FROM processed_invoices WHERE invoice_id = $1 AND ($2 = '' OR tenant_id = $2) LIMIT 1",
             invoice_id,
             tenant_id,
         )
     return row is not None
 
 
-async def mark_invoice_processed(
-    invoice_id: str, event_type: str = "", tenant_id: str = ""
-) -> None:
+async def mark_invoice_processed(invoice_id: str, event_type: str = "", tenant_id: str = "") -> None:
     if not invoice_id:
         return
     pool = await get_pool()
@@ -212,9 +203,7 @@ async def mark_invoice_processed(
 # ── Leads ───────────────────────────────────────────────────
 
 
-async def add_lead(
-    email: str, company: str = "", role: str = "", use_case: str = "", source: str = ""
-) -> int:
+async def add_lead(email: str, company: str = "", role: str = "", use_case: str = "", source: str = "") -> int:
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -232,9 +221,7 @@ async def list_leads(status: str = "") -> list[dict]:
     pool = await get_pool()
     async with pool.acquire() as conn:
         if status:
-            rows = await conn.fetch(
-                "SELECT * FROM leads WHERE status = $1 ORDER BY created_at DESC", status
-            )
+            rows = await conn.fetch("SELECT * FROM leads WHERE status = $1 ORDER BY created_at DESC", status)
         else:
             rows = await conn.fetch("SELECT * FROM leads ORDER BY created_at DESC")
     return [dict(r) for r in rows]
@@ -254,9 +241,7 @@ async def update_lead_status(lead_id: int, status: str, notes: str = "") -> None
 # ── Users ───────────────────────────────────────────────────
 
 
-async def upsert_oauth_user(
-    user_id: str, email: str, name: str, provider: str, tenant_id: str, api_key: str
-) -> dict:
+async def upsert_oauth_user(user_id: str, email: str, name: str, provider: str, tenant_id: str, api_key: str) -> dict:
     pool = await get_pool()
     now = datetime.now(timezone.utc)
     async with pool.acquire() as conn:
@@ -309,9 +294,7 @@ async def get_user_by_api_key(api_key: str) -> dict | None:
 # ── Email Logs ──────────────────────────────────────────────
 
 
-async def log_email_sent(
-    recipient_email: str, recipient_name: str, tenant_id: str, invitation_link: str
-) -> int:
+async def log_email_sent(recipient_email: str, recipient_name: str, tenant_id: str, invitation_link: str) -> int:
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -368,18 +351,10 @@ async def get_email_stats() -> dict:
     pool = await get_pool()
     async with pool.acquire() as conn:
         total = await conn.fetchval("SELECT COUNT(*) FROM email_logs")
-        sent = await conn.fetchval(
-            "SELECT COUNT(*) FROM email_logs WHERE status != 'pending'"
-        )
-        opened = await conn.fetchval(
-            "SELECT COUNT(*) FROM email_logs WHERE opened_at IS NOT NULL"
-        )
-        clicked = await conn.fetchval(
-            "SELECT COUNT(*) FROM email_logs WHERE clicked_at IS NOT NULL"
-        )
-        bounced = await conn.fetchval(
-            "SELECT COUNT(*) FROM email_logs WHERE status = 'bounced'"
-        )
+        sent = await conn.fetchval("SELECT COUNT(*) FROM email_logs WHERE status != 'pending'")
+        opened = await conn.fetchval("SELECT COUNT(*) FROM email_logs WHERE opened_at IS NOT NULL")
+        clicked = await conn.fetchval("SELECT COUNT(*) FROM email_logs WHERE clicked_at IS NOT NULL")
+        bounced = await conn.fetchval("SELECT COUNT(*) FROM email_logs WHERE status = 'bounced'")
     return {
         "total": total,
         "sent": sent,
@@ -420,9 +395,7 @@ async def log_user_event(
 async def get_analytics_overview(days: int = 30) -> dict:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        total_users = await conn.fetchval(
-            "SELECT COUNT(DISTINCT tenant_id) FROM user_events"
-        )
+        total_users = await conn.fetchval("SELECT COUNT(DISTINCT tenant_id) FROM user_events")
         active_today = await conn.fetchval(
             "SELECT COUNT(DISTINCT tenant_id) FROM user_events WHERE created_at >= now() - interval '1 day'"
         )
@@ -433,22 +406,14 @@ async def get_analytics_overview(days: int = 30) -> dict:
             "SELECT COUNT(DISTINCT tenant_id) FROM user_events WHERE created_at >= now() - interval '30 days'"
         )
 
-        login_users = await conn.fetchval(
-            "SELECT COUNT(DISTINCT tenant_id) FROM user_events WHERE event_type='login'"
-        )
+        login_users = await conn.fetchval("SELECT COUNT(DISTINCT tenant_id) FROM user_events WHERE event_type='login'")
         submit_users = await conn.fetchval(
             "SELECT COUNT(DISTINCT tenant_id) FROM user_events WHERE event_type='job_submit'"
         )
         login_to_submit = round(submit_users / login_users, 2) if login_users else 0
-        total_submits = await conn.fetchval(
-            "SELECT COUNT(*) FROM user_events WHERE event_type='job_submit'"
-        )
-        total_completes = await conn.fetchval(
-            "SELECT COUNT(*) FROM user_events WHERE event_type='job_complete'"
-        )
-        submit_to_complete = (
-            round(total_completes / total_submits, 2) if total_submits else 0
-        )
+        total_submits = await conn.fetchval("SELECT COUNT(*) FROM user_events WHERE event_type='job_submit'")
+        total_completes = await conn.fetchval("SELECT COUNT(*) FROM user_events WHERE event_type='job_complete'")
+        submit_to_complete = round(total_completes / total_submits, 2) if total_submits else 0
 
         total_jobs = await conn.fetchval(
             "SELECT COUNT(*) FROM user_events WHERE event_type IN ('job_submit', 'job_complete', 'job_failed')"
@@ -524,9 +489,7 @@ async def get_analytics_events(
         idx += 1
     wh = " AND ".join(where)
     async with pool.acquire() as conn:
-        total = await conn.fetchval(
-            f"SELECT COUNT(*) FROM user_events WHERE {wh}", *params
-        )
+        total = await conn.fetchval(f"SELECT COUNT(*) FROM user_events WHERE {wh}", *params)
         rows = await conn.fetch(
             f"SELECT * FROM user_events WHERE {wh} ORDER BY created_at DESC LIMIT ${idx} OFFSET ${idx + 1}",
             *params,
@@ -588,9 +551,7 @@ async def get_feedback(
         idx += 1
     wh = " AND ".join(where)
     async with pool.acquire() as conn:
-        total = await conn.fetchval(
-            f"SELECT COUNT(*) FROM feedback WHERE {wh}", *params
-        )
+        total = await conn.fetchval(f"SELECT COUNT(*) FROM feedback WHERE {wh}", *params)
         rows = await conn.fetch(
             f"SELECT * FROM feedback WHERE {wh} ORDER BY created_at DESC LIMIT ${idx} OFFSET ${idx + 1}",
             *params,

@@ -68,11 +68,7 @@ PSQL = [
 
 
 def now_iso() -> str:
-    return (
-        datetime.datetime.now(datetime.timezone.utc)
-        .isoformat(timespec="seconds")
-        .replace("+00:00", "Z")
-    )
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def emit(**fields) -> None:
@@ -193,8 +189,7 @@ def _rotate_quarantine(root: str, keep: int) -> list[str]:
         own = [
             name
             for name in os.listdir(root)
-            if name.startswith("quarantine-")
-            and os.path.isfile(os.path.join(root, name, QUARANTINE_MARKER))
+            if name.startswith("quarantine-") and os.path.isfile(os.path.join(root, name, QUARANTINE_MARKER))
         ]
     except Exception:
         return []
@@ -258,8 +253,7 @@ def clear_stale_lock(
 
     quarantine = os.path.join(
         quarantine_root,
-        "quarantine-"
-        + datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
+        "quarantine-" + datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
     )
     try:
         os.makedirs(quarantine, exist_ok=True)

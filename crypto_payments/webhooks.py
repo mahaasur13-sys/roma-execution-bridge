@@ -21,9 +21,7 @@ WEBHOOK_TERMINAL_KO: frozenset = frozenset({"expired", "failed", "cancelled"})
 
 
 class CryptoWebhookHandler:
-    def __init__(
-        self, provider: CryptoPaymentProvider, service: CryptoInvoiceService
-    ) -> None:
+    def __init__(self, provider: CryptoPaymentProvider, service: CryptoInvoiceService) -> None:
         self._provider = provider
         self._service = service
 
@@ -52,8 +50,6 @@ class CryptoWebhookHandler:
             logger.info("crypto_payment_partial", invoice_id=order_id)
 
         elif payment_status in WEBHOOK_TERMINAL_KO:
-            logger.info(
-                "crypto_payment_failed", invoice_id=order_id, status=payment_status
-            )
+            logger.info("crypto_payment_failed", invoice_id=order_id, status=payment_status)
 
         return {"status": "processed", "payment_status": payment_status}

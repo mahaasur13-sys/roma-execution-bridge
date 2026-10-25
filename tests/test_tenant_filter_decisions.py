@@ -69,9 +69,7 @@ def test_decision_read_is_tenant_scoped(decision_table):
     tenant_a = _uniq("t-a")
     tenant_b = _uniq("t-b")
 
-    db.insert_decision_record(
-        did, _uniq("req"), tenant_a, "allowed", "", 10, 0.5, "default"
-    )
+    db.insert_decision_record(did, _uniq("req"), tenant_a, "allowed", "", 10, 0.5, "default")
 
     own = db.get_decision_record(did, tenant_a)
     assert own is not None
@@ -91,12 +89,8 @@ def test_decision_read_no_cross_tenant_overlap(decision_table):
     id_a = _uniq("dec")
     id_b = _uniq("dec")
 
-    db.insert_decision_record(
-        id_a, _uniq("req"), tenant_a, "allowed", "", 1, 0.1, "default"
-    )
-    db.insert_decision_record(
-        id_b, _uniq("req"), tenant_b, "allowed", "", 1, 0.1, "default"
-    )
+    db.insert_decision_record(id_a, _uniq("req"), tenant_a, "allowed", "", 1, 0.1, "default")
+    db.insert_decision_record(id_b, _uniq("req"), tenant_b, "allowed", "", 1, 0.1, "default")
 
     # A читает своё, не чужое
     assert db.get_decision_record(id_a, tenant_a)["tenant_id"] == tenant_a

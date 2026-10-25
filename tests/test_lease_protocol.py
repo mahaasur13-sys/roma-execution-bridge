@@ -42,15 +42,11 @@ lease = load_lease_module()
 
 
 def iso_minutes_ago(minutes: int) -> str:
-    ts = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
-        minutes=minutes
-    )
+    ts = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=minutes)
     return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def write_marker_file(
-    sessions: pathlib.Path, instance_id: str, last_seen: str
-) -> pathlib.Path:
+def write_marker_file(sessions: pathlib.Path, instance_id: str, last_seen: str) -> pathlib.Path:
     sessions.mkdir(parents=True, exist_ok=True)
     path = sessions / f"{instance_id}.json"
     path.write_text(
@@ -268,12 +264,8 @@ def test_lease_sessions_dir_has_at_most_one_fresh_marker(
     assert set(fresh) == {"instance-live"}, f"свежий маркер подменён: {sorted(fresh)}"
 
 
-@pytest.mark.parametrize(
-    "broken", ["not-a-timestamp", "", "2026-13-45T99:00:00Z", None]
-)
-def test_capture_fails_closed_on_broken_heartbeat(
-    tmp_path: pathlib.Path, broken
-) -> None:
+@pytest.mark.parametrize("broken", ["not-a-timestamp", "", "2026-13-45T99:00:00Z", None])
+def test_capture_fails_closed_on_broken_heartbeat(tmp_path: pathlib.Path, broken) -> None:
     """НЕГАТИВ P-LEASE-3: битый heartbeat → отказ (не «протух»), аренда не перезаписывается."""
     write_lease_file(tmp_path, instance_id="instance-a", heartbeat_at=broken)
     write_marker_file(tmp_path / ".sessions", "instance-a", iso_minutes_ago(40))
@@ -290,9 +282,7 @@ def test_capture_fails_closed_on_broken_heartbeat(
 
 def test_capture_refused_on_fresh_foreign_marker(tmp_path: pathlib.Path) -> None:
     """НЕГАТИВ P-LEASE-3: аренда протухла, но живой чужой маркер → отказ."""
-    write_lease_file(
-        tmp_path, instance_id="instance-dead", heartbeat_at=iso_minutes_ago(40)
-    )
+    write_lease_file(tmp_path, instance_id="instance-dead", heartbeat_at=iso_minutes_ago(40))
     write_marker_file(tmp_path / ".sessions", "instance-dead", iso_minutes_ago(40))
     write_marker_file(tmp_path / ".sessions", "instance-alive", lease.iso())
     before = state_snapshot(tmp_path)
@@ -329,10 +319,7 @@ def test_capture_after_ttl_succeeds_once_with_token_plus_one(
 def test_two_concurrent_captures_only_one_succeeds(tmp_path: pathlib.Path) -> None:
     """Конкурентность: под flock ровно один capture получает перо, token растёт ровно раз."""
     cmd = [sys.executable, str(LEASE_PY), "capture", "--artifacts-dir", str(tmp_path)]
-    procs = [
-        subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        for _ in range(2)
-    ]
+    procs = [subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in range(2)]
     outs = [p.communicate() for p in procs]
     rcs = sorted(p.returncode for p in procs)
     assert rcs == [0, 3], f"ожидался ровно один успех, получено {rcs}: {outs}"

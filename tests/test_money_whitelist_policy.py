@@ -53,12 +53,10 @@ def test_policy_columns_match_schema_not_null() -> None:
         for column, spec in columns.items():
             if not spec["not_null"]:
                 continue
-            assert (
-                f"{column}" in ddl
-            ), f"{table}.{column} помечена not_null в политике, но отсутствует в 002_billing_pg.sql"
-            assert (
-                f"{column}" in ddl and "NOT NULL" in ddl
-            ), f"{table}.{column}: NOT NULL не подтверждён схемой"
+            assert f"{column}" in ddl, (
+                f"{table}.{column} помечена not_null в политике, но отсутствует в 002_billing_pg.sql"
+            )
+            assert f"{column}" in ddl and "NOT NULL" in ddl, f"{table}.{column}: NOT NULL не подтверждён схемой"
 
 
 # ── NOT NULL-договор: reject_none-колонки отклоняют None до INSERT ────────

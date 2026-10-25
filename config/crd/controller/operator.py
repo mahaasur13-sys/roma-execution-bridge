@@ -85,9 +85,7 @@ def build_configmap(tenant_id: str, branding: dict) -> dict:
     return cm
 
 
-def build_api_secret(
-    tenant_id: str, api_key: str, secret_name: str = "api-key"
-) -> dict:
+def build_api_secret(tenant_id: str, api_key: str, secret_name: str = "api-key") -> dict:
     """Create API key secret for tenant from Vault-sourced value."""
     return {
         "apiVersion": "v1",
@@ -148,9 +146,7 @@ def build_ingress(tenant_id: str, domain: str, subdomain: str, namespace: str) -
     }
 
 
-def build_certificate(
-    tenant_id: str, domain: str, subdomain: str, namespace: str
-) -> dict:
+def build_certificate(tenant_id: str, domain: str, subdomain: str, namespace: str) -> dict:
     """Certificate resource for cert-manager."""
     return {
         "apiVersion": "cert-manager.io/v1",
@@ -301,9 +297,7 @@ def ensure_ingress(networking, tenant_id: str, domain: str, subdomain: str):
         logger.info(f"Ingress {name} already exists — skipping")
     except ApiException as e:
         if e.status == 404:
-            networking.create_namespaced_ingress(
-                ns, build_ingress(tenant_id, domain, subdomain, ns)
-            )
+            networking.create_namespaced_ingress(ns, build_ingress(tenant_id, domain, subdomain, ns))
             logger.info(f"Created Ingress: {name}")
         else:
             raise
@@ -317,9 +311,7 @@ def ensure_certificate(cert_client, tenant_id: str, domain: str, subdomain: str)
         logger.info(f"Certificate {name} already exists — skipping")
     except ApiException as e:
         if e.status == 404:
-            cert_client.create_namespaced_certificate(
-                ns, build_certificate(tenant_id, domain, subdomain, ns)
-            )
+            cert_client.create_namespaced_certificate(ns, build_certificate(tenant_id, domain, subdomain, ns))
             logger.info(f"Created Certificate: {name}")
         else:
             raise
@@ -423,9 +415,7 @@ def reconcile_tenant(meta, spec, status, namespace, name, **kwargs):
         ensure_configmap(core, tenant_id, branding)
 
     # ---- 3. API Secret (from Vault or generated fallback) ----
-    api_key = os.environ.get(
-        f"ROMA_TENANT_{tenant_id.upper().replace('-','_')}_APIKEY", "roma-dev-key"
-    )
+    api_key = os.environ.get(f"ROMA_TENANT_{tenant_id.upper().replace('-', '_')}_APIKEY", "roma-dev-key")
     ensure_secret(core, tenant_id, api_key)
 
     # ---- 4. Service ----
@@ -490,22 +480,16 @@ def reconcile_tenant(meta, spec, status, namespace, name, **kwargs):
     }
 
     try:
-        custom.patch_cluster_custom_object(
-            group="roma.io", version="v1", plural="romatenants", name=name, body=patch
-        )
+        custom.patch_cluster_custom_object(group="roma.io", version="v1", plural="romatenants", name=name, body=patch)
         logger.info(f"Status updated: {name} → Ready")
     except Exception as e:
         logger.warning(f"Failed to update status: {e}")
 
-    logger.info(
-        f"[DONE] tenant={tenant_id} phase=Ready endpoint=https://{subdomain}.{domain}"
-    )
+    logger.info(f"[DONE] tenant={tenant_id} phase=Ready endpoint=https://{subdomain}.{domain}")
 
 
 @kopf.on.delete("romatenants", "roma.io", "v1")
 def delete_tenant(meta, spec, **kwargs):
     """Cleanup when RomaTenant is deleted."""
     tenant_id = spec.get("tenantId", meta.get("name"))
-    logger.info(
-        f"[DELETE] tenant={tenant_id} — resources will be removed by Kubernetes GC"
-    )
+    logger.info(f"[DELETE] tenant={tenant_id} — resources will be removed by Kubernetes GC")

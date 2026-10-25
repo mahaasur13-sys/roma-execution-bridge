@@ -42,9 +42,7 @@ class AuditLog:
 
     def export_json(self, org_id: str) -> str:
         events = self.query_events(org_id=org_id, limit=10000)
-        return json.dumps(
-            {"org_id": org_id, "events": events, "count": len(events)}, indent=2
-        )
+        return json.dumps({"org_id": org_id, "events": events, "count": len(events)}, indent=2)
 
     def export_csv(self, org_id: str) -> str:
         events = self.query_events(org_id=org_id, limit=10000)

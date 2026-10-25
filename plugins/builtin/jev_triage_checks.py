@@ -189,6 +189,7 @@ def test_detect_intent_cascade_falls_back_to_heuristic(monkeypatch):
 
     assert SupportChatPlugin._detect_intent("my invoice") == "billing"
 
+
 # ── cascade_once / _detect_intent: fail-closed (R5) ──────────────────────
 
 
@@ -231,9 +232,7 @@ def test_cascade_once_fail_closed_when_normalize_answers_raises(monkeypatch):
 def test_detect_intent_flag_off_never_calls_jev(monkeypatch):
     monkeypatch.delenv(shadow._CASCADE_ENV_FLAG, raising=False)
     calls: list = []
-    monkeypatch.setattr(
-        shadow, "cascade_once", lambda message, client=None, timeout=None: calls.append(1)
-    )
+    monkeypatch.setattr(shadow, "cascade_once", lambda message, client=None, timeout=None: calls.append(1))
     from plugins.builtin.support_chat import SupportChatPlugin
 
     assert SupportChatPlugin._detect_intent("my invoice") == "billing"
@@ -242,9 +241,7 @@ def test_detect_intent_flag_off_never_calls_jev(monkeypatch):
 
 def test_detect_intent_accepts_known_category(monkeypatch):
     monkeypatch.setenv(shadow._CASCADE_ENV_FLAG, "1")
-    monkeypatch.setattr(
-        shadow, "cascade_once", lambda message, client=None, timeout=None: "job_status"
-    )
+    monkeypatch.setattr(shadow, "cascade_once", lambda message, client=None, timeout=None: "job_status")
     from plugins.builtin.support_chat import SupportChatPlugin
 
     assert SupportChatPlugin._detect_intent("my invoice") == "job_status"
@@ -252,9 +249,7 @@ def test_detect_intent_accepts_known_category(monkeypatch):
 
 def test_detect_intent_rejects_category_outside_intent_categories(monkeypatch):
     monkeypatch.setenv(shadow._CASCADE_ENV_FLAG, "1")
-    monkeypatch.setattr(
-        shadow, "cascade_once", lambda message, client=None, timeout=None: "not_a_category"
-    )
+    monkeypatch.setattr(shadow, "cascade_once", lambda message, client=None, timeout=None: "not_a_category")
     from plugins.builtin.support_chat import SupportChatPlugin
 
     assert SupportChatPlugin._detect_intent("my invoice") == "billing"
@@ -270,6 +265,7 @@ def test_detect_intent_fail_closed_when_cascade_raises(monkeypatch):
     from plugins.builtin.support_chat import SupportChatPlugin
 
     assert SupportChatPlugin._detect_intent("my invoice") == "billing"
+
 
 # ── shadow-only путь: сбой shadow_triage не ломает _detect_intent ────────
 

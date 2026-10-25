@@ -54,9 +54,7 @@ def main(argv: list[str]) -> int:
         print("  choice:   ", dict(Counter(str(r.get("choice", "?")) for r in recs)))
         print("  verdict:  ", dict(Counter(str(r.get("verdict", "?")) for r in recs)))
         if confs:
-            print(
-                f"  confidence: min={min(confs):.3f} mean={sum(confs) / len(confs):.3f} max={max(confs):.3f}"
-            )
+            print(f"  confidence: min={min(confs):.3f} mean={sum(confs) / len(confs):.3f} max={max(confs):.3f}")
             print("  buckets:  ", dict(Counter(_bucket(c) for c in confs)))
     return 0
 

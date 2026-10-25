@@ -61,9 +61,7 @@ def _own_quarantines(root: pathlib.Path, wd) -> list[str]:
     return sorted(
         d.name
         for d in root.iterdir()
-        if d.is_dir()
-        and d.name.startswith("quarantine-")
-        and (d / wd.QUARANTINE_MARKER).exists()
+        if d.is_dir() and d.name.startswith("quarantine-") and (d / wd.QUARANTINE_MARKER).exists()
     )
 
 

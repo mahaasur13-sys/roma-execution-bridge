@@ -31,6 +31,7 @@ router = APIRouter(tags=["webhooks"])
 # shared with the Fail branch below so the two cannot drift apart.
 _REFUSED_STATUSES = ("Declined", "Cancelled")
 
+
 # F-004: the amount AND the currency CloudPayments reports must match the plan
 # before any credit/activation. Compared as exact ``Decimal`` values — the old
 # float tolerance is gone, so a drifted kopeck is a mismatch, not rounding.
@@ -121,9 +122,7 @@ async def cloudpayments_webhook(request: Request):
     # this gate runs BEFORE idempotency, so a foreign or unresolved AccountId
     # can never be answered with a silent {"code": 0}).
     if not tenant_id or not db.get_tenant(tenant_id):
-        logger.warning(
-            "cloudpayments_webhook: unknown AccountId invoice=%s", invoice_id
-        )
+        logger.warning("cloudpayments_webhook: unknown AccountId invoice=%s", invoice_id)
         raise HTTPException(status_code=422, detail="Unknown AccountId")
 
     # Idempotency is scoped to the resolved tenant (F-005): an InvoiceId already
@@ -132,23 +131,17 @@ async def cloudpayments_webhook(request: Request):
         return {"code": 0}
     if db.is_invoice_processed(invoice_id):
         logger.warning(
-            "cloudpayments_webhook: invoice recorded for another tenant "
-            "invoice=%s account=%s",
+            "cloudpayments_webhook: invoice recorded for another tenant invoice=%s account=%s",
             invoice_id,
             tenant_id,
         )
-        raise HTTPException(
-            status_code=409, detail="Invoice belongs to another tenant"
-        )
+        raise HTTPException(status_code=409, detail="Invoice belongs to another tenant")
 
     status = payload.get("Status", "")
     refused = status in _REFUSED_STATUSES
 
     try:
-        if not refused and (
-            event_type in ("Payment", "Pay", "Completed")
-            or status in ("Completed", "Authorized")
-        ):
+        if not refused and (event_type in ("Payment", "Pay", "Completed") or status in ("Completed", "Authorized")):
             if plan in ("pro", "enterprise"):
                 # F-004: never activate a tenant on an amount that does not
                 # match the plan price. Fail closed on a missing Amount.
@@ -166,14 +159,10 @@ async def cloudpayments_webhook(request: Request):
                         plan,
                     )
                     return {"code": 0}
-                db.update_tenant_subscription(
-                    tenant_id, invoice_id, "", "active", plan, None
-                )
+                db.update_tenant_subscription(tenant_id, invoice_id, "", "active", plan, None)
                 db.mark_invoice_processed(invoice_id, event_type, tenant_id)
             else:
-                db.mark_invoice_processed(
-                    invoice_id, event_type or "payment_no_plan", tenant_id
-                )
+                db.mark_invoice_processed(invoice_id, event_type or "payment_no_plan", tenant_id)
 
         elif event_type == "Recurrent" and status == "Completed":
             if plan:
@@ -191,14 +180,10 @@ async def cloudpayments_webhook(request: Request):
                         plan,
                     )
                     return {"code": 0}
-                db.update_tenant_subscription(
-                    tenant_id, invoice_id, "", "active", plan, None
-                )
+                db.update_tenant_subscription(tenant_id, invoice_id, "", "active", plan, None)
                 db.mark_invoice_processed(invoice_id, event_type, tenant_id)
             else:
-                db.mark_invoice_processed(
-                    invoice_id, event_type or "recurrent_no_plan", tenant_id
-                )
+                db.mark_invoice_processed(invoice_id, event_type or "recurrent_no_plan", tenant_id)
 
         elif event_type in ("Fail", "Declined") or refused:
             db.set_tenant_inactive(tenant_id)

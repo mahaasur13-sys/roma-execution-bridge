@@ -60,20 +60,12 @@ class BackpressureSystem:
         with self._lock:
             cooldown_remaining = 0
             if self._last_triggered:
-                elapsed = (
-                    datetime.now(timezone.utc) - self._last_triggered
-                ).total_seconds()
+                elapsed = (datetime.now(timezone.utc) - self._last_triggered).total_seconds()
                 cooldown_remaining = max(0, self.config.cooldown_seconds - int(elapsed))
 
-            saturation = (
-                self._gpu_vram_used_mb / self._gpu_vram_available_mb
-                if self._gpu_vram_available_mb > 0
-                else 0
-            )
+            saturation = self._gpu_vram_used_mb / self._gpu_vram_available_mb if self._gpu_vram_available_mb > 0 else 0
 
-            is_throttling = (saturation > self.config.gpu_saturation_max) or (
-                cooldown_remaining > 0
-            )
+            is_throttling = (saturation > self.config.gpu_saturation_max) or (cooldown_remaining > 0)
 
             return BackpressureStatus(
                 gpu_saturation=saturation,
@@ -83,9 +75,7 @@ class BackpressureSystem:
                 is_admitting=not is_throttling,
                 is_throttling=is_throttling,
                 throttle_reason=self._get_reason(saturation, cooldown_remaining),
-                last_triggered_at=(
-                    self._last_triggered.isoformat() if self._last_triggered else None
-                ),
+                last_triggered_at=(self._last_triggered.isoformat() if self._last_triggered else None),
                 cooldown_remaining_seconds=cooldown_remaining,
             )
 
@@ -105,9 +95,7 @@ class BackpressureSystem:
                 )
 
             # Check GPU saturation
-            post_saturation = (
-                self._gpu_vram_used_mb + job_vram_mb
-            ) / self._gpu_vram_available_mb
+            post_saturation = (self._gpu_vram_used_mb + job_vram_mb) / self._gpu_vram_available_mb
             if post_saturation > self.config.gpu_saturation_max:
                 self._trigger_backpressure(f"GPU would be at {post_saturation:.0%}")
                 return (
@@ -116,15 +104,9 @@ class BackpressureSystem:
                 )
 
             # Check if job fits in available VRAM
-            available_vram = (
-                self._gpu_vram_available_mb
-                - self._gpu_vram_used_mb
-                - self.config.vram_reserve_mb
-            )
+            available_vram = self._gpu_vram_available_mb - self._gpu_vram_used_mb - self.config.vram_reserve_mb
             if job_vram_mb > available_vram:
-                self._trigger_backpressure(
-                    f"Job needs {job_vram_mb}MB, only {available_vram}MB available"
-                )
+                self._trigger_backpressure(f"Job needs {job_vram_mb}MB, only {available_vram}MB available")
                 return False, f"VRAM: need {job_vram_mb}MB, have {available_vram}MB"
 
             # High priority jobs can bypass some warnings (but not hard limits)
@@ -147,9 +129,7 @@ class BackpressureSystem:
         """Update current queue depth (called by queue manager)."""
         with self._lock:
             if depth > self.config.queue_depth_max:
-                self._trigger_backpressure(
-                    f"Queue depth {depth} > {self.config.queue_depth_max}"
-                )
+                self._trigger_backpressure(f"Queue depth {depth} > {self.config.queue_depth_max}")
 
     def update_gpu_vram(self, used_mb: int, available_mb: int):
         """Update GPU VRAM stats (called from nvidia-smi or K8s metrics)."""

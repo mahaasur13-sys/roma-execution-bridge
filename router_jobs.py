@@ -58,9 +58,7 @@ async def retry_job(job_id: str, payload: dict = {}, x_api_key: str = Header(Non
         raise HTTPException(409, tr["reason"])
 
     db.update_execution_job(job_id, status="queued", tenant_id=tenant_id)
-    write_audit_event(
-        tenant_id, "job.retry", "job", job_id, {"previous_status": job.get("status")}
-    )
+    write_audit_event(tenant_id, "job.retry", "job", job_id, {"previous_status": job.get("status")})
     return {"job_id": job_id, "status": "queued"}
 
 
@@ -93,9 +91,7 @@ async def cancel_job(job_id: str, x_api_key: str = Header(None)):
         completed_at=datetime.now(timezone.utc).isoformat(),
         tenant_id=tenant_id,
     )
-    write_audit_event(
-        tenant_id, "job.cancel", "job", job_id, {"previous_status": current}
-    )
+    write_audit_event(tenant_id, "job.cancel", "job", job_id, {"previous_status": current})
     return {"job_id": job_id, "status": "cancelled"}
 
 
@@ -145,11 +141,7 @@ async def worker_ack(job_id: str, payload: dict, x_api_key: str = Header(None)):
         raise HTTPException(409, tr["reason"])
 
     error = payload.get("error") if action == "fail" else None
-    completed_at = (
-        datetime.now(timezone.utc).isoformat()
-        if action in ("complete", "fail")
-        else None
-    )
+    completed_at = datetime.now(timezone.utc).isoformat() if action in ("complete", "fail") else None
     db.update_execution_job(
         job_id,
         status=new_status,

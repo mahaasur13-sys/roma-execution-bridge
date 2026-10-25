@@ -52,9 +52,7 @@ def _patch_usage(monkeypatch, jobs_used: int) -> None:
         ("enterprise", 10**6, True),
     ],
 )
-def test_jobs_boundary_follows_source(
-    monkeypatch, plan: str, jobs_used: int, expected_allowed: bool
-) -> None:
+def test_jobs_boundary_follows_source(monkeypatch, plan: str, jobs_used: int, expected_allowed: bool) -> None:
     """Граница по джобам — ровно та, что объявлена в `config/plans.json`."""
     _patch_tenant(monkeypatch, plan)
     _patch_usage(monkeypatch, jobs_used)

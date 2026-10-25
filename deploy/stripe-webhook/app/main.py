@@ -22,9 +22,7 @@ Instrumentator().instrument(app).expose(app)
 
 STRIPE_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-ROMA_API_URL = os.getenv(
-    "ROMA_API_URL", "http://roma-api-server.roma-system.svc.cluster.local:8080"
-)
+ROMA_API_URL = os.getenv("ROMA_API_URL", "http://roma-api-server.roma-system.svc.cluster.local:8080")
 STREAM_KEY = "stripe:events"
 
 _redis: Optional[aioredis.Redis] = None
@@ -68,9 +66,7 @@ async def _sync_tenant(tenant_id: str, event_type: str) -> None:
         async with asyncio.timeout(15):
             async with __import__("httpx").AsyncClient() as client:
                 resp = await client.post(url, json={"event": event_type}, timeout=15.0)
-                logger.info(
-                    f"Tenant sync: tenant={tenant_id} event={event_type} status={resp.status_code}"
-                )
+                logger.info(f"Tenant sync: tenant={tenant_id} event={event_type} status={resp.status_code}")
     except Exception as e:
         logger.error(f"Tenant sync failed: tenant={tenant_id} error={e}")
 
@@ -111,9 +107,7 @@ async def stripe_webhook(
 
     try:
         obj = event.get("data", {}).get("object", {})
-        tid = obj.get("metadata", {}).get("tenant_id", "") or obj.get(
-            "customer_email", ""
-        )
+        tid = obj.get("metadata", {}).get("tenant_id", "") or obj.get("customer_email", "")
 
         if etype in (
             "checkout.session.completed",

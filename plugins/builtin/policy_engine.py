@@ -67,9 +67,7 @@ class PolicyEnginePlugin:
     def _register_default_rules(self) -> None:
         """Register built-in policy rules."""
 
-        def free_tier_quota(
-            tenant: dict[str, Any], payload: dict[str, Any]
-        ) -> PolicyResult | None:
+        def free_tier_quota(tenant: dict[str, Any], payload: dict[str, Any]) -> PolicyResult | None:
             if tenant.get("plan") != "free":
                 return None
             job_limit = tenant.get("job_limit", 3)
@@ -82,9 +80,7 @@ class PolicyEnginePlugin:
                 )
             return None
 
-        def max_cost_check(
-            tenant: dict[str, Any], payload: dict[str, Any]
-        ) -> PolicyResult | None:
+        def max_cost_check(tenant: dict[str, Any], payload: dict[str, Any]) -> PolicyResult | None:
             est_cost = payload.get("estimated_cost", 0)
             if est_cost > 100000:
                 return PolicyResult(
@@ -94,9 +90,7 @@ class PolicyEnginePlugin:
                 )
             return None
 
-        def enterprise_custom_check(
-            tenant: dict[str, Any], payload: dict[str, Any]
-        ) -> PolicyResult | None:
+        def enterprise_custom_check(tenant: dict[str, Any], payload: dict[str, Any]) -> PolicyResult | None:
             if tenant.get("plan") != "enterprise":
                 return None
             custom_policies = tenant.get("custom_policies", [])

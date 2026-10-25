@@ -32,9 +32,7 @@ class TestDashBeamDomain:
     """Domain model constructors, defaults, validation."""
 
     def test_ticket_defaults(self):
-        t = DashBeamTicket(
-            tenant_id="t1", created_by="u1", ticket_type=TicketType.FILE_TRANSFER
-        )
+        t = DashBeamTicket(tenant_id="t1", created_by="u1", ticket_type=TicketType.FILE_TRANSFER)
         assert t.state == TicketState.CREATED
         assert t.tenant_id == "t1"
         assert t.file_size_bytes == 0
@@ -64,9 +62,7 @@ class TestDashBeamDomain:
         assert c.is_custom is False
 
     def test_paired_device(self):
-        d = PairedDevice(
-            tenant_id="t1", user_id="u1", device_name="laptop", device_fingerprint="fp1"
-        )
+        d = PairedDevice(tenant_id="t1", user_id="u1", device_name="laptop", device_fingerprint="fp1")
         assert d.device_name == "laptop"
 
 
