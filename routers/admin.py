@@ -35,8 +35,8 @@ class TestAlertRequest(BaseModel):
     message: str = "🧪 Тестовый алерт ROMA Execution Bridge v2.1.0"
 
 
-@limiter.limit("5/minute")
 @router.post("/test-alert", dependencies=[Depends(_admin_only)])
+@limiter.limit("5/minute")
 async def test_alert(
     request: Request,
     body: TestAlertRequest = TestAlertRequest(),
@@ -86,10 +86,9 @@ async def admin_deactivate_invite(payload: dict):
 
 
 @router.get("")
-async def admin_page(request: Request):
+async def admin_page(admin: dict = Depends(_admin_only)):
     """Admin dashboard HTML page."""
-    info = _admin_only(request)
-    return Response(content=_render_admin_dashboard(info["tenant_id"]), media_type="text/html")
+    return Response(content=_render_admin_dashboard(admin["tenant_id"]), media_type="text/html")
 
 
 @router.get("/verification-stats", dependencies=[Depends(_admin_only)])
@@ -134,10 +133,9 @@ async def admin_backends():
     }
 
 
-@router.get("/analytics")
+@router.get("/analytics", dependencies=[Depends(_admin_only)])
 async def admin_analytics(request: Request):
     """Get analytics overview (JSON)."""
-    _admin_only(request)
     days = int(request.query_params.get("days", "30"))
     try:
         data = db.get_analytics_overview(days=days)
@@ -147,10 +145,9 @@ async def admin_analytics(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/analytics/users")
+@router.get("/analytics/users", dependencies=[Depends(_admin_only)])
 async def admin_analytics_users(request: Request):
     """Get user list for analytics."""
-    _admin_only(request)
     start_date = request.query_params.get("start_date", "")
     end_date = request.query_params.get("end_date", "")
     sort_by = request.query_params.get("sort_by", "last_seen")
@@ -161,10 +158,9 @@ async def admin_analytics_users(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/analytics/events")
+@router.get("/analytics/events", dependencies=[Depends(_admin_only)])
 async def admin_analytics_events(request: Request):
     """Get paginated event list."""
-    _admin_only(request)
     limit = int(request.query_params.get("limit", "100"))
     offset = int(request.query_params.get("offset", "0"))
     event_type = request.query_params.get("event_type", "")
@@ -191,10 +187,9 @@ async def admin_analytics_events(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/feedback")
+@router.get("/feedback", dependencies=[Depends(_admin_only)])
 async def admin_feedback(request: Request):
     """Get feedback list (JSON)."""
-    _admin_only(request)
     limit = int(request.query_params.get("limit", "50"))
     offset = int(request.query_params.get("offset", "0"))
     from_date = request.query_params.get("from_date", "")
@@ -219,11 +214,10 @@ async def admin_feedback(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/email-stats", dependencies=[Depends(_admin_only)])
 @limiter.limit("20/minute")
-@router.get("/email-stats")
 async def admin_email_stats(request: Request):
     """Get email sending statistics."""
-    _admin_only(request)
     try:
         stats = db.get_email_stats()
         return {"status": "ok", "data": stats}
@@ -231,11 +225,10 @@ async def admin_email_stats(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/invite", dependencies=[Depends(_admin_only)])
 @limiter.limit("20/minute")
-@router.post("/invite")
 async def admin_invite(request: Request):
     """Send beta invitations. Dry-run if no SendGrid API key."""
-    _admin_only(request)
     try:
         body = await request.json()
     except Exception:

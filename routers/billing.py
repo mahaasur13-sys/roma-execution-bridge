@@ -33,15 +33,14 @@ from models.app import CheckoutRequest
 router = APIRouter(prefix="/billing", tags=["billing"])
 
 
-@limiter.limit("10/minute")
 @router.post("/top-up")
-async def top_up_balance(request: Request, payload: dict):
+@limiter.limit("10/minute")
+async def top_up_balance(request: Request, payload: dict, admin: dict = Depends(_admin_only)):
     """Admin-only manual balance credit. Requires admin API key + IP allowlist.
 
     Non-admin callers get 403; the credited tenant is an EXPLICIT admin-supplied
     target (never derived from the caller), and the action is audited.
     """
-    admin = _admin_only(request)
     target_tenant_id = (payload.get("tenant_id") or "").strip()
     if not target_tenant_id:
         raise HTTPException(status_code=400, detail="tenant_id is required for admin top-up")

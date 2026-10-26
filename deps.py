@@ -113,7 +113,7 @@ def verify_api_key(x_api_key: str = Header(None)) -> dict:
     tenant["api_key"] = x_api_key
 
     # Check email verification for API endpoints (skip auth endpoints and admin keys)
-    if x_api_key not in admin_keys():
+    if not _admin_key_valid(x_api_key):
         # Deferred import: is_email_verified lives in main.py (auth cluster, out
         # of scope for this split). Reading main.is_email_verified at call time
         # keeps the existing monkeypatch in tests/test_p0_security.py effective.
