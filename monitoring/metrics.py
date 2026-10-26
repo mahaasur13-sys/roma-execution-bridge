@@ -111,12 +111,17 @@ def track_gate_unavailable(scope: str) -> None:
 
 
 # --- NEW — reconciliation-cron + alerts (P1b) — добавлено в 266283e FIX ---
-roma_ledger_computed_balance = Gauge("roma_ledger_computed_balance", "SUM(DEBIT) ledger_entries", ["tenant_id"])
-roma_api_balance = Gauge("roma_api_balance", "SUM(cost_usd) usage_events", ["tenant_id"])
-roma_ledger_reconciliation_diff = Gauge(
-    "roma_ledger_reconciliation_diff", "abs(ledger_debit - usage_cost)", ["tenant_id"]
+# DEPRECATED: per-tenant gauges ниже писались для одного хардкоженного тенанта и на
+# реальных данных всегда пустые. Сверка публикует агрегаты (roma_ledger_reconciliation_*),
+# per-tenant детали идут в лог. Оставлены ради живых дашбордов, удалять — отдельным PR.
+roma_ledger_computed_balance = Gauge(
+    "roma_ledger_computed_balance", "DEPRECATED — SUM(DEBIT) ledger_entries", ["tenant_id"]
 )
-roma_ledger_entry_count = Gauge("roma_ledger_entry_count", "COUNT(*)", ["tenant_id"])
+roma_api_balance = Gauge("roma_api_balance", "DEPRECATED — SUM(cost_usd) usage_events", ["tenant_id"])
+roma_ledger_reconciliation_diff = Gauge(
+    "roma_ledger_reconciliation_diff", "DEPRECATED — abs(ledger_debit - usage_cost)", ["tenant_id"]
+)
+roma_ledger_entry_count = Gauge("roma_ledger_entry_count", "DEPRECATED — COUNT(*)", ["tenant_id"])
 roma_tenant_balance = Gauge("roma_tenant_balance", "Current balance", ["tenant_id"])
 roma_debit_total = Counter("roma_debit_total", "Debit results", ["tenant_id", "status"])
 roma_debit_no_funds_total = Counter("roma_debit_no_funds_total", "No funds", ["tenant_id"])
@@ -131,6 +136,33 @@ roma_dr_drill_last_success_timestamp = Gauge(
     [],
 )
 roma_dr_drill_rto_seconds = Gauge("roma_dr_drill_rto_seconds", "Last pg_restore drill recovery time in seconds", [])
+
+# --- Сверка ledger: агрегаты без per-tenant метки (кардинальность = 1) ---
+roma_ledger_reconciliation_diff_max = Gauge(
+    "roma_ledger_reconciliation_diff_max",
+    "max |SUM(DEBIT) - SUM(cost_usd)| по всем тенантам, USD",
+    [],
+)
+roma_ledger_tenants_drifted = Gauge(
+    "roma_ledger_tenants_drifted",
+    "Тенантов с |diff| выше порога ROMA_LEDGER_DRIFT_THRESHOLD_USD",
+    [],
+)
+roma_ledger_entry_count_total = Gauge(
+    "roma_ledger_entry_count_total",
+    "Всего записей ledger_entries",
+    [],
+)
+roma_spend_cap_exceeded_tenants = Gauge(
+    "roma_spend_cap_exceeded_tenants",
+    "Тенантов, у которых списано >= spend-cap их тарифа",
+    [],
+)
+roma_ledger_reconcile_last_success_timestamp_seconds = Gauge(
+    "roma_ledger_reconcile_last_success_timestamp_seconds",
+    "Epoch seconds последней успешной сверки ledger",
+    [],
+)
 
 # алиасы для нового префикса (совместимость)
 roma_spend_cap_balance_usd = spend_cap_balance
