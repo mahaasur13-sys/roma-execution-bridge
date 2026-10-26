@@ -2,8 +2,8 @@
   "note": "A-6: канон полноты набора тестов. Числа — машинный факт последнего repo-wide прогона (junitxml), не оценка. Порог никогда не понижается: любое отличие от факта прогона роняет гейт, обновление — только явным диффом этого файла вместе с изменением набора тестов.",
   "rule": "collected == executed (нулевое расхождение) И collected/passed/failures/errors/skipped == canon. Проверяет scripts/ci_run_completeness.py, вызывается из ci/coverage_gate.sh и из CI-шага scripts/ci_junit_smoke.py. Прежний порог 'collected >= 244' пропускал исчезновение 19 тестов — заменён точным равенством. G-CI-PG-CANON: скипы классифицированы машинно по причине в junitxml — admission (постоянная канона, admission_skips) и env-skip (проверка не исполнена из-за отсутствия окружения): локально допустимо 0 или env_skips_expected, при CI/GITHUB_ACTIONS — строго 0, потому что CI поднимает реальный PostgreSQL. G-CANON-ENV-PARITY: ожидания по среде объявлены явно в объекте 'profiles' (node · ci): profiles[<env>].passed/admission_skips/env_skips_max/named_admissions. Профиль берётся из окружения (CI/GITHUB_ACTIONS → ci, иначе node); среда без профиля — отказ (fail-closed). Admission-скипы обязаны быть записаны поимённо (тройка класс·симптом·issue/expiry): скип без поимённой записи и предписанная запись, которой не было, — оба случая отказ.",
   "canon": {
-    "collected": 775,
-    "passed": 767,
+    "collected": 851,
+    "passed": 843,
     "failures": 0,
     "errors": 0,
     "skipped": 8,
@@ -14,6 +14,20 @@
     "skip_classes": "admission=8 (живой GPU-воркер + 5 плейсхолдеров submit-роутера + R6-live на DSH-хосте + 015a container-scoped destructive) · env-skip=46 (PG-зависимые при отсутствии PG_DSN, включая test_usage_event_idempotency, test_migration_015a_preflight, test_migration_order и 11 pg-marked из test_migration_010a_legacy_reconcile)"
   },
   "history": [
+    {
+      "date": "2026-10-26-sec-admin-authz-test-alert",
+      "collected": 851,
+      "passed": 843,
+      "skipped": 8,
+      "change": "sec/admin-authz (PR-E, продолжение): POST /admin/test-alert получил Depends(_admin_only) (tenant-гейт verify_api_key с него снят — ключ админа не резолвится в тенанта и давал 401); мёртвый недокорированный дубль admin_verification_stats удалён (rg: ни одной ссылки, живой маршрут /admin/verification-stats с гейтом остался). Набор: +5 кейсов в tests/test_admin_authz_hardening.py (маршрут test-alert в ADMIN_ROUTES × без ключа/tenant/tenant-demo/admin + отдельный тест: alert_dispatcher.send замокан, admin-ключ → 200 и ровно один вызов, отказные ключи → 401/403 и ноль вызовов). CI-факт run 40367460686 на 36b2363: 851 collected / 851 executed / 843 passed / 0 failed / 0 errors / 8 admission-скипов / env-skip 0. collected 845 → 851; CI passed 837 → 843; node passed 791 → 797 (= 851 − 8 admission − 46 env-skip; арифметика профиля, локальный node-прогон не повторялся). env_skips_expected 46 и admission 8 не менялись."
+    },
+    {
+      "date": "2026-10-26-sec-admin-authz",
+      "collected": 845,
+      "passed": 837,
+      "skipped": 8,
+      "change": "sec/admin-authz (PR-E): /admin* и /billing/top-up закрыты гейтом deps._admin_only по ROMA_ADMIN_KEYS (перебор всех ключей через hmac.compare_digest, fail-closed при пустом env), ключ читается только из заголовка X-API-Key, tenant-ключи (включая tenant-demo) admin-прав больше не дают; X-Forwarded-For/X-Real-IP учитываются только при ROMA_TRUST_PROXY=1, иначе берётся адрес сокета. Зависимость Depends(_admin_only) добавлена на /admin/invites/create, /admin/invites, /admin/invites/deactivate, /admin/verification-stats, /admin/backends (там снят tenant-гейт verify_api_key). Набор: +70 tests/test_admin_authz_hardening.py (13 маршрутов × без ключа/tenant-ключ/tenant-demo → 401/403/403, admin-ключ проходит гейт, пустой ROMA_ADMIN_KEYS → 403, ?api_key= не принимается, спуф XFF без TRUST_PROXY → 403, XFF с TRUST_PROXY=1 → 200). CI-факт run 40359699208 на b128ac3: 845 collected / 845 executed / 836 passed / 1 failed (устаревший канон 775 в негативе полноты) / 0 errors / 8 admission-скипов / env-skip 0; после апдейта канона отказ исчезает (837 passed). collected 775 → 845; CI passed 767 → 837; node passed 791 = 845 − 8 admission − 46 env-skip (арифметика профиля; локальный node-прогон: 830 passed, 845 collected, те же env-зависимые отказы, что на master). env_skips_expected 46 и admission 8 не менялись."
+    },
     {
       "date": "2026-10-26-obs-jaeger-to-otlp",
       "collected": 775,
@@ -539,7 +553,7 @@
     "node": {
       "label": "node",
       "env": "node",
-      "passed": 721,
+      "passed": 797,
       "admission_skips": 8,
       "env_skips_max": 46,
       "named_admissions": [
@@ -604,7 +618,7 @@
     "ci": {
       "label": "CI",
       "env": "ci",
-      "passed": 767,
+      "passed": 843,
       "admission_skips": 8,
       "env_skips_max": 0,
       "named_admissions": [
