@@ -25,7 +25,7 @@
 - [ ] Grafana dashboard `ROMA v1.2` импортирован (`deploy/monitoring/grafana/roma-dashboard.json`)
 - [ ] Alert rules загружены (`deploy/monitoring/alert-rules-roma.yml`)
 - [ ] AlertManager/TG контакт-поинты настроены
-- [ ] Jaeger трейсинг (опционально, `JAEGER_ENABLED=true`)
+- [ ] OTLP трейсинг (опционально, `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317`; Jaeger принимает OTLP на 4317 нативно)
 
 ## 💳 Биллинг (CloudPayments)
 
