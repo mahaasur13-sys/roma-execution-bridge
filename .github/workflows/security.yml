@@ -58,6 +58,14 @@ jobs:
       - name: pip-audit (enforced — any known vulnerability fails the job)
         run: pip-audit --progress-spinner off --skip-editable
 
+      # G-CI-AUDIT-PINS: шаг выше аудирует окружение, собранное из pyproject (диапазоны
+      # `pip install -e .`), а install-шаги CI ставят ПИНЫ requirements-ci.txt — файл,
+      # объявленный единственным источником истины для install (`test`, `pytest-suite`).
+      # Аудит по файлу, а не по резолву pyproject: иначе расхождение пинов с безопасными
+      # версиями не видно (23 advisories на пинах против 0 на pyproject).
+      - name: pip-audit (requirements-ci.txt pins)
+        run: pip-audit -r requirements-ci.txt --progress-spinner off
+
   secrets:
     runs-on: ubuntu-latest
     timeout-minutes: 10
