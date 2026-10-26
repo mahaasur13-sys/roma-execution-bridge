@@ -3,10 +3,12 @@
 ## Access
 
 ```
-https://roma-execution-bridge-asurdev.zocomputer.io/admin/dashboard?api_key=roma-demo-key-2026
+curl -H "X-API-Key: $ROMA_ADMIN_KEY" https://roma-execution-bridge-asurdev.zocomputer.io/admin
 ```
 
-Requires a valid API key (any tenant). In production, restrict to admin-only.
+Requires a key from `ROMA_ADMIN_KEYS` (tenant keys, including `tenant-demo`, are rejected
+with 403) and a client IP inside `ADMIN_IP_ALLOWLIST`. The key is accepted from the
+`X-API-Key` header only — a `?api_key=` query parameter is ignored.
 
 ## Sections
 

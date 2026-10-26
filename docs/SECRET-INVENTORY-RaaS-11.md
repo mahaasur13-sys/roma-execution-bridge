@@ -45,8 +45,8 @@
 |----------|----------|
 | Владелец | НЕ НАЗНАЧЕН |
 | Место хранения | только env `ROMA_ADMIN_KEYS` (CSV); в репозитории и GitHub secrets не хранится; по состоянию на 2026-10-26 в production не задан |
-| Формат | CSV, без хэширования; сравнение `x_api_key not in admin_keys()` — set membership, не constant-time |
-| Что даёт | только обход email-верификации (403 "Email not verified") во всех `Depends(verify_api_key)`; admin-авторизацию НЕ даёт — её делает `deps._admin_only` (IP-allowlist + ключ `tenant-demo`) |
+| Формат | CSV, без хэширования; сравнение constant-time — `deps._admin_key_valid()` перебирает все ключи через `hmac.compare_digest` без раннего выхода |
+| Что даёт | (1) обход email-верификации (403 "Email not verified") во всех `Depends(verify_api_key)`; (2) admin-авторизацию в `deps._admin_only` — вместе с IP-allowlist (`ADMIN_IP_ALLOWLIST`). Ключ читается только из заголовка `X-API-Key`; tenant-ключи (включая `tenant-demo`) admin-прав не дают |
 | При отсутствии | fail-closed: `set()` → обхода нет (`tests/test_admin_keys_env.py`, 6 тестов) |
 | Ротация | рунбука нет (`rg -ni rotat docs/` → только `docs/DECISIONOS-TRANSFORMATION.md`: "Missing rotation"); порядок — раздел 2 |
 | Последняя ротация | не проводилась; механика введена в `7320a67` (2026-10-24) |

@@ -56,7 +56,7 @@ async def test_alert(
     }
 
 
-@router.post("/invites/create")
+@router.post("/invites/create", dependencies=[Depends(_admin_only)])
 async def admin_create_invite(payload: dict):
     """Create a new invite code (admin only)."""
     max_uses = int(payload.get("max_uses", 1))
@@ -68,13 +68,13 @@ async def admin_create_invite(payload: dict):
     return result
 
 
-@router.get("/invites")
+@router.get("/invites", dependencies=[Depends(_admin_only)])
 async def admin_list_invites():
     """List all invite codes with usage status."""
     return {"invites": list_invites(), "beta": check_beta_capacity()}
 
 
-@router.post("/invites/deactivate")
+@router.post("/invites/deactivate", dependencies=[Depends(_admin_only)])
 async def admin_deactivate_invite(payload: dict):
     """Deactivate an invite code."""
     code = payload.get("code", "")
@@ -93,7 +93,7 @@ async def admin_page(request: Request):
     return Response(content=_render_admin_dashboard(info["tenant_id"]), media_type="text/html")
 
 
-@router.get("/verification-stats")
+@router.get("/verification-stats", dependencies=[Depends(_admin_only)])
 def get_verification_stats():
     """Return verification statistics for the last 24h."""
     try:
@@ -129,8 +129,8 @@ async def admin_verification_stats():
     return get_verification_stats()
 
 
-@router.get("/backends", dependencies=[Depends(verify_api_key)])
-async def admin_backends(key_info: dict = Depends(verify_api_key)):
+@router.get("/backends", dependencies=[Depends(_admin_only)])
+async def admin_backends():
     """List available execution backends and their status."""
     from backends.dispatcher import list_backends
 

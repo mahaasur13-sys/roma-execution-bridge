@@ -11,6 +11,7 @@ working). There is no ``create_app`` here.
 
 from __future__ import annotations
 
+import hmac
 import ipaddress
 import logging
 import os
@@ -128,13 +129,19 @@ def verify_api_key(x_api_key: str = Header(None)) -> dict:
 
 
 def _get_client_ip(request: Request) -> str:
-    """Get real client IP, respecting proxy headers (X-Forwarded-For, X-Real-IP)."""
-    xff = request.headers.get("X-Forwarded-For", "")
-    if xff:
-        return xff.split(",")[0].strip()
-    xri = request.headers.get("X-Real-IP", "")
-    if xri:
-        return xri.strip()
+    """Get the client IP.
+
+    Proxy headers (X-Forwarded-For, X-Real-IP) are attacker-controlled, so they
+    are honoured only when ``ROMA_TRUST_PROXY=1`` says we sit behind a proxy
+    that overwrites them. Otherwise the socket peer address is the truth.
+    """
+    if os.getenv("ROMA_TRUST_PROXY", "") == "1":
+        xff = request.headers.get("X-Forwarded-For", "")
+        if xff:
+            return xff.split(",")[0].strip()
+        xri = request.headers.get("X-Real-IP", "")
+        if xri:
+            return xri.strip()
     return request.client.host if request.client else "unknown"
 
 
@@ -166,26 +173,42 @@ def _ip_allowed(client_ip: str) -> bool:
     return False
 
 
+def _admin_key_valid(candidate: str) -> bool:
+    """Constant-time membership check against ``ROMA_ADMIN_KEYS``.
+
+    Fail-closed: an empty/absent env yields no keys, so nothing is valid. Every
+    configured key is compared (no early exit) via ``hmac.compare_digest``.
+    """
+    if not candidate:
+        return False
+    keys = admin_keys()
+    if not keys:
+        return False
+    matched = False
+    for key in keys:
+        if hmac.compare_digest(candidate, key):
+            matched = True
+    return matched
+
+
 def _admin_only(request: Request) -> dict:
-    """Verify admin access — IP allowlist + valid API key + tenant-demo."""
+    """Verify admin access — ``ROMA_ADMIN_KEYS`` key + IP allowlist.
+
+    Tenant API keys (including ``tenant-demo``) grant no admin rights. The key
+    is read from the ``X-API-Key`` header only; a ``?api_key=`` query parameter
+    is not accepted (it leaks into access logs and Referer).
+    """
+    api_key_raw = request.headers.get("X-API-Key", "") or ""
+    if not api_key_raw:
+        raise HTTPException(status_code=401, detail="Admin API key required")
+
+    if not _admin_key_valid(api_key_raw):
+        logger.warning("Admin access denied — key not in ROMA_ADMIN_KEYS")
+        raise HTTPException(status_code=403, detail="Admin access requires an admin API key")
 
     client_ip = _get_client_ip(request)
     if not _ip_allowed(client_ip):
         logger.warning(f"Admin access denied — IP not in allowlist: {client_ip}")
         raise HTTPException(status_code=403, detail=f"Access denied from {client_ip}")
 
-    api_key_raw = request.headers.get("X-API-Key")
-    if not api_key_raw:
-        api_key_raw = request.query_params.get("api_key", "")
-
-    if not api_key_raw:
-        raise HTTPException(status_code=401, detail="Admin API key required")
-
-    info = API_KEYS.get(api_key_raw)
-    if not info:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-
-    if info.get("tenant_id") != "tenant-demo":
-        raise HTTPException(status_code=403, detail="Admin access requires tenant-demo API key")
-
-    return info
+    return {"tenant_id": "admin", "api_key": api_key_raw, "is_admin": True}
