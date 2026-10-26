@@ -23,6 +23,7 @@ from slowapi.util import get_remote_address
 
 from alerts import AlertDispatcher
 from billing.pg_ledger import PGBillingLedger as BillingLedger
+from billing.spend_caps import MONEY_POLICY
 
 # ── Logging ────────────────────────────────────────────────────────────
 logger = logging.getLogger("roma")
@@ -45,15 +46,9 @@ ADMIN_IP_ALLOWLIST = os.environ.get(
 # ── Billing ─────────────────────────────────────────────────────────────
 billing_ledger = BillingLedger()
 
-# G-MONEY-CAP-LITERALS: денежная политика (spend-cap и ставка сверх лимита) — НЕ квота.
-# Источник квот (`config/plans.json`) этих полей не покрывает и не должен: денежный
-# лимит и месячная квота — разные оси (вердикт владельца, чекпойнт P3.6 №1).
-_MONEY_POLICY: dict[str, dict[str, float]] = {
-    "free": {"spend_cap_usd": 0.50, "overage_rate": 0.0},
-    "start": {"spend_cap_usd": 5.00, "overage_rate": 0.000005},
-    "pro": {"spend_cap_usd": 50.00, "overage_rate": 0.000003},
-    "enterprise": {"spend_cap_usd": -1.0, "overage_rate": 0.0},
-}
+# G-MONEY-CAP-LITERALS: денежная политика живёт в `billing/spend_caps.py` — там же её
+# читает сверка ledger. Здесь только алиас, чтобы `deps.plan_config` не менялся.
+_MONEY_POLICY: dict[str, dict[str, float]] = MONEY_POLICY
 
 
 def plan_config(plan_name: str | None) -> dict:

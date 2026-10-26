@@ -5,11 +5,14 @@ from __future__ import annotations
 import time
 import json
 import logging
+import math
+import os
 import hashlib
 import zlib
 from uuid import uuid4
 
 from billing.pg_connection import get_pg_manager, PGUnavailableError
+from billing.spend_caps import MONEY_POLICY
 from cost.money_policy import reject_nullable_money
 
 logger = logging.getLogger("roma.billing.ledger")
@@ -28,6 +31,56 @@ _DEBIT_IF_FUNDS_INSERT_SQL = """
     ON CONFLICT (ledger_id) DO NOTHING
     RETURNING ledger_id
 """
+
+_LEDGER_SUMMARY_SQL = """
+    WITH per_tenant AS (
+        SELECT tenant_id,
+               COALESCE(SUM(CASE WHEN entry_type = 'DEBIT' THEN amount END), 0) AS debit,
+               COUNT(*) AS entries
+          FROM ledger_entries
+         GROUP BY tenant_id
+    ), usage AS (
+        SELECT tenant_id, COALESCE(SUM(cost_usd), 0) AS cost
+          FROM usage_events
+         GROUP BY tenant_id
+    ), diff AS (
+        SELECT COALESCE(l.tenant_id, u.tenant_id) AS tenant_id,
+               COALESCE(l.debit, 0) AS debit,
+               ABS(COALESCE(l.debit, 0) - COALESCE(u.cost, 0)) AS d
+          FROM per_tenant l
+          FULL OUTER JOIN usage u ON u.tenant_id = l.tenant_id
+    )
+    SELECT
+        (SELECT COALESCE(MAX(d), 0) FROM diff),
+        (SELECT COUNT(*) FROM diff WHERE d > %s),
+        (SELECT COALESCE(SUM(entries), 0) FROM per_tenant),
+        (SELECT COALESCE(json_agg(json_build_object('tenant_id', tenant_id, 'diff', d) ORDER BY d DESC),
+                         '[]'::json)
+           FROM (SELECT tenant_id, d FROM diff WHERE d > %s ORDER BY d DESC LIMIT 20) top),
+        (SELECT COUNT(*)
+           FROM diff
+           JOIN tenants tn ON tn.id = diff.tenant_id
+          WHERE COALESCE((%s::jsonb ->> tn.plan)::float8, 0) > 0
+            AND diff.debit >= (%s::jsonb ->> tn.plan)::float8)
+"""
+
+DRIFT_THRESHOLD_DEFAULT = 0.05
+
+
+def drift_threshold_from_env() -> float:
+    """ROMA_LEDGER_DRIFT_THRESHOLD_USD — порог сверки; мусор/отрицательное → дефолт + warning."""
+    raw = os.environ.get("ROMA_LEDGER_DRIFT_THRESHOLD_USD")
+    if raw is None or not raw.strip():
+        return DRIFT_THRESHOLD_DEFAULT
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("ROMA_LEDGER_DRIFT_THRESHOLD_USD=%r не число — беру %.2f", raw, DRIFT_THRESHOLD_DEFAULT)
+        return DRIFT_THRESHOLD_DEFAULT
+    if not math.isfinite(value) or value < 0:
+        logger.warning("ROMA_LEDGER_DRIFT_THRESHOLD_USD=%r вне диапазона — беру %.2f", raw, DRIFT_THRESHOLD_DEFAULT)
+        return DRIFT_THRESHOLD_DEFAULT
+    return value
 
 
 class PGBillingLedger:
@@ -342,3 +395,38 @@ class PGBillingLedger:
         except PGUnavailableError:
             pass
         return len([e for e in self._entries if e["tenant_id"] == tenant_id])
+
+    def reconciliation_summary(self, threshold_usd: float | None = None) -> dict:
+        """Сверка ledger↔usage по ВСЕМ тенантам одним запросом: агрегаты, без метки на тенанта.
+
+        diff = |SUM(DEBIT) - SUM(usage cost)| по каждому тенанту; drifted — те, у кого
+        diff > threshold_usd; drifted_ids — top-20 по |diff| (для лога, не для метрик).
+        spend_cap_exceeded — тенанты, у кого списано >= spend-cap своего тарифа
+        (тариф и числа — из `billing.spend_caps`, тот же источник, что у `deps.plan_config`).
+        """
+        threshold = DRIFT_THRESHOLD_DEFAULT if threshold_usd is None else float(threshold_usd)
+        caps = json.dumps({plan: float(cfg["spend_cap_usd"]) for plan, cfg in MONEY_POLICY.items()})
+        rows = self._pg_execute(
+            "ledger_reconcile_summary",
+            _LEDGER_SUMMARY_SQL,
+            (threshold, threshold, caps, caps),
+            fetch=True,
+        )
+        if not rows:
+            return {
+                "diff_max": 0.0,
+                "drifted": 0,
+                "entries_total": 0,
+                "drifted_top": [],
+                "spend_cap_exceeded": 0,
+                "threshold_usd": threshold,
+            }
+        diff_max, drifted, entries, top, exceeded = rows[0]
+        return {
+            "diff_max": float(diff_max or 0.0),
+            "drifted": int(drifted or 0),
+            "entries_total": int(entries or 0),
+            "drifted_top": list(top or []),
+            "spend_cap_exceeded": int(exceeded or 0),
+            "threshold_usd": threshold,
+        }

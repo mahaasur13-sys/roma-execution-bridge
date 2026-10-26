@@ -538,32 +538,42 @@ def _set_dr_drill_metrics() -> None:
     roma_dr_drill_rto_seconds.set(rto)
 
 
+def _reconcile_once() -> dict:
+    """Один проход сверки ledger↔usage: агрегаты в gauge, top-дрейф — в лог. Ошибки — наружу."""
+    from billing.pg_ledger import PGBillingLedger, drift_threshold_from_env
+    from monitoring.metrics import (
+        roma_ledger_entry_count_total,
+        roma_ledger_reconcile_last_success_timestamp_seconds,
+        roma_ledger_reconciliation_diff_max,
+        roma_ledger_tenants_drifted,
+        roma_spend_cap_exceeded_tenants,
+    )
+
+    _set_backup_metric()
+    _set_dr_drill_metrics()
+
+    summary = PGBillingLedger().reconciliation_summary(drift_threshold_from_env())
+    roma_ledger_reconciliation_diff_max.set(summary["diff_max"])
+    roma_ledger_tenants_drifted.set(summary["drifted"])
+    roma_ledger_entry_count_total.set(summary["entries_total"])
+    roma_spend_cap_exceeded_tenants.set(summary["spend_cap_exceeded"])
+    roma_ledger_reconcile_last_success_timestamp_seconds.set(time.time())
+    if summary["drifted"] or summary["spend_cap_exceeded"]:
+        logger.warning(
+            "ledger reconcile: threshold=%.4f drifted=%d diff_max=%.6f spend_cap_exceeded=%d top=%s",
+            summary["threshold_usd"],
+            summary["drifted"],
+            summary["diff_max"],
+            summary["spend_cap_exceeded"],
+            [(row.get("tenant_id"), round(float(row.get("diff") or 0), 6)) for row in summary["drifted_top"]],
+        )
+    return summary
+
+
 async def _reconciliation_loop():
     while True:
         try:
-            from billing.pg_ledger import PGBillingLedger
-            from monitoring.metrics import (
-                roma_ledger_computed_balance,
-                roma_api_balance,
-                roma_ledger_reconciliation_diff,
-                roma_ledger_entry_count,
-            )
-
-            ledger = PGBillingLedger()
-            for tenant_id in ["t-test-paper-20260909"]:
-                try:
-                    debit_sum = ledger.get_tenant_debit_sum(tenant_id)
-                    cost_sum = ledger.get_tenant_usage_cost(tenant_id)
-                    count = ledger.get_tenant_entry_count(tenant_id)
-                    diff = abs(debit_sum - cost_sum)
-                    roma_ledger_computed_balance.labels(tenant_id=tenant_id).set(debit_sum)
-                    roma_api_balance.labels(tenant_id=tenant_id).set(cost_sum)
-                    roma_ledger_reconciliation_diff.labels(tenant_id=tenant_id).set(diff)
-                    roma_ledger_entry_count.labels(tenant_id=tenant_id).set(count)
-                except Exception as e:
-                    logger.warning("reconciliation failed tenant=%s: %s", tenant_id, e)
-            _set_backup_metric()
-            _set_dr_drill_metrics()
+            _reconcile_once()
         except Exception as e:
             logger.warning("reconciliation loop error: %s", e)
         await asyncio.sleep(900)
