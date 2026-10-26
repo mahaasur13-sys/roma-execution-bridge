@@ -23,7 +23,7 @@ from auth.invites import (
     deactivate_invite,
     list_invites,
 )
-from deps import _admin_only, alert_dispatcher, limiter, logger, verify_api_key
+from deps import _admin_only, alert_dispatcher, limiter, logger
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -36,11 +36,10 @@ class TestAlertRequest(BaseModel):
 
 
 @limiter.limit("5/minute")
-@router.post("/test-alert")
+@router.post("/test-alert", dependencies=[Depends(_admin_only)])
 async def test_alert(
     request: Request,
     body: TestAlertRequest = TestAlertRequest(),
-    key_info: dict = Depends(verify_api_key),
 ):
     """Отправить тестовый алерт через заданный канал (или все)."""
     alert = Alert(
@@ -122,11 +121,6 @@ def get_verification_stats():
     except Exception as e:
         logger.warning("verification_stats_failed", extra={"error": str(e)})
         return {"error": str(e), "period": "24h"}
-
-
-async def admin_verification_stats():
-    """Return email verification statistics for the last 24 hours."""
-    return get_verification_stats()
 
 
 @router.get("/backends", dependencies=[Depends(_admin_only)])

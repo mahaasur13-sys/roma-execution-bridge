@@ -42,6 +42,7 @@ ADMIN_ROUTES = [
     ("POST", "/admin/invites/create", {"max_uses": 1}),
     ("POST", "/admin/invites/deactivate", {"code": "no-such-code"}),
     ("POST", "/admin/invite", {"dry_run": True}),
+    ("POST", "/admin/test-alert", {}),
     ("POST", "/billing/top-up", {"tenant_id": "t-none", "amount": 1.0}),
 ]
 
@@ -124,6 +125,29 @@ def test_admin_key_200_on_gate_only_route():
     client = TestClient(main.app, raise_server_exceptions=False)
     resp = client.get("/admin/verification-stats", headers={"X-API-Key": ADMIN_KEY})
     assert resp.status_code == 200, resp.text
+
+
+def test_test_alert_sends_only_for_admin_key(monkeypatch):
+    """POST /admin/test-alert: an admin key reaches the handler and sends once."""
+    from routers import admin as admin_router
+
+    sent = []
+    monkeypatch.setattr(admin_router.alert_dispatcher, "send", sent.append)
+    client = TestClient(main.app, raise_server_exceptions=False)
+
+    resp = client.post("/admin/test-alert", json={"message": "ping"}, headers={"X-API-Key": ADMIN_KEY})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["sent"] is True
+    assert len(sent) == 1
+
+    for key in (TENANT_KEY, DEMO_KEY, None):
+        resp = client.post(
+            "/admin/test-alert",
+            json={"message": "ping"},
+            headers={"X-API-Key": key} if key else {},
+        )
+        assert resp.status_code in (401, 403), f"key={key} -> {resp.status_code}"
+    assert len(sent) == 1, "a rejected request must not dispatch an alert"
 
 
 def test_admin_key_on_top_up_writes_ledger():
