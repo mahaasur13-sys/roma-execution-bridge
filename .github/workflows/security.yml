@@ -57,6 +57,13 @@ jobs:
       # (editable-установка строкой выше). Все сторонние зависимости аудируются целиком.
       - name: pip-audit (enforced — any known vulnerability fails the job)
         run: pip-audit --progress-spinner off --skip-editable
+      - name: pip check на свежей установке requirements-ci.txt
+        run: |
+          set -euo pipefail
+          python -m venv /tmp/ci-deps-check
+          /tmp/ci-deps-check/bin/python -m pip install -q -U pip
+          /tmp/ci-deps-check/bin/python -m pip install -q -r requirements-ci.txt
+          /tmp/ci-deps-check/bin/python -m pip check
 
       # G-CI-AUDIT-PINS: шаг выше аудирует окружение, собранное из pyproject (диапазоны
       # `pip install -e .`), а install-шаги CI ставят ПИНЫ requirements-ci.txt — файл,
