@@ -52,6 +52,10 @@ opentelemetry-instrumentation==0.66b1
 opentelemetry-instrumentation-asgi==0.66b1
 opentelemetry-instrumentation-fastapi==0.66b1
 opentelemetry-util-http==0.66b1
+opentelemetry-exporter-otlp-proto-grpc==1.45.1
+opentelemetry-exporter-otlp-proto-common==1.45.1
+opentelemetry-exporter-otlp-common==0.66b1
+opentelemetry-proto==1.45.1
 
 # --- tooling прогона ([dependency-groups].dev) ---
 pytest==9.0.3
