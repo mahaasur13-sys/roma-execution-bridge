@@ -1,17 +1,19 @@
 # ROMA Observability — Tracing & Alerts
 
-## OpenTelemetry / Jaeger
+## OpenTelemetry / OTLP
 
-ROMA uses OpenTelemetry with Jaeger exporter for distributed tracing.
+ROMA exports OpenTelemetry traces over OTLP/gRPC. Tracing is opt-in and is enabled only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
 
 ### Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `JAEGER_ENABLED` | `false` | Enable Jaeger tracing |
-| `JAEGER_AGENT_HOST` | `localhost` | Jaeger agent host |
-| `JAEGER_AGENT_PORT` | `6831` | Jaeger agent UDP port |
-| `JAEGER_SERVICE_NAME` | `roma-execution-bridge` | Service name in traces |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | OTLP/gRPC collector endpoint, e.g. `http://127.0.0.1:4317`. Unset = tracing disabled |
+| `OTEL_SERVICE_NAME` | `roma-execution-bridge` | Service name in traces |
+
+If the OTLP exporter packages are missing (`opentelemetry-exporter-otlp-proto-grpc`), the service logs one warning and starts without tracing.
+
+`JAEGER_ENABLED` is deprecated: setting it only logs a warning, nothing else happens.
 
 ### Tracing Coverage
 
@@ -23,8 +25,8 @@ All FastAPI endpoints are auto-instrumented. Additionally, the following operati
 
 ### Viewing Traces
 
-1. Start Jaeger: `docker run -p 16686:16686 -p 6831:6831/udp jaegertracing/all-in-one:latest`
-2. Set `JAEGER_ENABLED=true`
+1. Start a collector or Jaeger (Jaeger accepts OTLP natively on `4317`): `docker run -p 16686:16686 -p 4317:4317 jaegertracing/all-in-one:latest`
+2. Set `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317`
 3. Send requests to ROMA
 4. Open Jaeger UI: `http://localhost:16686`
 

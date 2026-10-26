@@ -407,35 +407,42 @@ if CLOUDPAYMENTS_ENABLED:
 import httpx
 
 # ============================================
-# JAEGER / OPENTELEMETRY TRACING
+# OPENTELEMETRY TRACING (OTLP)
 # ============================================
 
-JAEGER_ENABLED = os.environ.get("JAEGER_ENABLED", "false").lower() == "true"
-JAEGER_AGENT_HOST = os.environ.get("JAEGER_AGENT_HOST", "localhost")
-JAEGER_AGENT_PORT = int(os.environ.get("JAEGER_AGENT_PORT", "6831"))
-JAEGER_SERVICE_NAME = os.environ.get("JAEGER_SERVICE_NAME", "roma-execution-bridge")
+OTEL_SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", "roma-execution-bridge")
 
-if JAEGER_ENABLED:
-    from opentelemetry import trace
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    from opentelemetry.exporter.jaeger.thrift import JaegerExporter
-    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-    from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+tracer = None
+_fastapi_instrumentor = None
 
-    resource = Resource.create({SERVICE_NAME: JAEGER_SERVICE_NAME})
-    provider = TracerProvider(resource=resource)
 
-    jaeger_exporter = JaegerExporter(
-        agent_host_name=JAEGER_AGENT_HOST,
-        agent_port=JAEGER_AGENT_PORT,
-    )
-    provider.add_span_processor(BatchSpanProcessor(jaeger_exporter))
+def _setup_tracing() -> bool:
+    """Включает OTLP-трейсинг, только если задан OTEL_EXPORTER_OTLP_ENDPOINT."""
+    global tracer, _fastapi_instrumentor
+    if os.environ.get("JAEGER_ENABLED", "").strip():
+        logger.warning("JAEGER_ENABLED is deprecated, use OTEL_EXPORTER_OTLP_ENDPOINT")
+    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
+    if not endpoint:
+        return False
+    try:
+        from opentelemetry import trace
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    except ImportError as exc:
+        logger.warning(f"OTEL tracing disabled: {exc}")
+        return False
+    provider = TracerProvider(resource=Resource.create({SERVICE_NAME: OTEL_SERVICE_NAME}))
+    provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint)))
     trace.set_tracer_provider(provider)
-
     tracer = trace.get_tracer(__name__)
-else:
-    tracer = None
+    _fastapi_instrumentor = FastAPIInstrumentor
+    return True
+
+
+tracing_enabled = _setup_tracing()
 
 
 # ============================================
@@ -697,8 +704,8 @@ app.include_router(submit_router)
 app.include_router(beta_router)
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-if JAEGER_ENABLED:
-    FastAPIInstrumentor.instrument_app(app)
+if tracing_enabled:
+    _fastapi_instrumentor.instrument_app(app)
 
 STATIC_INDEX = Path(__file__).parent / "static" / "index.html"
 
