@@ -104,7 +104,7 @@ Exported at `/metrics`. Core billing metrics:
 Location: `deploy/monitoring/alert-rules-roma.yml`
 
 - **ROMASpendCap90** — warning at 90% spend-cap
-- **ROMASpendCapExceeded** — critical when cap exceeded
+- **ROMASpendCapExceededTenants** — critical when any tenant exceeded its spend-cap (aggregate count)
 - **ROMABillingErrorRate** — critical when billing errors spike
 - **ROMANoMetrics** — critical when /metrics not responding
 
