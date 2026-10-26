@@ -11,7 +11,7 @@
 | Путь | Тип секрета | Источник |
 |------|-------------|----------|
 | `.env.example` | API-ключи: CloudPayments (`public_id`/`api_secret`/`webhook_secret`), DeepSeek, SendGrid, Vast.ai, GitHub OAuth (`client_id`/`client_secret`), Google OAuth (`client_id`/`client_secret`) | env-переменные |
-| `.env.example` | секреты/токены: `JWT_SECRET`, `ROMA_API_KEY`, `ROMA_DEMO_API_KEY`, `ROMA_GPU_WORKER_TOKEN`, `ALERT_TELEGRAM_BOT_TOKEN`, `ADMIN_API_KEYS` | env-переменные |
+| `.env.example` | секреты/токены: `JWT_SECRET`, `ROMA_API_KEY`, `ROMA_DEMO_API_KEY`, `ROMA_GPU_WORKER_TOKEN`, `ALERT_TELEGRAM_BOT_TOKEN`, `ROMA_ADMIN_KEYS` | env-переменные |
 | `.env.example` | инфра/БД: `PG_DSN`, `REDIS_URL`, `MINIO_ROOT_PASSWORD`, `ALERT_EMAIL_SMTP_PASSWORD`, `SLURM_SSH_KEY`, `ZO_SSH_KEY` | env-переменные |
 | `.env.crypto.example` | крипто-платежи: `CRYPTO_NOWPAYMENTS_API_KEY`/`IPN_SECRET`, `CRYPTO_HELEKET_API_KEY`, `CRYPTO_CRYPTOCLOUD_API_KEY`, `CRYPTO_MONERO_VIEW_KEY` | env-переменные |
 
@@ -38,6 +38,18 @@
 | `deploy/stripe-webhook/scripts/encrypt-secret.sh` | скрипт шифрования webhook-секрета | скрипт |
 | `deploy/sealed-secrets/Chart.yaml` | sealed-secrets helm chart | чарт |
 | `docs/tutorials/01-submit-job-with-tokens.md` | туториал (использование токена/API-ключа) | документ |
+
+### `ROMA_ADMIN_KEYS` — admin-доступ
+
+| Параметр | Значение |
+|----------|----------|
+| Владелец | НЕ НАЗНАЧЕН |
+| Место хранения | только env `ROMA_ADMIN_KEYS` (CSV); в репозитории и GitHub secrets не хранится; по состоянию на 2026-10-26 в production не задан |
+| Формат | CSV, без хэширования; сравнение `x_api_key not in admin_keys()` — set membership, не constant-time |
+| Что даёт | только обход email-верификации (403 "Email not verified") во всех `Depends(verify_api_key)`; admin-авторизацию НЕ даёт — её делает `deps._admin_only` (IP-allowlist + ключ `tenant-demo`) |
+| При отсутствии | fail-closed: `set()` → обхода нет (`tests/test_admin_keys_env.py`, 6 тестов) |
+| Ротация | рунбука нет (`rg -ni rotat docs/` → только `docs/DECISIONOS-TRANSFORMATION.md`: "Missing rotation"); порядок — раздел 2 |
+| Последняя ротация | не проводилась; механика введена в `7320a67` (2026-10-24) |
 
 ---
 
