@@ -71,16 +71,6 @@ jobs:
         run: pip install -r requirements-ci.txt
       - name: Apply migrations to CI test DB (реальный вход миграций, без глушителей)
         run: python scripts/run_migrations.py
-      - name: "Collect-only (диагностика нестабильной коллекции)"
-        # G-CI-COLLECT-DRIFT: 874 локально vs 873 в CI. Список nodeid из раннера
-        # нужен как artifact, иначе расхождение нечем сравнить. Прогон не меняется.
-        run: timeout 120 python3 -m pytest --collect-only -q -p no:cacheprovider | tee collect.txt
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: always()
-        with:
-          name: collect-idx
-          path: collect.txt
-          if-no-files-found: warn
       - name: "Full suite — repo-wide (A-2/N7b: область прогона = весь репозиторий)"
         run: |
           python -m pytest -q -rs --junitxml=junit.xml
