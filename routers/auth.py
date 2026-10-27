@@ -63,7 +63,7 @@ email_service = EmailService(
 
 VERIFICATION_TOKEN_EXPIRY_HOURS = int(os.environ.get("VERIFICATION_TOKEN_EXPIRY_HOURS", "24"))
 VERIFICATION_BASE_URL = os.environ.get("VERIFICATION_BASE_URL", "https://roma-execution-bridge-asurdev.zocomputer.io")
-DEMO_API_KEY = os.environ.get("ROMA_DEMO_API_KEY", "YOUR_API_KEY")
+DEMO_API_KEY = "YOUR_API_KEY"  # static placeholder on the login page; demo keys are no longer issued
 
 LOGIN_PAGE = """<!DOCTYPE html>
 <html lang="en">
