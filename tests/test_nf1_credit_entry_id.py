@@ -99,11 +99,12 @@ def test_top_up_route_returns_non_empty_entry_id(monkeypatch):
 
     fresh = PGBillingLedger()
     monkeypatch.setattr(billing_router, "billing_ledger", fresh)
-    monkeypatch.setattr(
-        billing_router,
-        "_admin_only",
-        lambda request: {"tenant_id": "tenant-demo", "name": "admin"},
-    )
+    # The gate is a route dependency, bound at import time, so it can no longer
+    # be monkeypatched on the module: configure a real admin key instead.
+    import deps
+
+    monkeypatch.setenv("ROMA_ADMIN_KEYS", "test-admin-key")
+    monkeypatch.setattr(deps, "ADMIN_IP_ALLOWLIST", "*")
 
     import main
 

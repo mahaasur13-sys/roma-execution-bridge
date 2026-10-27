@@ -25,7 +25,7 @@ import db_adapter as db
 # A1 — shared singletons/helpers (re-exported so main.* names stay intact)
 from deps import (
     API_KEYS,
-    admin_keys,
+    _admin_key_valid,
     verify_api_key,
     alert_dispatcher,
     limiter,
@@ -335,7 +335,7 @@ def verify_api_key(x_api_key: str = Header(None)) -> dict:
     tenant["api_key"] = x_api_key
 
     # Check email verification for API endpoints (skip auth endpoints and admin keys)
-    if x_api_key not in admin_keys():
+    if not _admin_key_valid(x_api_key):
         verif_status = is_email_verified(x_api_key)
         if not verif_status:
             raise HTTPException(
@@ -1803,8 +1803,8 @@ async def dashboard(request: Request):
 # ============================================
 
 
-@limiter.limit("10/minute")
 @app.post("/feedback")
+@limiter.limit("10/minute")
 async def submit_feedback(request: Request):
     """Submit user feedback. Public endpoint, no auth required."""
     try:
