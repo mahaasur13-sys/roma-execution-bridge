@@ -136,7 +136,7 @@ async def login(request: Request):
         ).replace("{{ demo_key }}", DEMO_API_KEY)
         return Response(content=error_html, media_type="text/html", status_code=401)
 
-    session_id = create_session(info["tenant_id"], api_key)
+    session_id = create_session(info["tenant_id"])
 
     resp = RedirectResponse(url="/dashboard", status_code=302)
     resp.set_cookie(
@@ -479,7 +479,6 @@ async def oauth_callback(provider: str, code: str = "", error: str = "", request
     # Upsert user — if exists, reuse; otherwise create new tenant + API key
     existing = db.get_user_by_email(email)
     if existing:
-        api_key = existing["api_key"]
         tenant_id = existing["tenant_id"]
         logger.info(f"OAuth login: existing user {email} → tenant={tenant_id}")
     else:
@@ -503,9 +502,9 @@ async def oauth_callback(provider: str, code: str = "", error: str = "", request
                 "subscription_status": "active",
             },
         )
-        logger.info(f"OAuth login: NEW user {email} → tenant={tenant_id}, api_key={api_key[:8]}***")
+        logger.info(f"OAuth login: NEW user {email} → tenant={tenant_id}")
 
-    session_id = create_session(tenant_id, api_key)
+    session_id = create_session(tenant_id)
     resp = RedirectResponse(url="/dashboard", status_code=302)
     resp.set_cookie("session_id", session_id, httponly=True, max_age=3600, samesite="lax")
     return resp
