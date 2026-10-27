@@ -371,6 +371,8 @@ def test_sixth_request_in_the_window_is_429(account, client, monkeypatch):
 
     assert codes[:5] == [200] * 5, codes
     assert codes[5] == 429, codes
+
+
 def test_two_rotations_revoke_both_previous_keys(account, client):
     """(е) вторая ротация отзывает и первый, и второй ключ — работает только третий.
 
