@@ -639,7 +639,7 @@
     "ci": {
       "label": "CI",
       "env": "ci",
-      "passed": 865,
+      "passed": 866,
       "admission_skips": 8,
       "env_skips_max": 0,
       "named_admissions": [
