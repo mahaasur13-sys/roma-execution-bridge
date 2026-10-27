@@ -407,7 +407,7 @@ def get_user_by_email(email: str) -> dict | None:
 
 def get_user_by_api_key(api_key: str) -> dict | None:
     if _pg_enabled():
-        from db_pg_sync import get_user_by_api_key as pg_fn
+        from db_pg_sync import find_user_by_api_key as pg_fn
 
         conn = _pg_conn()
         try:
