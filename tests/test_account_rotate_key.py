@@ -371,3 +371,30 @@ def test_sixth_request_in_the_window_is_429(account, client, monkeypatch):
 
     assert codes[:5] == [200] * 5, codes
     assert codes[5] == 429, codes
+def test_two_rotations_revoke_both_previous_keys(account, client):
+    """(е) вторая ротация отзывает и первый, и второй ключ — работает только третий.
+
+    ``users.api_key`` обнуляется после первой ротации, поэтому digest старого
+    ключа обязан читаться из ``users.api_key_hash``: иначе вторая ротация
+    отзывает пустую строку и первый ключ остаётся валидным в реестре.
+    """
+    session_id, token = _login(client, account["tenant_id"])
+    try:
+        first = client.post("/account/rotate-key", data={"csrf_token": token})
+        assert first.status_code == 200, first.text
+        key1 = NEW_KEY.search(first.text).group(1)
+
+        second = client.post("/account/rotate-key", data={"csrf_token": token})
+        assert second.status_code == 200, second.text
+        key2 = NEW_KEY.search(second.text).group(1)
+        assert len({account["raw"], key1, key2}) == 3
+
+        assert deps.lookup_key(account["raw"]) is None, "ключ до ротаций обязан умереть"
+        assert deps.lookup_key(key1) is None, "ключ первой ротации обязан умереть"
+        assert deps.lookup_key(key2) is not None, "ключ второй ротации обязан работать"
+
+        row = _row(account["user_id"])
+        assert row["api_key"] == ""
+        assert row["api_key_hash"] == _digest(key2)
+    finally:
+        delete_session(session_id)

@@ -31,7 +31,7 @@ from fastapi import APIRouter, HTTPException, Request
 from starlette.responses import HTMLResponse
 
 from auth.sessions import csrf_token_for, csrf_valid, get_session
-from deps import key_digest, limiter, logger, register_key, revoke_key
+from deps import limiter, logger, register_key, revoke_key
 
 router = APIRouter(prefix="/account", tags=["account"])
 
@@ -192,9 +192,9 @@ async def rotate_api_key(request: Request):
         logger.exception("api_key_rotation_failed tenant_id=%s user_id=%s", tenant_id, user.get("id"))
         raise HTTPException(status_code=500, detail="Key rotation failed")
 
-    old_api_key = result.get("old_api_key") or user.get("api_key") or ""
-    if old_api_key:
-        revoke_key(key_digest(old_api_key))
+    old_api_key_hash = result.get("old_api_key_hash") or ""
+    if old_api_key_hash:
+        revoke_key(old_api_key_hash)
 
     tenant = db.get_tenant(tenant_id) or {}
     register_key(new_key, {"tenant_id": tenant_id, "plan": tenant.get("plan", "free")})

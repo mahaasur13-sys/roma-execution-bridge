@@ -351,8 +351,8 @@ def rotate_user_api_key(user_id: str, tenant_id: str, new_key: str) -> dict:
     """sqlite parity of ``db_pg_sync.rotate_user_api_key`` — both updates or none."""
     c = _conn()
     try:
-        row = c.execute("SELECT api_key FROM users WHERE id = ?", (user_id,)).fetchone()
-        old_api_key = (row["api_key"] or "") if row else ""
+        row = c.execute("SELECT api_key_hash FROM users WHERE id = ?", (user_id,)).fetchone()
+        old_api_key_hash = (row["api_key_hash"] or "") if row else ""
         digest = _key_digest(new_key)
         cur = c.execute(
             "UPDATE users SET api_key = '', api_key_hash = ?, updated_at = datetime('now') WHERE id = ?",
@@ -368,7 +368,11 @@ def rotate_user_api_key(user_id: str, tenant_id: str, new_key: str) -> dict:
             c.rollback()
         else:
             c.commit()
-        return {"users_count": users_count, "tenants_count": tenants_count, "old_api_key": old_api_key}
+        return {
+            "users_count": users_count,
+            "tenants_count": tenants_count,
+            "old_api_key_hash": old_api_key_hash,
+        }
     finally:
         c.close()
 
