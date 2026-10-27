@@ -6,7 +6,7 @@ Named ``main_checks.py`` (NOT ``test_*.py``) on purpose: the repo-wide canon run
     python -m pytest main_checks.py -q
 
 Что проверяется:
-  * транзиентные отказы init_db → успех, seed_tenants вызывается один раз и после успеха;
+  * транзиентные отказы init_db → успех, seed_tenants при старте не вызывается;
   * отказы дольше бюджета ROMA_DB_INIT_TIMEOUT_S → последнее исключение пробрасывается;
   * бюджет читается из env (0 → первая же неудача пробрасывается, без ретраев);
   * backoff экспоненциальный и упирается в потолок (2 → 4 → 8 → 10 → 10);
@@ -72,24 +72,22 @@ def test_succeeds_after_transient_failures(monkeypatch, no_sleep) -> None:
     main._init_db_with_retry(timeout_s=60, delay_s=0)
 
     assert calls["init"] == 3
-    assert seeded == [main.API_KEYS], "seed_tenants обязан идти после успешного init_db"
+    assert seeded == [], "seed_tenants на старте не зовётся: реестр ключей не источник тенантов"
 
 
-def test_seed_failure_is_retried_too(monkeypatch, no_sleep) -> None:
-    """Сбой seed_tenants — тоже ретраится, а не падает в первый раз."""
-    attempts = {"n": 0}
+def test_seed_is_not_called_at_startup(monkeypatch, no_sleep) -> None:
+    """Старт не сеет тенантов из реестра: там только digest'ы, seed принял бы их за ключи."""
+    calls = {"seed": 0}
 
-    def flaky_seed(_keys) -> None:
-        attempts["n"] += 1
-        if attempts["n"] < 2:
-            raise RuntimeError("seed failed")
+    def counting_seed(_keys) -> None:
+        calls["seed"] += 1
 
     monkeypatch.setattr(main.db, "init_db", lambda: None)
-    monkeypatch.setattr(main.db, "seed_tenants", flaky_seed)
+    monkeypatch.setattr(main.db, "seed_tenants", counting_seed)
 
     main._init_db_with_retry(timeout_s=60, delay_s=0)
 
-    assert attempts["n"] == 2
+    assert calls["seed"] == 0
 
 
 def test_raises_when_budget_exhausted(monkeypatch, no_sleep) -> None:

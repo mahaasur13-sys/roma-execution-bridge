@@ -22,6 +22,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from deps import register_key
 from starlette.testclient import TestClient
 
 import db_adapter as db
@@ -69,12 +70,8 @@ def _env(monkeypatch):
     demo_tenant = "tenant-demo"
     db.seed_tenants({DEMO_KEY: {"tenant_id": demo_tenant, "name": "demo"}})
     original = dict(main.API_KEYS)
-    main.API_KEYS.update(
-        {
-            TENANT_KEY: {"tenant_id": TENANT_ID},
-            DEMO_KEY: {"tenant_id": demo_tenant},
-        }
-    )
+    register_key(TENANT_KEY, {"tenant_id": TENANT_ID})
+    register_key(DEMO_KEY, {"tenant_id": demo_tenant})
     yield
     main.API_KEYS.clear()
     main.API_KEYS.update(original)

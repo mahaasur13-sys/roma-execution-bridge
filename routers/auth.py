@@ -33,7 +33,7 @@ from auth.invites import (
 )
 from auth.sessions import create_session, delete_session, get_session
 from auth.verification import create_verification, verify_token
-from deps import API_KEYS, limiter, logger
+from deps import limiter, logger, lookup_key, register_key
 from saas.email.service import EmailProvider as _EmailProvider, EmailService
 
 # ── OAuth config ───────────────────────────────────────────────────────
@@ -127,7 +127,8 @@ async def login(request: Request):
     """Process login form submission."""
     form = await request.form()
     api_key = form.get("api_key", "")
-    if api_key not in API_KEYS:
+    info = lookup_key(api_key)
+    if not info:
         # Show login page with error
         error_html = LOGIN_PAGE.replace(
             "</form>",
@@ -135,7 +136,6 @@ async def login(request: Request):
         ).replace("{{ demo_key }}", DEMO_API_KEY)
         return Response(content=error_html, media_type="text/html", status_code=401)
 
-    info = API_KEYS[api_key]
     session_id = create_session(info["tenant_id"], api_key)
 
     resp = RedirectResponse(url="/dashboard", status_code=302)
@@ -207,7 +207,7 @@ async def signup(payload: dict, request: Request):
     verification_url = f"{VERIFICATION_BASE_URL}/auth/verify-email?token={token}"
 
     db.seed_tenants({api_key: {"tenant_id": tenant_id, "plan": plan}})
-    API_KEYS[api_key] = {"tenant_id": tenant_id, "plan": plan, "email_verified": False}
+    register_key(api_key, {"tenant_id": tenant_id, "plan": plan})
     db.create_user_with_password(user_id, email, name, tenant_id, api_key, password_hash, token, expires_at)
 
     try:
@@ -266,9 +266,6 @@ async def verify_email_endpoint(token: str):
         raise HTTPException(status_code=404, detail="User not found")
 
     db.mark_email_verified(user["email"])
-    api_key = user.get("api_key", "")
-    if api_key and api_key in API_KEYS:
-        API_KEYS[api_key]["email_verified"] = True
 
     return {
         "status": "verified",
@@ -498,11 +495,14 @@ async def oauth_callback(provider: str, code: str = "", error: str = "", request
         except Exception as e:
             logger.warning(f"seed_tenants failed (non-fatal): {e}")
         # Add to in-memory API key registry
-        API_KEYS[api_key] = {
-            "tenant_id": tenant_id,
-            "plan": "free",
-            "subscription_status": "active",
-        }
+        register_key(
+            api_key,
+            {
+                "tenant_id": tenant_id,
+                "plan": "free",
+                "subscription_status": "active",
+            },
+        )
         logger.info(f"OAuth login: NEW user {email} → tenant={tenant_id}, api_key={api_key[:8]}***")
 
     session_id = create_session(tenant_id, api_key)
