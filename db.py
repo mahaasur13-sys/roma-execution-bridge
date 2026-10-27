@@ -316,7 +316,8 @@ def upsert_oauth_user(user_id: str, email: str, name: str, provider: str, tenant
         c.execute(
             "INSERT INTO users (id, email, name, provider, tenant_id, api_key, api_key_hash, created_at, updated_at) "
             "VALUES (?,?,?,?,?,?,?,?,?)",
-            (user_id, email, name, provider, tenant_id, api_key, _key_digest(api_key), now, now),
+            # api_key stays empty: only its digest is ever stored (PR-F2d).
+            (user_id, email, name, provider, tenant_id, "", _key_digest(api_key), now, now),
         )
     c.commit()
     row = c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()

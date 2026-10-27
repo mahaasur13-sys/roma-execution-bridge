@@ -261,7 +261,9 @@ def upsert_oauth_user(
         "VALUES (%s,%s,%s,%s,%s,%s,%s) "
         "ON CONFLICT (id) DO UPDATE SET email=EXCLUDED.email, name=EXCLUDED.name, "
         "updated_at=now() RETURNING *",
-        (user_id, email, name, provider, tenant_id, api_key, _key_digest(api_key)),
+        # api_key stays empty: the plaintext is shown once at verification and
+        # only its digest is ever stored (PR-F2d key bootstrap).
+        (user_id, email, name, provider, tenant_id, "", _key_digest(api_key)),
     )
     cols = [desc[0] for desc in cur.description]
     return dict(zip(cols, cur.fetchone()))
@@ -650,7 +652,9 @@ def create_user_with_password(
             name,
             "email",
             tenant_id,
-            api_key,
+            # api_key stays empty: the plaintext is shown once at verification
+            # and only its digest is ever stored (PR-F2d key bootstrap).
+            "",
             _key_digest(api_key),
             password_hash,
             False,
