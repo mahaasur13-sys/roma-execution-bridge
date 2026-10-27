@@ -27,7 +27,7 @@ import time
 import uuid
 
 import db_adapter as db
-from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from starlette.responses import HTMLResponse
 
 from auth.sessions import csrf_token_for, csrf_valid, get_session
@@ -161,12 +161,11 @@ async def account_page(request: Request):
 
 @router.post("/rotate-key")
 @limiter.limit("5/15minutes")
-async def rotate_api_key(
-    request: Request,
-    csrf_token: str = Form(""),
-    password: str = Form(""),
-):
+async def rotate_api_key(request: Request):
     """Rotate the tenant API key: one transaction, then the registry switch-over."""
+    form = await request.form()
+    csrf_token = str(form.get("csrf_token", ""))
+    password = str(form.get("password", ""))
     session_id, session = _session(request)
     if not csrf_valid(session_id, csrf_token):
         raise HTTPException(status_code=403, detail="Invalid CSRF token")
