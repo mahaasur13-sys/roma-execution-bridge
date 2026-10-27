@@ -172,10 +172,19 @@ def _ensure_users_api_key_hash_c(c) -> None:
     The plaintext ``users.api_key`` is kept — it is cleared only once every writer
     fills ``api_key_hash`` (mirrors 017 now / 018 later). Idempotent: a re-run adds
     no column, recomputes nothing and matches no rows.
+
+    The email-verification columns are added here too: PG has had them since 001,
+    sqlite never did, so without them the sqlite branch could not consume a token.
     """
     ucols = {row[1] for row in c.execute("PRAGMA table_info(users)").fetchall()}
-    if "api_key_hash" not in ucols:
-        c.execute("ALTER TABLE users ADD COLUMN api_key_hash TEXT NOT NULL DEFAULT ''")
+    for col, decl in (
+        ("api_key_hash", "TEXT NOT NULL DEFAULT ''"),
+        ("verification_token", "TEXT"),
+        ("verification_token_expires_at", "TEXT"),
+        ("email_verified", "INTEGER NOT NULL DEFAULT 0"),
+    ):
+        if col not in ucols:
+            c.execute(f"ALTER TABLE users ADD COLUMN {col} {decl}")
     c.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS users_api_key_hash_uidx ON users(api_key_hash) WHERE api_key_hash <> ''"
     )
@@ -385,6 +394,58 @@ def get_user_by_api_key(api_key: str) -> dict | None:
     row = c.execute("SELECT * FROM users WHERE api_key_hash = ?", (_key_digest(api_key),)).fetchone()
     c.close()
     return dict(row) if row else None
+
+
+def consume_verification_token(token: str) -> dict | None:
+    """sqlite parity of ``db_pg_sync.consume_verification_token`` — one transaction.
+
+    ``BEGIN IMMEDIATE`` takes the write lock before the read, so two clicks on the
+    same link serialise: the loser sees no live token and returns ``None``.
+    Expiry is compared as the ISO-8601 string this codebase writes (UTC, ``+00:00``).
+    """
+    if not token:
+        return None
+    now_iso = datetime.now(timezone.utc).isoformat()
+    c = _conn()
+    try:
+        c.execute("BEGIN IMMEDIATE")
+        row = c.execute(
+            "SELECT id, email, tenant_id, verification_token_expires_at FROM users "
+            "WHERE verification_token = ? AND COALESCE(email_verified, 0) = 0 "
+            "AND (verification_token_expires_at IS NULL OR verification_token_expires_at > ?)",
+            (token, now_iso),
+        ).fetchone()
+        if not row:
+            c.rollback()
+            return None
+        c.execute(
+            "UPDATE users SET email_verified = 1, verification_token = NULL, "
+            "verification_token_expires_at = NULL, updated_at = datetime('now') WHERE id = ?",
+            (row["id"],),
+        )
+        c.commit()
+        return {
+            "user_id": row["id"],
+            "email": row["email"],
+            "tenant_id": row["tenant_id"],
+            "expires_at": row["verification_token_expires_at"],
+        }
+    finally:
+        c.close()
+
+
+def restore_verification_token(user_id: str, token: str, expires_at) -> None:
+    """Undo a consume when the key rotation that followed it failed."""
+    c = _conn()
+    try:
+        c.execute(
+            "UPDATE users SET email_verified = 0, verification_token = ?, "
+            "verification_token_expires_at = ?, updated_at = datetime('now') WHERE id = ?",
+            (token, expires_at, user_id),
+        )
+        c.commit()
+    finally:
+        c.close()
 
 
 def log_email_sent(recipient_email: str, recipient_name: str, tenant_id: str, invitation_link: str) -> int:

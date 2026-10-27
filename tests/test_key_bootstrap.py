@@ -133,10 +133,23 @@ def test_oauth_insert_stores_only_the_digest(sqlite_tmp_db, monkeypatch):
             c.close()
 
 
-def test_verify_email_shows_key_once_and_moves_both_hashes(oauth_user, client, monkeypatch, caplog):
+def _set_token(user_id: str, token: str, expires_at: str = "2030-01-01T00:00:00+00:00") -> None:
+    c = db._conn()
+    try:
+        c.execute(
+            "UPDATE users SET verification_token = ?, verification_token_expires_at = ?, "
+            "email_verified = 0 WHERE id = ?",
+            (token, expires_at, user_id),
+        )
+        c.commit()
+    finally:
+        c.close()
+
+
+def test_verify_email_shows_key_once_and_moves_both_hashes(oauth_user, client, caplog):
     """(а) первый успех: ключ в HTML один раз, оба хэша = sha256(new), сессия, no-store."""
     token = "verify-token-" + uuid.uuid4().hex[:8]
-    monkeypatch.setattr(auth_routes, "verify_token", lambda _t: ({"user_id": oauth_user["user_id"]}, "success"))
+    _set_token(oauth_user["user_id"], token)
 
     with caplog.at_level("DEBUG"):
         resp = client.get(f"/auth/verify-email?token={token}")
@@ -153,28 +166,55 @@ def test_verify_email_shows_key_once_and_moves_both_hashes(oauth_user, client, m
     assert user["api_key"] == ""
     assert user["api_key_hash"] == _digest(new_key)
     assert tenant["api_key_hash"] == user["api_key_hash"], "users и tenants меняются вместе"
+    assert user["verification_token"] is None, "токен израсходован тем же запросом"
 
     session_id = resp.cookies.get("session_id")
     assert session_id and get_session(session_id)["tenant_id"] == oauth_user["tenant_id"]
     assert deps.lookup_key(new_key) is not None
-    assert deps.lookup_key(oauth_user["raw"]) is None, "старый ключ снят с реестра"
     assert new_key not in caplog.text, "ключ не должен попадать в лог"
 
 
-def test_verified_link_replay_has_no_key(oauth_user, client, monkeypatch):
-    """(а) токен израсходован: повторный переход отвечает 400 и ключа не показывает."""
-    monkeypatch.setattr(auth_routes, "verify_token", lambda _t: ({"user_id": oauth_user["user_id"]}, "success"))
-    first = client.get("/auth/verify-email?token=spent")
-    assert first.status_code == 200
+def test_two_verifies_with_one_token_reveal_the_key_once(oauth_user, client):
+    """(б) два перехода по одной ссылке: ровно один показ ключа, второй — 400."""
+    token = "verify-token-" + uuid.uuid4().hex[:8]
+    _set_token(oauth_user["user_id"], token)
+
+    first = client.get(f"/auth/verify-email?token={token}")
+    assert first.status_code == 200, first.text
+    assert KEY_IN_HTML.search(first.text), "первый переход обязан показать ключ"
     digest_after_first = _row("users", "id", oauth_user["user_id"])["api_key_hash"]
 
-    # Ровно то, что делает mark_email_verified: токен обнулён → verify_token даёт invalid.
-    monkeypatch.setattr(auth_routes, "verify_token", lambda _t: (None, "invalid"))
-    replay = client.get("/auth/verify-email?token=spent")
+    replay = client.get(f"/auth/verify-email?token={token}")
 
     assert replay.status_code == 400
     assert KEY_IN_HTML.search(replay.text) is None
     assert _row("users", "id", oauth_user["user_id"])["api_key_hash"] == digest_after_first
+
+
+def test_rotation_failure_keeps_the_token_alive(oauth_user, client, monkeypatch):
+    """(в) ротация упала → 500, токен и email_verified вернулись, повтор проходит."""
+
+    def _boom(*_a, **_kw):
+        raise RuntimeError("rotate_user_api_key: no rows")
+
+    token = "verify-token-" + uuid.uuid4().hex[:8]
+    _set_token(oauth_user["user_id"], token)
+
+    # Патч ограничен контекстом: monkeypatch.undo() снял бы и редирект DB_PATH,
+    # и повторный заход ушёл бы в боевую базу.
+    with monkeypatch.context() as patched:
+        patched.setattr(db_adapter, "rotate_user_api_key", _boom)
+        failed = client.get(f"/auth/verify-email?token={token}")
+
+    assert failed.status_code == 500
+    assert KEY_IN_HTML.search(failed.text) is None
+    row = _row("users", "id", oauth_user["user_id"])
+    assert row["verification_token"] == token, "ссылка остаётся рабочей"
+    assert not row["email_verified"]
+
+    retry = client.get(f"/auth/verify-email?token={token}")
+    assert retry.status_code == 200, retry.text
+    assert KEY_IN_HTML.search(retry.text)
 
 
 def test_oauth_new_user_reveals_key_once(monkeypatch, sqlite_tmp_db):
@@ -222,6 +262,35 @@ def test_oauth_new_user_reveals_key_once(monkeypatch, sqlite_tmp_db):
                 c.close()
 
 
+def test_oauth_new_fails_closed_when_seed_fails(monkeypatch, sqlite_tmp_db):
+    """(г) seed/upsert упали → 500 без ключа и без сессии."""
+    db.init_db()
+    info = {
+        "id": f"user-{uuid.uuid4().hex[:8]}",
+        "email": f"{uuid.uuid4().hex[:8]}@example.com",
+        "name": "OAuth Fail",
+        "provider": "google",
+    }
+
+    async def _fake_callback(_code):
+        return info
+
+    def _boom(*_a, **_kw):
+        raise RuntimeError("seed_tenants: db down")
+
+    monkeypatch.setattr(auth_routes, "OAUTH_ENABLED", True)
+    monkeypatch.setattr(auth_routes, "_oauth_google_callback", _fake_callback)
+    monkeypatch.setattr(db_adapter, "seed_tenants", _boom)
+
+    resp = TestClient(main.app).get("/auth/oauth/callback/google?code=x")
+
+    assert resp.status_code == 500
+    assert KEY_IN_HTML.search(resp.text) is None, "ключ не выпускается при сбое"
+    assert resp.headers.get("cache-control") == "no-store"
+    assert resp.cookies.get("session_id") is None, "сессия не создаётся"
+    assert _row("users", "id", info["id"]) is None
+
+
 @pytest.fixture
 def rotate_cli(monkeypatch, tmp_path):
     """Скрипт как модуль + /root/.sealed подменён на tmp, чтобы не писать в живой каталог."""
@@ -241,7 +310,7 @@ def test_cli_dry_run_changes_nothing(oauth_user, rotate_cli, tmp_path, capsys):
 
     assert rc == 0
     assert _row("users", "id", oauth_user["user_id"])["api_key_hash"] == before["api_key_hash"]
-    assert list(tmp_path.iterdir()) == []
+    assert [p for p in tmp_path.iterdir() if p.name.startswith("rotated-")] == []
     assert "dry-run" in capsys.readouterr().out
 
 
@@ -254,7 +323,7 @@ def test_cli_rotation_writes_0400_file_and_prints_only_path(oauth_user, rotate_c
     assert rc == 0
     assert out.startswith(str(tmp_path)) and out.count("\n") == 0, "печатается только путь"
 
-    files = list(tmp_path.iterdir())
+    files = [p for p in tmp_path.iterdir() if p.name.startswith("rotated-")]
     assert len(files) == 1
     assert files[0].name.startswith(f"rotated-{oauth_user['user_id'][:8]}-")
     assert (files[0].stat().st_mode & 0o777) == 0o400
@@ -268,6 +337,24 @@ def test_cli_rotation_writes_0400_file_and_prints_only_path(oauth_user, rotate_c
     assert user["api_key"] == ""
     assert user["api_key_hash"] == _digest(new_key)
     assert _row("tenants", "id", oauth_user["tenant_id"])["api_key_hash"] == user["api_key_hash"]
+
+
+def test_cli_rotation_kills_the_old_key_without_the_registry(oauth_user, rotate_cli, tmp_path):
+    """(а) CLI-ротация: старый ключ мёртв, новый жив — реестр не участвует.
+
+    ``register_key`` для нового ключа здесь не вызывается: единственный источник
+    правды — ``tenants.api_key_hash``, иначе ротация из другого процесса
+    (``scripts/rotate_user_key.py``) не долетела бы до живого сервера.
+    """
+    assert deps.lookup_key(oauth_user["raw"]) is not None
+
+    rc = rotate_cli.main(["--user-id", oauth_user["user_id"]])
+    assert rc == 0
+    new_key = next(p for p in tmp_path.iterdir() if p.name.startswith("rotated-")).read_text().strip()
+
+    assert deps.key_digest(new_key) not in deps.API_KEYS, "новый ключ не регистрировался"
+    assert deps.lookup_key(oauth_user["raw"]) is None, "ротированный ключ обязан умереть"
+    assert deps.lookup_key(new_key)["tenant_id"] == oauth_user["tenant_id"]
 
 
 @pytest.mark.pg

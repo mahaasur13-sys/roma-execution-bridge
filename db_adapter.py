@@ -2788,6 +2788,46 @@ def mark_email_verified(email: str) -> None:
             _pg_return(conn)
 
 
+def consume_verification_token(token: str) -> dict | None:
+    """Burn an email verification token; ``None`` when it is spent, expired or forged."""
+    if _pg_enabled():
+        from db_pg_sync import consume_verification_token as pg_fn
+
+        conn = _pg_conn()
+        try:
+            result = pg_fn(conn, token)
+            conn.commit()
+            return result
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            _pg_return(conn)
+    import db
+
+    return db.consume_verification_token(token)
+
+
+def restore_verification_token(user_id: str, token: str, expires_at) -> None:
+    """Give a consumed token back after a failed key rotation."""
+    if _pg_enabled():
+        from db_pg_sync import restore_verification_token as pg_fn
+
+        conn = _pg_conn()
+        try:
+            pg_fn(conn, user_id, token, expires_at)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            _pg_return(conn)
+    else:
+        import db
+
+        db.restore_verification_token(user_id, token, expires_at)
+
+
 def find_user_by_api_key(api_key: str) -> dict | None:
     if _pg_enabled():
         from db_pg_sync import find_user_by_api_key as pg_fn

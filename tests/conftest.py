@@ -268,9 +268,15 @@ def sqlite_tmp_db(monkeypatch, tmp_path):
     который читает сервис. Путь отдаётся через module-level `db_adapter.DB_PATH`;
     кеша соединений в модуле нет (`_sqlite_conn()` открывает новое на вызов).
     """
+    import db as sqlite_db
     import db_adapter as db
 
     monkeypatch.delenv("PG_DSN", raising=False)
     monkeypatch.setattr(db, "_USE_PG", False)
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "roma.db")
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "data" / "roma.db")
+    # Both layers read their own module-level path: adapter lookups went to a file
+    # nobody initialised once ``lookup_key`` started asking the database.
+    monkeypatch.setattr(sqlite_db, "DB_PATH", tmp_path / "data" / "roma.db")
+    # Some suites open the file directly instead of going through db._conn().
+    (tmp_path / "data").mkdir(parents=True, exist_ok=True)
     return db

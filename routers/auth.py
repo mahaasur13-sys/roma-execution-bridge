@@ -33,7 +33,7 @@ from auth.invites import (
     validate_invite,
 )
 from auth.sessions import create_session, delete_session, get_session
-from auth.verification import create_verification, verify_token
+from auth.verification import create_verification
 from deps import limiter, logger, lookup_key, register_key, revoke_key
 from saas.email.service import EmailProvider as _EmailProvider, EmailService
 
@@ -301,35 +301,30 @@ async def verify_email_endpoint(token: str):
     has proven they own the mailbox the account was created with, so the
     credential is created at the one moment it can actually be handed over. The
     plaintext lives only in this response (``no-store``); the database keeps the
-    digest. ``mark_email_verified`` nulls the token, so replaying the link fails
-    at ``verify_token`` and never reaches the key.
+    digest. The token is burned by the same UPDATE that flips ``email_verified``
+    (single use and expiry are its predicates), so a replay matches no row and
+    never reaches the key.
     """
-    result, reason = verify_token(token)
-    if reason != "success":
+    consumed = db.consume_verification_token(token)
+    if not consumed:
         raise HTTPException(status_code=400, detail="Invalid or expired verification token")
 
-    user_id = result["user_id"]
-    user = db.get_user_by_id(user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    email = user["email"]
-    tenant_id = user["tenant_id"]
-
-    if user.get("email_verified"):
-        return HTMLResponse(
-            content=_error_page("This address is already verified. Sign in to rotate a key."),
-            headers={"Cache-Control": "no-store"},
-        )
+    user_id = consumed["user_id"]
+    tenant_id = consumed["tenant_id"]
+    email = consumed["email"]
 
     new_key = _new_api_key()
     try:
         rotated = db.rotate_user_api_key(user_id, tenant_id, new_key)
     except Exception:
+        # Ротация не прошла — возвращаем токен: иначе аккаунт остался бы
+        # подтверждённым, но без ключа и без пути назад из письма.
+        try:
+            db.restore_verification_token(user_id, token, consumed.get("expires_at"))
+        except Exception:
+            logger.exception("verification_token_restore_failed user_id=%s", user_id)
         logger.exception("api_key_bootstrap_failed user_id=%s", user_id)
         raise HTTPException(status_code=500, detail="Verification failed")
-
-    db.mark_email_verified(email)
 
     old_digest = (rotated or {}).get("old_api_key_hash") or ""
     if old_digest:
@@ -561,15 +556,21 @@ async def oauth_callback(provider: str, code: str = "", error: str = "", request
         tenant_id = f"tenant-{str(uuid.uuid4())[:8]}"
         api_key = _new_api_key()
         # Tenant row first: users.tenant_id references tenants.id, and inserting
-        # the user first left the FK unsatisfied on sqlite (PR-F2d).
+        # the user first left the FK unsatisfied on sqlite (PR-F2d). A half-created
+        # account must not hand out a key or a session: without both rows the key
+        # would be unrecoverable and the tenant unauthenticated, so the callback
+        # fails closed instead of showing a credential nobody can use.
         try:
             db.seed_tenants({api_key: {"tenant_id": tenant_id, "plan": "free"}})
-        except Exception as e:
-            logger.warning(f"seed_tenants failed (non-fatal): {e}")
-        try:
             db.upsert_oauth_user(user_id, email, name, prov, tenant_id, api_key)
         except Exception as e:
-            logger.warning(f"upsert_oauth_user failed (non-fatal): {e}")
+            logger.error("oauth_signup_failed provider=%s error=%s", prov, type(e).__name__)
+            return Response(
+                content=_error_page("Could not create the account. No key was issued — try again."),
+                media_type="text/html",
+                status_code=500,
+                headers={"Cache-Control": "no-store"},
+            )
         # Add to in-memory API key registry
         register_key(
             api_key,
