@@ -7,7 +7,7 @@ import time
 import uuid
 from typing import Optional
 
-# {session_id: {tenant_id, api_key, created_at, expires_at}}
+# {session_id: {tenant_id, created_at, expires_at}}
 _sessions: dict[str, dict] = {}
 SESSION_TTL = 3600  # 1 hour
 
@@ -19,13 +19,12 @@ def _cleanup_expired() -> None:
         del _sessions[sid]
 
 
-def create_session(tenant_id: str, api_key: str) -> str:
+def create_session(tenant_id: str) -> str:
     _cleanup_expired()
     session_id = str(uuid.uuid4())
     now = time.time()
     _sessions[session_id] = {
         "tenant_id": tenant_id,
-        "api_key": api_key,
         "created_at": now,
         "expires_at": now + SESSION_TTL,
     }

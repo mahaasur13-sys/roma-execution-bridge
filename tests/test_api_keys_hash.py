@@ -138,7 +138,7 @@ def test_dashboard_session_cookie_path(monkeypatch):
         lambda _tid: {"total_jobs": 0, "gpu_seconds": 0, "gpu_hours": 0, "total_cost": 0.0},
     )
 
-    session_id = create_session(tenant_id, raw)
+    session_id = create_session(tenant_id)
     client = TestClient(main.app, raise_server_exceptions=False)
 
     try:

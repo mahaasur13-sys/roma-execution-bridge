@@ -24,6 +24,14 @@ import asyncpg
 
 logger = logging.getLogger("roma.db_pg")
 
+
+def _key_digest(raw_key: str) -> str:
+    """sha256 of a raw API key — the same digest as ``deps.key_digest``."""
+    from deps import key_digest
+
+    return key_digest(raw_key)
+
+
 POOL: Optional[asyncpg.Pool] = None
 
 DEFAULT_DSN = ""
@@ -246,6 +254,7 @@ async def upsert_oauth_user(user_id: str, email: str, name: str, provider: str, 
     now = datetime.now(timezone.utc)
     async with pool.acquire() as conn:
         existing = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+        digest = _key_digest(api_key) if api_key else ""
         if existing:
             await conn.execute(
                 "UPDATE users SET email=$1, name=$2, updated_at=$3 WHERE id=$4",
@@ -256,13 +265,15 @@ async def upsert_oauth_user(user_id: str, email: str, name: str, provider: str, 
             )
         else:
             await conn.execute(
-                "INSERT INTO users (id, email, name, provider, tenant_id, api_key, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+                "INSERT INTO users (id, email, name, provider, tenant_id, api_key, api_key_hash, created_at, updated_at) "
+                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
                 user_id,
                 email,
                 name,
                 provider,
                 tenant_id,
                 api_key,
+                digest,
                 now,
                 now,
             )
@@ -285,9 +296,11 @@ async def get_user_by_email(email: str) -> dict | None:
 
 
 async def get_user_by_api_key(api_key: str) -> dict | None:
+    if not api_key:
+        return None
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM users WHERE api_key = $1", api_key)
+        row = await conn.fetchrow("SELECT * FROM users WHERE api_key_hash = $1", _key_digest(api_key))
     return dict(row) if row else None
 
 

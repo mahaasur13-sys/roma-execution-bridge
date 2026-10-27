@@ -1,11 +1,19 @@
 """SQLite database for tenant subscriptions, Stripe data, and webhook events."""
 
+import hashlib
 import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "data" / "roma.db"
+
+
+def _key_digest(api_key: str) -> str:
+    """sha256 of a raw API key — the same digest as ``deps.key_digest``."""
+    if not api_key:
+        raise ValueError("empty API key cannot be hashed")
+    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
 
 
 def _conn():
@@ -153,8 +161,29 @@ def init_db() -> None:
             "UPDATE tenants SET api_key_hash = ?, api_key = '' WHERE id = ?",
             (digest, row[0]),
         )
+    _ensure_users_api_key_hash_c(c)
     c.commit()
     c.close()
+
+
+def _ensure_users_api_key_hash_c(c) -> None:
+    """sqlite parity for migrations/017: users.api_key_hash, backfill, partial unique index.
+
+    The plaintext ``users.api_key`` is kept — it is cleared only once every writer
+    fills ``api_key_hash`` (mirrors 017 now / 018 later). Idempotent: a re-run adds
+    no column, recomputes nothing and matches no rows.
+    """
+    ucols = {row[1] for row in c.execute("PRAGMA table_info(users)").fetchall()}
+    if "api_key_hash" not in ucols:
+        c.execute("ALTER TABLE users ADD COLUMN api_key_hash TEXT NOT NULL DEFAULT ''")
+    c.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS users_api_key_hash_uidx ON users(api_key_hash) WHERE api_key_hash <> ''"
+    )
+    unhashed = c.execute(
+        "SELECT id, api_key FROM users WHERE coalesce(api_key, '') <> '' AND coalesce(api_key_hash, '') = ''"
+    ).fetchall()
+    for row in unhashed:
+        c.execute("UPDATE users SET api_key_hash = ? WHERE id = ?", (_key_digest(row[1]), row[0]))
 
 
 def seed_tenants(api_keys: dict[str, dict]) -> None:
@@ -285,8 +314,9 @@ def upsert_oauth_user(user_id: str, email: str, name: str, provider: str, tenant
         )
     else:
         c.execute(
-            "INSERT INTO users (id, email, name, provider, tenant_id, api_key, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
-            (user_id, email, name, provider, tenant_id, api_key, now, now),
+            "INSERT INTO users (id, email, name, provider, tenant_id, api_key, api_key_hash, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (user_id, email, name, provider, tenant_id, api_key, _key_digest(api_key), now, now),
         )
     c.commit()
     row = c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
@@ -309,8 +339,10 @@ def get_user_by_email(email: str) -> dict | None:
 
 
 def get_user_by_api_key(api_key: str) -> dict | None:
+    if not api_key:
+        return None
     c = _conn()
-    row = c.execute("SELECT * FROM users WHERE api_key = ?", (api_key,)).fetchone()
+    row = c.execute("SELECT * FROM users WHERE api_key_hash = ?", (_key_digest(api_key),)).fetchone()
     c.close()
     return dict(row) if row else None
 
