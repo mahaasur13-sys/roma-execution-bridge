@@ -44,7 +44,9 @@ API_KEYS: dict[str, dict] = {}
 
 def key_digest(raw_key: str) -> str:
     """sha256 hex digest of a raw API key — the only form kept in ``API_KEYS``."""
-    return hashlib.sha256((raw_key or "").encode("utf-8")).hexdigest()
+    if not raw_key:
+        raise ValueError("empty API key cannot be hashed")
+    return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
 
 def lookup_key(raw_key: str | None) -> dict | None:

@@ -255,3 +255,47 @@ def test_migration_017_is_idempotent():
     finally:
         conn.rollback()
         conn.close()
+
+
+def test_conflicting_upsert_keeps_old_hash(user_factory):
+    """Повторный upsert того же id с другим ключом сохраняет старый api_key_hash."""
+    import db_adapter
+
+    user_id, raw = user_factory()
+    before = _row(user_id)
+
+    db.upsert_oauth_user(user_id, "other@example.com", "Test", "google", before["tenant_id"], "roma-other-key")
+
+    after = _row(user_id)
+    assert after["api_key_hash"] == before["api_key_hash"] == _digest(raw)
+    assert after["api_key"] == raw, "plaintext тоже не должен меняться"
+    assert db_adapter.find_user_by_api_key(raw)["id"] == user_id
+
+
+def test_key_digest_rejects_empty_key():
+    """sha256("") не должен приниматься за ключ ни в одной ветке."""
+    import deps
+
+    with pytest.raises(ValueError):
+        deps.key_digest("")
+    with pytest.raises(ValueError):
+        deps.key_digest(None)
+
+
+def test_lookup_with_empty_key_returns_none(user_factory):
+    """Пустой ключ не должен находить пользователя с хэшем пустой строки."""
+    import db_adapter
+
+    user_factory()
+    assert db.get_user_by_api_key("") is None
+    assert db_adapter.find_user_by_api_key("") is None
+
+
+@pytest.mark.pg
+def test_pg_get_user_by_api_key_empty_returns_none():
+    """PG-ветка: пустой ключ отсекается до хэширования и до пула."""
+    import asyncio
+
+    import db_pg
+
+    assert asyncio.run(db_pg.get_user_by_api_key("")) is None

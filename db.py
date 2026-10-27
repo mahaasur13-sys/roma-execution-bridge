@@ -11,7 +11,9 @@ DB_PATH = Path(__file__).parent / "data" / "roma.db"
 
 def _key_digest(api_key: str) -> str:
     """sha256 of a raw API key — the same digest as ``deps.key_digest``."""
-    return hashlib.sha256((api_key or "").encode("utf-8")).hexdigest()
+    if not api_key:
+        raise ValueError("empty API key cannot be hashed")
+    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
 
 
 def _conn():
@@ -337,6 +339,8 @@ def get_user_by_email(email: str) -> dict | None:
 
 
 def get_user_by_api_key(api_key: str) -> dict | None:
+    if not api_key:
+        return None
     c = _conn()
     row = c.execute("SELECT * FROM users WHERE api_key_hash = ?", (_key_digest(api_key),)).fetchone()
     c.close()

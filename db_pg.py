@@ -12,7 +12,6 @@ Usage:
         row = await conn.fetchrow("SELECT * FROM tenants WHERE id=$1", tenant_id)
 """
 
-import hashlib
 import json
 import logging
 import os
@@ -24,6 +23,14 @@ from urllib.parse import urlsplit, urlunsplit
 import asyncpg
 
 logger = logging.getLogger("roma.db_pg")
+
+
+def _key_digest(raw_key: str) -> str:
+    """sha256 of a raw API key — the same digest as ``deps.key_digest``."""
+    from deps import key_digest
+
+    return key_digest(raw_key)
+
 
 POOL: Optional[asyncpg.Pool] = None
 
@@ -247,13 +254,12 @@ async def upsert_oauth_user(user_id: str, email: str, name: str, provider: str, 
     now = datetime.now(timezone.utc)
     async with pool.acquire() as conn:
         existing = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
-        digest = hashlib.sha256((api_key or "").encode("utf-8")).hexdigest()
+        digest = _key_digest(api_key) if api_key else ""
         if existing:
             await conn.execute(
-                "UPDATE users SET email=$1, name=$2, api_key_hash=$3, updated_at=$4 WHERE id=$5",
+                "UPDATE users SET email=$1, name=$2, updated_at=$3 WHERE id=$4",
                 email,
                 name,
-                digest,
                 now,
                 user_id,
             )
@@ -290,10 +296,11 @@ async def get_user_by_email(email: str) -> dict | None:
 
 
 async def get_user_by_api_key(api_key: str) -> dict | None:
+    if not api_key:
+        return None
     pool = await get_pool()
     async with pool.acquire() as conn:
-        digest = hashlib.sha256((api_key or "").encode("utf-8")).hexdigest()
-        row = await conn.fetchrow("SELECT * FROM users WHERE api_key_hash = $1", digest)
+        row = await conn.fetchrow("SELECT * FROM users WHERE api_key_hash = $1", _key_digest(api_key))
     return dict(row) if row else None
 
 

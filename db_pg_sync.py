@@ -260,7 +260,7 @@ def upsert_oauth_user(
         "INSERT INTO users (id, email, name, provider, tenant_id, api_key, api_key_hash) "
         "VALUES (%s,%s,%s,%s,%s,%s,%s) "
         "ON CONFLICT (id) DO UPDATE SET email=EXCLUDED.email, name=EXCLUDED.name, "
-        "api_key_hash=EXCLUDED.api_key_hash, updated_at=now() RETURNING *",
+        "updated_at=now() RETURNING *",
         (user_id, email, name, provider, tenant_id, api_key, _key_digest(api_key)),
     )
     cols = [desc[0] for desc in cur.description]
@@ -597,7 +597,6 @@ def create_user_with_password(
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         ON CONFLICT (id) DO UPDATE SET
             email=EXCLUDED.email, name=EXCLUDED.name, password_hash=EXCLUDED.password_hash,
-            api_key_hash=EXCLUDED.api_key_hash,
             verification_token=EXCLUDED.verification_token,
             verification_token_expires_at=EXCLUDED.verification_token_expires_at,
             updated_at=now()
@@ -684,7 +683,6 @@ def create_email_user(
         "INSERT INTO users (id, email, name, provider, tenant_id, api_key, api_key_hash, password_hash, email_verified) "
         "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,false) "
         "ON CONFLICT (id) DO UPDATE SET email=EXCLUDED.email, name=EXCLUDED.name, "
-        "api_key_hash=EXCLUDED.api_key_hash "
         "RETURNING *",
         (user_id, email, name, "email", tenant_id, api_key, _key_digest(api_key), password_hash),
     )
@@ -720,6 +718,8 @@ def mark_email_verified(conn, email: str):
 
 
 def find_user_by_api_key(conn, api_key: str) -> dict | None:
+    if not api_key:
+        return None
     cur = conn.cursor()
     cur.execute("SELECT * FROM users WHERE api_key_hash=%s", (_key_digest(api_key),))
     row = cur.fetchone()
