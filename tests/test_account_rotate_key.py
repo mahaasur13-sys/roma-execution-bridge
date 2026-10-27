@@ -99,7 +99,7 @@ def account(sqlite_tmp_db):
 
 @pytest.fixture
 def client():
-    return TestClient(main.app, raise_server_exceptions=False)
+    return TestClient(main.app)
 
 
 def _login(client, tenant_id: str) -> tuple[str, str]:
