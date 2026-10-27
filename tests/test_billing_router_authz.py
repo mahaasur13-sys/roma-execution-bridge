@@ -27,6 +27,7 @@ from starlette.testclient import TestClient
 
 import db_adapter as db
 import main
+from deps import register_key
 
 
 def _uniq(prefix: str) -> str:
@@ -60,15 +61,11 @@ def tenants(monkeypatch):
     )
     monkeypatch.setattr(main, "is_email_verified", lambda api_key: True)
 
-    # _admin_only / verify_api_key read the in-memory API_KEYS registry.
+    # The in-memory registry is digest-keyed: register by raw key, never by hand.
     original = dict(main.API_KEYS)
-    main.API_KEYS.update(
-        {
-            key_a: {"tenant_id": a_id},
-            key_b: {"tenant_id": b_id},
-        }
-    )
-    main.API_KEYS["hotfix-admin-demo"] = {"tenant_id": "tenant-demo"}
+    register_key(key_a, {"tenant_id": a_id})
+    register_key(key_b, {"tenant_id": b_id})
+    register_key("hotfix-admin-demo", {"tenant_id": "tenant-demo"})
 
     yield {"a_id": a_id, "b_id": b_id, "key_a": key_a, "key_b": key_b}
 

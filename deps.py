@@ -11,6 +11,7 @@ working). There is no ``create_app`` here.
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import ipaddress
 import logging
@@ -36,7 +37,27 @@ limiter = Limiter(key_func=get_remote_address)
 alert_dispatcher = AlertDispatcher()
 
 # ── In-memory API key registry (shared mutable dict) ──────────────────
+# Keys are sha256 digests of the raw API key — the raw key is never stored here,
+# so a heap dump or a debug repr cannot leak a working credential.
 API_KEYS: dict[str, dict] = {}
+
+
+def key_digest(raw_key: str) -> str:
+    """sha256 hex digest of a raw API key — the only form kept in ``API_KEYS``."""
+    return hashlib.sha256((raw_key or "").encode("utf-8")).hexdigest()
+
+
+def lookup_key(raw_key: str | None) -> dict | None:
+    """Resolve a raw API key to its registry info via its digest (``None`` if unknown)."""
+    if not raw_key:
+        return None
+    return API_KEYS.get(key_digest(raw_key))
+
+
+def register_key(raw_key: str, info: dict) -> None:
+    """Register a raw API key; only its digest reaches ``API_KEYS``."""
+    API_KEYS[key_digest(raw_key)] = info
+
 
 # ── Admin access ───────────────────────────────────────────────────────
 ADMIN_IP_ALLOWLIST = os.environ.get(

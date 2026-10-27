@@ -24,8 +24,9 @@ import db_adapter as db
 
 # A1 — shared singletons/helpers (re-exported so main.* names stay intact)
 from deps import (
-    API_KEYS,
+    API_KEYS,  # noqa: F401 — ре-экспорт реестра для tests/main_checks (`main.API_KEYS`)
     _admin_key_valid,
+    lookup_key,
     verify_api_key,
     alert_dispatcher,
     limiter,
@@ -282,7 +283,7 @@ def _init_db_with_retry(
     delay_s: float = 2.0,
     max_delay_s: float = 10.0,
 ) -> None:
-    """Довести init_db+seed_tenants до успеха либо бросить последнее исключение.
+    """Довести init_db до успеха либо бросить последнее исключение.
 
     Зачем: после рестарта песочницы PG поднимается позже приложения. Без ретрая импорт
     main падал на первом же отказе соединения, supervisor сжигал startretries
@@ -303,7 +304,6 @@ def _init_db_with_retry(
         attempt += 1
         try:
             db.init_db()
-            db.seed_tenants(API_KEYS)
             return
         except Exception as exc:
             if time.monotonic() >= deadline:
@@ -753,7 +753,7 @@ async def tracking_middleware(request: Request, call_next) -> Response:
     start = time.monotonic()
     api_key_raw = request.headers.get("X-API-Key")
     api_key_masked = _mask_key(api_key_raw)
-    tenant_id = API_KEYS.get(api_key_raw, {}).get("tenant_id") if api_key_raw else None
+    tenant_id = (lookup_key(api_key_raw) or {}).get("tenant_id")
 
     response = await call_next(request)
 
@@ -1469,11 +1469,12 @@ async def ws_worker(ws: WebSocket):
                 worker_id = data["worker_id"]
                 api_key = data.get("api_key", "")
                 capabilities = data.get("capabilities", {})
-                if api_key not in API_KEYS:
+                key_info = lookup_key(api_key)
+                if not key_info:
                     await ws.send_json({"type": "error", "message": "Invalid API key"})
                     await ws.close(code=4001)
                     return
-                tenant_id = API_KEYS[api_key]["tenant_id"]
+                tenant_id = key_info["tenant_id"]
                 db.register_worker(worker_id, tenant_id, capabilities)
                 active_ws_workers[worker_id] = ws
                 await ws.send_json(
@@ -1534,15 +1535,7 @@ from auth.verification import is_email_verified
 from starlette.responses import RedirectResponse
 
 
-def _resolve_api_key(request: Request) -> dict | None:
-    """Try header first, then query param (for browser access)."""
-    key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
-    if not key or key not in API_KEYS:
-        return None
-    return API_KEYS[key]
-
-
-def _render_dashboard(tenant_id: str, plan_name: str, api_key: str) -> str:
+def _render_dashboard(tenant_id: str, plan_name: str) -> str:
     usage_data = _get_tenant_usage(tenant_id)
     plan, refusal = _plan_limits_or_refusal(plan_name)
     max_jobs = plan["max_jobs_per_month"] if plan else None
@@ -1566,7 +1559,7 @@ def _render_dashboard(tenant_id: str, plan_name: str, api_key: str) -> str:
                 <td style="font-family:monospace;font-size:13px">{j['job_id'][:8]}...</td>
                 <td><span style="background:{status_cls};color:#fff;padding:2px 8px;border-radius:10px;font-size:12px">{j['status']}</span></td>
                 <td style="font-size:13px">{j.get('submitted_at', '—')[:19]}</td>
-                <td><a href="/status/{j['job_id']}?api_key=' + api_key + '" style="color:#3b82f6">details →</a></td>
+                <td><a href="/status/{j['job_id']}" style="color:#3b82f6">details →</a></td>
             </tr>"""
     else:
         jobs_html = (
@@ -1648,8 +1641,8 @@ footer .dot {{ display:inline-block; width:7px; height:7px; border-radius:50%; b
     <div class="actions">
         <a href="/health">♥ /health</a>
         <a href="/metrics">📊 /metrics</a>
-        <a href="/usage?api_key=' + api_key + '">📈 /usage</a>
-        <a href="/jobs?api_key=' + api_key + '">📋 /jobs</a>
+        <a href="/usage">📈 /usage</a>
+        <a href="/jobs">📋 /jobs</a>
         <a href="/docs/quickstart.md">📖 Quickstart</a>
     </div>
 </div>
@@ -1664,10 +1657,8 @@ footer .dot {{ display:inline-block; width:7px; height:7px; border-radius:50%; b
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script>
     (function() {{
-        var apiKey = "";
-        try {{ apiKey = new URLSearchParams(window.location.search).get("api_key") || ""; }} catch(e) {{}}
         var xhr = new XMLHttpRequest();
-        xhr.open("GET", "/stats/daily?api_key=" + encodeURIComponent(apiKey), true);
+        xhr.open("GET", "/stats/daily", true);
         xhr.onload = function() {{
             if (xhr.status !== 200) return;
             var data = JSON.parse(xhr.responseText);
@@ -1739,10 +1730,9 @@ footer .dot {{ display:inline-block; width:7px; height:7px; border-radius:50%; b
 </div>
 <script>
 (async function() {{
-    const key = new URLSearchParams(window.location.search).get("api_key") || "";
     let rows = [];
     try {{
-        const r = await fetch("/stats/daily?api_key=" + encodeURIComponent(key));
+        const r = await fetch("/stats/daily");
         if (r.ok) {{
             const d = await r.json();
             rows = d.dates.map((date, i) => ({{ date, jobs: d.jobs_count[i], gpu: d.gpu_hours[i] }}));
@@ -1778,20 +1768,24 @@ async def dashboard(request: Request):
         sess = get_session(session_id)
         if sess:
             tenant_id = sess["tenant_id"]
-            api_key_raw = sess["api_key"]
             t = db.get_tenant(tenant_id)
             plan_name = t["plan"] if t else None
-            html = _render_dashboard(tenant_id, plan_name, api_key_raw)
+            html = _render_dashboard(tenant_id, plan_name)
             return Response(content=html, media_type="text/html")
 
-    # 2. Fall back to query param or header
-    api_key_raw = request.headers.get("X-API-Key") or request.query_params.get("api_key")
-    if api_key_raw and api_key_raw in API_KEYS:
-        info = API_KEYS[api_key_raw]
+    # 2. Fall back to the header only — a ?api_key= query is refused outright, since
+    # it leaks into access logs and the Referer header.
+    if request.query_params.get("api_key"):
+        raise HTTPException(
+            status_code=401,
+            detail="API key in the query string is not accepted — send the X-API-Key header",
+        )
+    info = lookup_key(request.headers.get("X-API-Key"))
+    if info:
         tenant_id = info["tenant_id"]
         t = db.get_tenant(tenant_id)
         plan_name = t["plan"] if t else info.get("plan", "free")
-        html = _render_dashboard(tenant_id, plan_name, api_key_raw)
+        html = _render_dashboard(tenant_id, plan_name)
         return Response(content=html, media_type="text/html")
 
     # 3. No valid auth — redirect to login page
@@ -1826,7 +1820,7 @@ async def submit_feedback(request: Request):
     user_id = ""
     api_key_raw = request.headers.get("X-API-Key")
     if api_key_raw:
-        info = API_KEYS.get(api_key_raw)
+        info = lookup_key(api_key_raw)
         if info:
             tenant_id = info["tenant_id"]
 
