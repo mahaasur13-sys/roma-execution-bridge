@@ -688,6 +688,7 @@ from routers.billing import router as billing_router
 from routers.public_jobs import router as public_jobs_router
 from routers.submit import router as submit_router
 from routers.beta import router as beta_router
+from routers.account import router as account_router
 
 app.include_router(v1_router)
 app.include_router(decisions_router)
@@ -702,6 +703,7 @@ app.include_router(billing_router)
 app.include_router(public_jobs_router)
 app.include_router(submit_router)
 app.include_router(beta_router)
+app.include_router(account_router)
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 if tracing_enabled:
@@ -1643,6 +1645,7 @@ footer .dot {{ display:inline-block; width:7px; height:7px; border-radius:50%; b
         <a href="/metrics">📊 /metrics</a>
         <a href="/usage">📈 /usage</a>
         <a href="/jobs">📋 /jobs</a>
+        <a href="/account">🔑 Account &amp; API key</a>
         <a href="/docs/quickstart.md">📖 Quickstart</a>
     </div>
 </div>
