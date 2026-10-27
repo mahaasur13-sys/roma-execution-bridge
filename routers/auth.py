@@ -12,6 +12,7 @@ Dependencies come from ``deps`` / ``auth.*`` / ``db_adapter`` — never ``main``
 from __future__ import annotations
 
 import hashlib
+import html
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -21,7 +22,7 @@ import httpx
 
 import db_adapter as db
 from fastapi import APIRouter, HTTPException, Request
-from starlette.responses import RedirectResponse, Response
+from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from auth.invites import (
     BETA_DEFAULT_SPEND_CAP,
@@ -32,8 +33,8 @@ from auth.invites import (
     validate_invite,
 )
 from auth.sessions import create_session, delete_session, get_session
-from auth.verification import create_verification, verify_token
-from deps import limiter, logger, lookup_key, register_key
+from auth.verification import create_verification
+from deps import limiter, logger, lookup_key, register_key, revoke_key
 from saas.email.service import EmailProvider as _EmailProvider, EmailService
 
 # ── OAuth config ───────────────────────────────────────────────────────
@@ -106,6 +107,45 @@ button:hover { background:#2ea043 }
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _new_api_key() -> str:
+    """Fresh tenant key — same shape as ``/auth/signup`` and ``/account``."""
+    return f"roma-{str(uuid.uuid4())[:12]}"
+
+
+def _key_page(email: str, tenant_id: str, new_key: str) -> str:
+    """Email verified: the key exists only in this response, so no-store is mandatory."""
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ROMA — Email verified</title>
+<style>
+* {{ margin:0; padding:0; box-sizing:border-box }}
+body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background:#0f1117; color:#e5e7eb; min-height:100vh }}
+.container {{ max-width:640px; margin:0 auto; padding:32px 16px }}
+h1 {{ font-size:24px; font-weight:700; margin-bottom:8px }}
+.sub {{ color:#9ca3af; font-size:14px; margin-bottom:24px }}
+.card {{ background:#161b22; border:1px solid #30363d; border-radius:12px; padding:20px }}
+code {{ display:block; padding:14px; border-radius:8px; background:#0d1117; border:1px solid #30363d; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:15px; word-break:break-all }}
+.warn {{ color:#f59e0b; font-size:13px; margin-top:16px }}
+.back {{ display:inline-block; margin-top:20px; color:#3b82f6; font-size:14px; text-decoration:none }}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>Email verified</h1>
+<div class="sub">{html.escape(email)} — {html.escape(tenant_id)}</div>
+<div class="card">
+<code>{new_key}</code>
+<p class="warn">Shown once — this page cannot be replayed. Send it as the X-API-Key header.</p>
+</div>
+<a class="back" href="/dashboard">→ dashboard</a>
+</div>
+</body>
+</html>"""
 
 
 @router.get("/login")
@@ -197,7 +237,7 @@ async def signup(payload: dict, request: Request):
 
     user_id = str(uuid.uuid4())
     tenant_id = f"tenant-{str(uuid.uuid4())[:8]}"
-    api_key = f"roma-{str(uuid.uuid4())[:12]}"
+    api_key = _new_api_key()
     password_hash = hashlib.sha256(password.encode() + user_id.encode()).hexdigest()
 
     from auth.verification import generate_token
@@ -255,23 +295,51 @@ async def signup(payload: dict, request: Request):
 
 @router.get("/verify-email")
 async def verify_email_endpoint(token: str):
-    """Verify email address. Can be called via browser (GET) or API (POST)."""
-    result, reason = verify_token(token)
-    if reason != "success":
+    """Verify the address and hand the tenant its API key — once.
+
+    The key is minted here, not at signup: until the address is confirmed nobody
+    has proven they own the mailbox the account was created with, so the
+    credential is created at the one moment it can actually be handed over. The
+    plaintext lives only in this response (``no-store``); the database keeps the
+    digest. The token is burned by the same UPDATE that flips ``email_verified``
+    (single use and expiry are its predicates), so a replay matches no row and
+    never reaches the key.
+    """
+    consumed = db.consume_verification_token(token)
+    if not consumed:
         raise HTTPException(status_code=400, detail="Invalid or expired verification token")
 
-    user_id = result["user_id"]
-    user = db.get_user_by_id(user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user_id = consumed["user_id"]
+    tenant_id = consumed["tenant_id"]
+    email = consumed["email"]
 
-    db.mark_email_verified(user["email"])
+    new_key = _new_api_key()
+    try:
+        rotated = db.rotate_user_api_key(user_id, tenant_id, new_key)
+    except Exception:
+        # Ротация не прошла — возвращаем токен: иначе аккаунт остался бы
+        # подтверждённым, но без ключа и без пути назад из письма.
+        try:
+            db.restore_verification_token(user_id, token, consumed.get("expires_at"))
+        except Exception:
+            logger.exception("verification_token_restore_failed user_id=%s", user_id)
+        logger.exception("api_key_bootstrap_failed user_id=%s", user_id)
+        raise HTTPException(status_code=500, detail="Verification failed")
 
-    return {
-        "status": "verified",
-        "message": "Email verified successfully. Your account is now active.",
-        "email": user["email"],
-    }
+    old_digest = (rotated or {}).get("old_api_key_hash") or ""
+    if old_digest:
+        revoke_key(old_digest)
+    tenant = db.get_tenant(tenant_id) or {}
+    register_key(new_key, {"tenant_id": tenant_id, "plan": tenant.get("plan", "free")})
+    logger.info("api_key_bootstrapped tenant_id=%s user_id=%s", tenant_id, user_id)
+
+    session_id = create_session(tenant_id)
+    resp = HTMLResponse(
+        content=_key_page(email, tenant_id, new_key),
+        headers={"Cache-Control": "no-store"},
+    )
+    resp.set_cookie("session_id", session_id, httponly=True, max_age=3600, samesite="lax")
+    return resp
 
 
 @router.post("/resend-verification")
@@ -478,21 +546,31 @@ async def oauth_callback(provider: str, code: str = "", error: str = "", request
 
     # Upsert user — if exists, reuse; otherwise create new tenant + API key
     existing = db.get_user_by_email(email)
+    # Held only for a brand-new account: OAuth has no mailbox to confirm, so the
+    # key is minted and handed over in this one response.
+    new_api_key = ""
     if existing:
         tenant_id = existing["tenant_id"]
         logger.info(f"OAuth login: existing user {email} → tenant={tenant_id}")
     else:
         tenant_id = f"tenant-{str(uuid.uuid4())[:8]}"
-        api_key = f"roma-{str(uuid.uuid4())[:12]}"
-        try:
-            db.upsert_oauth_user(user_id, email, name, prov, tenant_id, api_key)
-        except Exception as e:
-            logger.warning(f"upsert_oauth_user failed (non-fatal): {e}")
-        # Seed tenant into DB
+        api_key = _new_api_key()
+        # Tenant row first: users.tenant_id references tenants.id, and inserting
+        # the user first left the FK unsatisfied on sqlite (PR-F2d). A half-created
+        # account must not hand out a key or a session: without both rows the key
+        # would be unrecoverable and the tenant unauthenticated, so the callback
+        # fails closed instead of showing a credential nobody can use.
         try:
             db.seed_tenants({api_key: {"tenant_id": tenant_id, "plan": "free"}})
+            db.upsert_oauth_user(user_id, email, name, prov, tenant_id, api_key)
         except Exception as e:
-            logger.warning(f"seed_tenants failed (non-fatal): {e}")
+            logger.error("oauth_signup_failed provider=%s error=%s", prov, type(e).__name__)
+            return Response(
+                content=_error_page("Could not create the account. No key was issued — try again."),
+                media_type="text/html",
+                status_code=500,
+                headers={"Cache-Control": "no-store"},
+            )
         # Add to in-memory API key registry
         register_key(
             api_key,
@@ -503,9 +581,16 @@ async def oauth_callback(provider: str, code: str = "", error: str = "", request
             },
         )
         logger.info(f"OAuth login: NEW user {email} → tenant={tenant_id}")
+        new_api_key = api_key
 
     session_id = create_session(tenant_id)
-    resp = RedirectResponse(url="/dashboard", status_code=302)
+    if new_api_key:
+        resp = HTMLResponse(
+            content=_key_page(email, tenant_id, new_api_key),
+            headers={"Cache-Control": "no-store"},
+        )
+    else:
+        resp = RedirectResponse(url="/dashboard", status_code=302)
     resp.set_cookie("session_id", session_id, httponly=True, max_age=3600, samesite="lax")
     return resp
 

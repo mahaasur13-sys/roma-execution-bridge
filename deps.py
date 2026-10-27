@@ -50,10 +50,27 @@ def key_digest(raw_key: str) -> str:
 
 
 def lookup_key(raw_key: str | None) -> dict | None:
-    """Resolve a raw API key to its registry info via its digest (``None`` if unknown)."""
+    """Resolve a raw API key to tenant info; the database is the authority.
+
+    ``API_KEYS`` is only a cache of keys this process minted, so it must not
+    outvote a revocation made elsewhere: a digest still sitting in the registry
+    while its tenant row already carries another ``api_key_hash`` (see
+    ``scripts/rotate_user_key.py``) is dead and resolves to ``None``. Entries
+    whose tenant row does not exist at all — static/admin keys and test doubles —
+    keep working as before.
+    """
     if not raw_key:
         return None
-    return API_KEYS.get(key_digest(raw_key))
+    tenant = db.find_tenant_by_key(raw_key)
+    if tenant:
+        return {"tenant_id": tenant["tenant_id"], "plan": tenant.get("plan")}
+    registered = API_KEYS.get(key_digest(raw_key))
+    if registered is None:
+        return None
+    tenant_id = registered.get("tenant_id")
+    if not tenant_id or db.get_tenant(tenant_id) is None:
+        return registered
+    return None
 
 
 def register_key(raw_key: str, info: dict) -> None:

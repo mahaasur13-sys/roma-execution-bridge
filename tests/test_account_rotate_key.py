@@ -166,7 +166,7 @@ def test_missing_or_foreign_csrf_token_is_403(account, client):
         assert foreign.status_code == 403, foreign.text
 
         row = _row(account["user_id"])
-        assert row["api_key"] == account["raw"], "отказ CSRF не должен трогать ключ"
+        assert row["api_key_hash"] == _digest(account["raw"]), "отказ CSRF не должен трогать ключ"
         assert deps.lookup_key(account["raw"]) is not None
     finally:
         delete_session(session_id)
@@ -193,7 +193,7 @@ def test_oauth_session_older_than_ten_minutes_is_403(account, client):
         assert "sign in again" in resp.text.lower()
 
         row = _row(account["user_id"])
-        assert row["api_key"] == account["raw"]
+        assert row["api_key_hash"] == _digest(account["raw"])
     finally:
         delete_session(session_id)
 
@@ -242,7 +242,7 @@ def test_tenant_rowcount_zero_rolls_back_users(account):
         db_adapter.rotate_user_api_key(account["user_id"], "tenant-does-not-exist", "roma-newkey1234")
 
     row = _row(account["user_id"])
-    assert row["api_key"] == account["raw"], "откат обязан вернуть plaintext"
+    assert row["api_key"] == "", "откат: плейнтекст в строке не хранится"
     assert row["api_key_hash"] == _digest(account["raw"]), "откат обязан вернуть старый хэш"
 
 

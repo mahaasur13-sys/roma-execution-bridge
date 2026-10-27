@@ -261,7 +261,9 @@ def upsert_oauth_user(
         "VALUES (%s,%s,%s,%s,%s,%s,%s) "
         "ON CONFLICT (id) DO UPDATE SET email=EXCLUDED.email, name=EXCLUDED.name, "
         "updated_at=now() RETURNING *",
-        (user_id, email, name, provider, tenant_id, api_key, _key_digest(api_key)),
+        # api_key stays empty: the plaintext is shown once at verification and
+        # only its digest is ever stored (PR-F2d key bootstrap).
+        (user_id, email, name, provider, tenant_id, "", _key_digest(api_key)),
     )
     cols = [desc[0] for desc in cur.description]
     return dict(zip(cols, cur.fetchone()))
@@ -650,7 +652,9 @@ def create_user_with_password(
             name,
             "email",
             tenant_id,
-            api_key,
+            # api_key stays empty: the plaintext is shown once at verification
+            # and only its digest is ever stored (PR-F2d key bootstrap).
+            "",
             _key_digest(api_key),
             password_hash,
             False,
@@ -757,6 +761,54 @@ def mark_email_verified(conn, email: str):
         "UPDATE users SET email_verified=true, verification_token=NULL, "
         "verification_token_expires_at=NULL, updated_at=now() WHERE email=%s",
         (email,),
+    )
+
+
+def consume_verification_token(conn, token: str) -> dict | None:
+    """Burn a verification token in one statement, returning the user it belonged to.
+
+    Single-use and expiry are predicates of the same UPDATE that flips
+    ``email_verified``, so two simultaneous clicks cannot both see a live token:
+    the second one matches no row and gets ``None``. No commit here — the caller
+    owns the transaction, together with the key rotation that follows.
+    """
+    if not token:
+        return None
+    cur = conn.cursor()
+    # Old expiry, kept only so a failed rotation can put the same link back.
+    # Never a decision input: the UPDATE below carries the real predicates.
+    cur.execute("SELECT verification_token_expires_at FROM users WHERE verification_token=%s", (token,))
+    prev = cur.fetchone()
+    cur.execute(
+        "UPDATE users SET email_verified=true, verification_token=NULL, "
+        "verification_token_expires_at=NULL, updated_at=now() "
+        "WHERE verification_token=%s AND COALESCE(email_verified, false)=false "
+        "AND (verification_token_expires_at IS NULL OR verification_token_expires_at > now()) "
+        "RETURNING id, email, tenant_id",
+        (token,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "user_id": row[0],
+        "email": row[1],
+        "tenant_id": row[2],
+        "expires_at": prev[0] if prev else None,
+    }
+
+
+def restore_verification_token(conn, user_id: str, token: str, expires_at) -> None:
+    """Undo a consume when the key rotation that followed it failed.
+
+    The link has to stay usable: a consumed token whose rotation rolled back would
+    leave the account verified but keyless, with no way back in from the email.
+    """
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE users SET email_verified=false, verification_token=%s, "
+        "verification_token_expires_at=%s, updated_at=now() WHERE id=%s",
+        (token, expires_at, user_id),
     )
 
 

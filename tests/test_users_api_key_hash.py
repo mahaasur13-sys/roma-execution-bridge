@@ -90,7 +90,7 @@ def test_upsert_oauth_user_writes_hash(user_factory):
     row = _row(user_id)
     assert row["api_key_hash"] == _digest(raw)
     assert HEX64.match(row["api_key_hash"]), "api_key_hash обязан быть sha256-hex"
-    assert row["api_key"] == raw, "шаг 1 plaintext не обнуляет"
+    assert row["api_key"] == "", "плейнтекст в строке не хранится (PR-F2d)"
 
 
 @pytest.mark.pg
@@ -268,7 +268,7 @@ def test_conflicting_upsert_keeps_old_hash(user_factory):
 
     after = _row(user_id)
     assert after["api_key_hash"] == before["api_key_hash"] == _digest(raw)
-    assert after["api_key"] == raw, "plaintext тоже не должен меняться"
+    assert after["api_key"] == "", "плейнтекст в строке не хранится (PR-F2d)"
     assert db_adapter.find_user_by_api_key(raw)["id"] == user_id
 
 
