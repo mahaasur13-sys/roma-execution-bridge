@@ -61,6 +61,11 @@ def register_key(raw_key: str, info: dict) -> None:
     API_KEYS[key_digest(raw_key)] = info
 
 
+def revoke_key(digest: str) -> bool:
+    """Drop a digest from ``API_KEYS``; ``True`` when an entry was removed."""
+    return API_KEYS.pop(digest, None) is not None
+
+
 # ── Admin access ───────────────────────────────────────────────────────
 ADMIN_IP_ALLOWLIST = os.environ.get(
     "ADMIN_IP_ALLOWLIST",

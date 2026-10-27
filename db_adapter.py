@@ -405,6 +405,58 @@ def get_user_by_email(email: str) -> dict | None:
     return db.get_user_by_email(email)
 
 
+def get_user_by_tenant(tenant_id: str) -> dict | None:
+    if _pg_enabled():
+        from db_pg_sync import get_user_by_tenant as pg_fn
+
+        conn = _pg_conn()
+        try:
+            return pg_fn(conn, tenant_id)
+        finally:
+            _pg_return(conn)
+    import db
+
+    return db.get_user_by_tenant(tenant_id)
+
+
+def rotate_user_api_key(user_id: str, tenant_id: str, new_key: str) -> dict:
+    """Rotate a tenant's API key: users + tenants hashes change together or not at all.
+
+    Raises ``RuntimeError`` when either UPDATE matched no row — the transaction is
+    rolled back first, so a half-rotated account (new hash in one table, old in
+    the other) cannot survive a failure.
+    """
+    if _pg_enabled():
+        from db_pg_sync import rotate_user_api_key as pg_fn
+
+        conn = _pg_conn()
+        try:
+            result = pg_fn(conn, user_id, tenant_id, new_key)
+            if result.get("users_count") != 1 or result.get("tenants_count") != 1:
+                conn.rollback()
+                raise RuntimeError(
+                    "rotate_user_api_key: expected one users row and one tenants row, got "
+                    f"users={result.get('users_count')} tenants={result.get('tenants_count')}"
+                )
+            conn.commit()
+            return result
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            _pg_return(conn)
+
+    import db
+
+    result = db.rotate_user_api_key(user_id, tenant_id, new_key)
+    if result.get("users_count") != 1 or result.get("tenants_count") != 1:
+        raise RuntimeError(
+            "rotate_user_api_key: expected one users row and one tenants row, got "
+            f"users={result.get('users_count')} tenants={result.get('tenants_count')}"
+        )
+    return result
+
+
 def get_user_by_api_key(api_key: str) -> dict | None:
     if _pg_enabled():
         from db_pg_sync import find_user_by_api_key as pg_fn

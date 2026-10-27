@@ -287,6 +287,49 @@ def get_user_by_email(conn, email: str) -> dict | None:
     return None
 
 
+def get_user_by_tenant(conn, tenant_id: str) -> dict | None:
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users WHERE tenant_id = %s ORDER BY created_at LIMIT 1", (tenant_id,))
+    row = cur.fetchone()
+    if row:
+        cols = [desc[0] for desc in cur.description]
+        return dict(zip(cols, row))
+    return None
+
+
+def rotate_user_api_key(conn, user_id: str, tenant_id: str, new_key: str) -> dict:
+    """Rewrite users.api_key_hash and tenants.api_key_hash in ONE transaction.
+
+    Caller owns the commit: this function only runs the statements and reports
+    rowcounts plus the digest the users row carried BEFORE the update (needed to
+    revoke the old entry from the in-memory registry). The digest is read, not
+    re-derived from plaintext: users.api_key is empty for any account rotated
+    more than once, so hashing it would revoke nothing on the second rotation.
+    users.api_key is cleared — after rotation it must not hold a working
+    credential.
+    """
+    cur = conn.cursor()
+    cur.execute("SELECT api_key_hash FROM users WHERE id = %s FOR UPDATE", (user_id,))
+    row = cur.fetchone()
+    old_api_key_hash = (row[0] or "") if row else ""
+    digest = _key_digest(new_key)
+    cur.execute(
+        "UPDATE users SET api_key = '', api_key_hash = %s, updated_at = now() WHERE id = %s",
+        (digest, user_id),
+    )
+    users_count = cur.rowcount
+    cur.execute(
+        "UPDATE tenants SET api_key_hash = %s, updated_at = now() WHERE id = %s",
+        (digest, tenant_id),
+    )
+    tenants_count = cur.rowcount
+    return {
+        "users_count": users_count,
+        "tenants_count": tenants_count,
+        "old_api_key_hash": old_api_key_hash,
+    }
+
+
 def log_email_sent(
     conn,
     recipient_email: str,

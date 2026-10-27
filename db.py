@@ -338,6 +338,45 @@ def get_user_by_email(email: str) -> dict | None:
     return dict(row) if row else None
 
 
+def get_user_by_tenant(tenant_id: str) -> dict | None:
+    c = _conn()
+    try:
+        row = c.execute("SELECT * FROM users WHERE tenant_id = ? ORDER BY created_at LIMIT 1", (tenant_id,)).fetchone()
+    finally:
+        c.close()
+    return dict(row) if row else None
+
+
+def rotate_user_api_key(user_id: str, tenant_id: str, new_key: str) -> dict:
+    """sqlite parity of ``db_pg_sync.rotate_user_api_key`` — both updates or none."""
+    c = _conn()
+    try:
+        row = c.execute("SELECT api_key_hash FROM users WHERE id = ?", (user_id,)).fetchone()
+        old_api_key_hash = (row["api_key_hash"] or "") if row else ""
+        digest = _key_digest(new_key)
+        cur = c.execute(
+            "UPDATE users SET api_key = '', api_key_hash = ?, updated_at = datetime('now') WHERE id = ?",
+            (digest, user_id),
+        )
+        users_count = cur.rowcount
+        cur = c.execute(
+            "UPDATE tenants SET api_key_hash = ?, updated_at = datetime('now') WHERE id = ?",
+            (digest, tenant_id),
+        )
+        tenants_count = cur.rowcount
+        if users_count != 1 or tenants_count != 1:
+            c.rollback()
+        else:
+            c.commit()
+        return {
+            "users_count": users_count,
+            "tenants_count": tenants_count,
+            "old_api_key_hash": old_api_key_hash,
+        }
+    finally:
+        c.close()
+
+
 def get_user_by_api_key(api_key: str) -> dict | None:
     if not api_key:
         return None
