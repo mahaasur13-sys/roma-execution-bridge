@@ -117,3 +117,43 @@ def test_no_direct_registry_access_in_source():
                 offenders.append(f"{path.relative_to(REPO_ROOT)}:{lineno}: {line.strip()}")
 
     assert offenders == [], "прямые обращения к реестру запрещены:\n" + "\n".join(offenders)
+
+
+def test_dashboard_session_cookie_path(monkeypatch):
+    """(д) Cookie-сессия — отдельный вход в /dashboard, ключ не нужен.
+
+    Фактическое поведение мастер-кода сохраняется: без сессии и без заголовка
+    роут отдаёт 302 на /auth/login (страница входа), а не 401.
+    """
+    from auth.sessions import create_session, delete_session
+
+    tenant_id = _uniq("test-sess")
+    raw = _uniq("roma-key")
+
+    db.seed_tenants({raw: {"tenant_id": tenant_id, "name": "sess"}})
+    register_key(raw, {"tenant_id": tenant_id, "plan": "free"})
+    monkeypatch.setattr(
+        main,
+        "_get_tenant_usage",
+        lambda _tid: {"total_jobs": 0, "gpu_seconds": 0, "gpu_hours": 0, "total_cost": 0.0},
+    )
+
+    session_id = create_session(tenant_id, raw)
+    client = TestClient(main.app, raise_server_exceptions=False)
+
+    try:
+        anonymous = client.get("/dashboard", follow_redirects=False)
+        assert anonymous.status_code == 302, anonymous.text
+        assert anonymous.headers["location"] == "/auth/login"
+
+        client.cookies.set("session_id", "no-such-session")
+        unknown = client.get("/dashboard", follow_redirects=False)
+        assert unknown.status_code == 302, unknown.text
+        assert unknown.headers["location"] == "/auth/login"
+
+        client.cookies.set("session_id", session_id)
+        with_session = client.get("/dashboard")
+        assert with_session.status_code == 200, with_session.text
+        assert tenant_id in with_session.text
+    finally:
+        delete_session(session_id)
