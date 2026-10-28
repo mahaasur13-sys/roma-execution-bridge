@@ -92,6 +92,8 @@ def test_missing_key_hint_uses_public_base_url(verify):
 def _clean_env(monkeypatch):
     for key in ("CORS_ALLOW_ORIGINS", "CORS_ORIGINS", "ENV", "ROMA_ENV"):
         monkeypatch.delenv(key, raising=False)
+    # the default PUBLIC_BASE_URL is a public https host, which reads as production
+    monkeypatch.setattr(config, "PUBLIC_BASE_URL", "http://localhost:8000")
 
 
 def test_cors_origins_fallback(monkeypatch):

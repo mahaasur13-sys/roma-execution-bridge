@@ -19,6 +19,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import config
 import db_adapter as db
@@ -640,25 +641,53 @@ app.state.limiter = limiter
 
 
 # CORS (C5) — allowlist from CORS_ALLOW_ORIGINS; CORS_ORIGINS is the legacy alias
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _cors_is_production() -> bool:
+    """Production when ENV/ROMA_ENV says so, or when the public base URL is a non-local https host."""
+    if (
+        os.environ.get("ENV", "").strip().lower() == "production"
+        or os.environ.get("ROMA_ENV", "").strip().lower() == "production"
+    ):
+        return True
+    base = config.PUBLIC_BASE_URL
+    if not base.lower().startswith("https://"):
+        return False
+    return (urlparse(base).hostname or "") not in _LOCAL_HOSTS
+
+
+def _cors_origin_allowed(origin: str) -> bool:
+    """Production allowlist entry: https only, no wildcard, no loopback host."""
+    if origin == "*":
+        return False
+    parts = urlparse(origin if "//" in origin else "//" + origin)
+    if parts.scheme != "https":
+        return False
+    return (parts.hostname or "") not in _LOCAL_HOSTS
+
+
 def _cors_allowed_origins() -> list[str]:
     """Resolve CORS origins from CORS_ALLOW_ORIGINS, falling back to CORS_ORIGINS.
 
     - CORS_ALLOW_ORIGINS wins; CORS_ORIGINS is read only when it is empty
-    - explicit list -> used as-is (trimmed, empty entries dropped)
-    - production (ENV/ROMA_ENV=production) + empty -> fail-closed []
+    - explicit list -> filtered in production (https only, no wildcard, no loopback)
+    - production + empty -> fail-closed []
     - non-prod + empty -> localhost only
 
-    Only the count is logged — origin values never reach the log.
+    Only the accepted/rejected counts are logged — origin values never reach the log.
     """
     raw = os.environ.get("CORS_ALLOW_ORIGINS", "").strip() or os.environ.get("CORS_ORIGINS", "").strip()
     origins = [o.strip() for o in raw.split(",") if o.strip()]
-    if not origins:
-        production = (
-            os.environ.get("ENV", "").strip().lower() == "production"
-            or os.environ.get("ROMA_ENV", "").strip().lower() == "production"
-        )
-        origins = [] if production else ["http://127.0.0.1:3080", "http://localhost:3080"]  # fail-closed in prod
-    logger.info("CORS allowlist resolved: %d origin(s)", len(origins))
+    production = _cors_is_production()
+    if not origins and not production:
+        origins = ["http://127.0.0.1:3080", "http://localhost:3080"]
+    rejected = 0
+    if production:
+        kept = [o for o in origins if _cors_origin_allowed(o)]
+        rejected = len(origins) - len(kept)
+        origins = kept
+    logger.info("CORS allowlist resolved: %d accepted, %d rejected", len(origins), rejected)
     return origins
 
 
