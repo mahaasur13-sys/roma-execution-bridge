@@ -1,7 +1,8 @@
 """E-01: политика исключений pytest — причина · issue · срок пересмотра.
 
 Зачем: в pyproject.toml накопились три безымянных `--ignore` (test_ci.py,
-saas/gateway/tests/test_gateway.py, saas/gateway/tests/test_rate_limiter.py) —
+saas/gateway/tests/test_gateway.py, saas/gateway/tests/test_rate_limiter.py; модуль
+удалён в PR-F3) —
 без причины, без issue-id и без срока. Это тот же класс, что «skip без reason»,
 только на уровне КОЛЛЕКЦИИ: файл не просто исключён, а исключён НЕВИДИМО.
 
