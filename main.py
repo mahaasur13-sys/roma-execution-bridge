@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 
 import config
 import db_adapter as db
+from log_redaction import install_access_log_redaction
 
 # A1 — shared singletons/helpers (re-exported so main.* names stay intact)
 from deps import (
@@ -246,6 +247,10 @@ logger = logging.getLogger("roma")
 logger.addHandler(_log_handler)
 logger.setLevel(logging.INFO)
 logger.propagate = False
+
+# access-лог uvicorn пишет query-строку целиком, поэтому фильтр ставится при старте
+# приложения (не через env) и маскирует token/api_key/key/code.
+install_access_log_redaction()
 
 
 def _mask_key(api_key: str | None) -> str | None:
