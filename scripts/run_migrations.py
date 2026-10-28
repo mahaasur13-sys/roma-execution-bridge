@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Apply migrations/*.sql to PostgreSQL in filename order, idempotently.
 
+LEGACY runner (2026-10-28): deploy-агент больше его не вызывает — на проде миграции идут
+через `apply_migrations.py` под админским DSN и `SET LOCAL ROLE roma_owner`. Этот файл остаётся
+для sqlite/dev-путей и как набор общих хелперов, которые импортирует `apply_migrations.py`.
+
 Tracks applied files in a `schema_migrations` table so re-running is a no-op
 for already-applied files. Each file runs inside its own transaction (explicit
 `BEGIN;` / `COMMIT;` wrappers are stripped so the runner owns the transaction).
