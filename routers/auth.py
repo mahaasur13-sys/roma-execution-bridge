@@ -250,6 +250,7 @@ async def login(request: Request):
         httponly=True,
         max_age=3600,
         samesite="lax",
+        secure=config.cookie_secure(),
     )
     return resp
 
@@ -279,6 +280,7 @@ async def signup_page(request: Request):
 
 
 @router.post("/signup", status_code=201)
+@limiter.limit("5/minute")
 async def signup(payload: dict, request: Request):
     """Register new user with email/password. Sends verification email."""
     email = (payload.get("email") or "").strip().lower()
@@ -372,7 +374,8 @@ async def signup(payload: dict, request: Request):
 
 
 @router.get("/verify-email")
-async def verify_email_endpoint(token: str):
+@limiter.limit("20/minute")
+async def verify_email_endpoint(request: Request, token: str):
     """Verify the address and hand the tenant its API key — once.
 
     The key is minted here, not at signup: until the address is confirmed nobody
@@ -416,12 +419,20 @@ async def verify_email_endpoint(token: str):
         content=_key_page(email, tenant_id, new_key),
         headers={"Cache-Control": "no-store"},
     )
-    resp.set_cookie("session_id", session_id, httponly=True, max_age=3600, samesite="lax")
+    resp.set_cookie(
+        "session_id",
+        session_id,
+        httponly=True,
+        max_age=3600,
+        samesite="lax",
+        secure=config.cookie_secure(),
+    )
     return resp
 
 
 @router.post("/resend-verification")
-async def resend_verification(payload: dict):
+@limiter.limit("3/minute")
+async def resend_verification(request: Request, payload: dict):
     """Resend verification email."""
     email = (payload.get("email") or "").strip().lower()
     if not email:
@@ -669,7 +680,14 @@ async def oauth_callback(provider: str, code: str = "", error: str = "", request
         )
     else:
         resp = RedirectResponse(url="/dashboard", status_code=302)
-    resp.set_cookie("session_id", session_id, httponly=True, max_age=3600, samesite="lax")
+    resp.set_cookie(
+        "session_id",
+        session_id,
+        httponly=True,
+        max_age=3600,
+        samesite="lax",
+        secure=config.cookie_secure(),
+    )
     return resp
 
 

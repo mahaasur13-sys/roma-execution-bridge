@@ -190,9 +190,11 @@ def test_spoofed_xff_without_trust_proxy_403(monkeypatch):
 def test_trusted_xff_honoured_when_trust_proxy_on(monkeypatch):
     monkeypatch.setenv("ROMA_TRUST_PROXY", "1")
     monkeypatch.setattr(deps, "ADMIN_IP_ALLOWLIST", "127.0.0.1,::1")
-    client = TestClient(main.app, raise_server_exceptions=False)
+    # XFF is read only from a loopback peer, and only its rightmost entry is
+    # the address the nearest proxy appended — the left half is caller-supplied.
+    client = TestClient(main.app, raise_server_exceptions=False, client=("127.0.0.1", 50000))
     resp = client.get(
         "/admin/verification-stats",
-        headers={"X-API-Key": ADMIN_KEY, "X-Forwarded-For": "127.0.0.1, 10.1.2.3"},
+        headers={"X-API-Key": ADMIN_KEY, "X-Forwarded-For": "10.1.2.3, 127.0.0.1"},
     )
     assert resp.status_code == 200, resp.text
