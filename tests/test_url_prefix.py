@@ -235,3 +235,21 @@ def test_dashboard_quick_actions_carry_prefix_and_drop_dead_links(monkeypatch):
     for dead in ('href="/metrics"', 'href="/usage"', 'href="/jobs"', "/docs/quickstart.md"):
         assert dead not in html, f"мёртвая ссылка {dead} осталась в дашборде"
     assert "/status/" not in html, "детали задачи переехали в текст, страницы нет"
+
+
+def test_session_cookie_path_follows_prefix(client, tenants, monkeypatch):
+    """Cookie сессии живёт под точкой монтирования: Path=/roma, без префикса — Path=/."""
+    alpha = tenants["alpha"]
+
+    root = client.post("/auth/login", data={"api_key": alpha["raw"]}, follow_redirects=False)
+    assert root.status_code == 302, root.text
+    assert "Path=/;" in root.headers["set-cookie"]
+
+    monkeypatch.setenv("ROMA_URL_PREFIX", "/roma")
+    prefixed = client.post("/auth/login", data={"api_key": alpha["raw"]}, follow_redirects=False)
+    assert prefixed.status_code == 302, prefixed.text
+    assert "Path=/roma" in prefixed.headers["set-cookie"]
+
+    out = client.get("/auth/logout", follow_redirects=False)
+    assert out.status_code == 302
+    assert "Path=/roma" in out.headers["set-cookie"], "delete_cookie должен чистить ту же Path"

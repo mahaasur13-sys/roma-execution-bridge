@@ -263,6 +263,7 @@ async def login(request: Request):
         max_age=3600,
         samesite="lax",
         secure=config.cookie_secure(),
+        path=config.url_prefix() or "/",
     )
     return resp
 
@@ -274,7 +275,7 @@ async def logout(request: Request):
     if session_id:
         delete_session(session_id)
     resp = RedirectResponse(url=config.u("/auth/login"), status_code=302)
-    resp.delete_cookie("session_id")
+    resp.delete_cookie("session_id", path=config.url_prefix() or "/")
     return resp
 
 
@@ -440,6 +441,7 @@ async def verify_email_endpoint(request: Request, token: str):
         max_age=3600,
         samesite="lax",
         secure=config.cookie_secure(),
+        path=config.url_prefix() or "/",
     )
     return resp
 
@@ -701,6 +703,7 @@ async def oauth_callback(provider: str, code: str = "", error: str = "", request
         max_age=3600,
         samesite="lax",
         secure=config.cookie_secure(),
+        path=config.url_prefix() or "/",
     )
     return resp
 
