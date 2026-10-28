@@ -63,6 +63,7 @@
       "health_gpu.py",
       "input_contract",
       "k8s",
+      "log_redaction.py",
       "local_worker.py",
       "main.py",
       "models",
