@@ -20,6 +20,7 @@ from urllib.parse import urlencode
 
 import httpx
 
+import config
 import db_adapter as db
 from fastapi import APIRouter, HTTPException, Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
@@ -43,7 +44,7 @@ GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 GITHUB_CLIENT_ID = os.environ.get("GITHUB_CLIENT_ID", "")
 GITHUB_CLIENT_SECRET = os.environ.get("GITHUB_CLIENT_SECRET", "")
 OAUTH_ENABLED = bool(GOOGLE_CLIENT_ID or GITHUB_CLIENT_ID)
-OAUTH_REDIRECT_BASE = os.environ.get("OAUTH_REDIRECT_BASE", "https://roma-execution-bridge-asurdev.zocomputer.io")
+OAUTH_REDIRECT_BASE = os.environ.get("OAUTH_REDIRECT_BASE", config.PUBLIC_BASE_URL)
 
 # ── Email service singleton ────────────────────────────────────────────
 email_service = EmailService(
@@ -62,7 +63,7 @@ email_service = EmailService(
 )
 
 VERIFICATION_TOKEN_EXPIRY_HOURS = int(os.environ.get("VERIFICATION_TOKEN_EXPIRY_HOURS", "24"))
-VERIFICATION_BASE_URL = os.environ.get("VERIFICATION_BASE_URL", "https://roma-execution-bridge-asurdev.zocomputer.io")
+VERIFICATION_BASE_URL = os.environ.get("VERIFICATION_BASE_URL", config.PUBLIC_BASE_URL)
 DEMO_API_KEY = "YOUR_API_KEY"  # static placeholder on the login page; demo keys are no longer issued
 
 LOGIN_PAGE = """<!DOCTYPE html>

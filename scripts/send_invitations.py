@@ -18,6 +18,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent
 sys.path.insert(0, str(PROJECT_DIR))
 
+import config
 from env_loader import load_env
 
 load_env()
@@ -25,7 +26,7 @@ load_env()
 # --- Config ---
 SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")
 FROM_EMAIL = os.environ.get("FROM_EMAIL", "beta@roma-execution-bridge.io")
-SIGNUP_URL = "https://roma-execution-bridge-asurdev.zocomputer.io/auth/signup"
+SIGNUP_URL = f"{config.PUBLIC_BASE_URL}/auth/signup"
 BATCH_SIZE = 10
 DELAY_SECONDS = 6
 MAX_RETRIES = 3

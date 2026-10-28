@@ -17,6 +17,7 @@ import ipaddress
 import logging
 import os
 
+import config
 import db_adapter as db
 import plan_source
 from fastapi import Header, HTTPException, Request
@@ -144,7 +145,7 @@ def verify_api_key(x_api_key: str = Header(None)) -> dict:
     if not x_api_key:
         raise HTTPException(
             status_code=401,
-            detail="Missing X-API-Key header. Request a key at https://roma-execution-bridge-asurdev.zocomputer.io",
+            detail=f"Missing X-API-Key header. Request a key at {config.PUBLIC_BASE_URL}",
         )
     tenant = db.find_tenant_by_key(x_api_key)
     if not tenant:

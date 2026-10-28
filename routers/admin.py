@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 from urllib.parse import quote, urlencode
 
+import config
 import db_adapter as db
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -28,7 +29,7 @@ from deps import _admin_only, alert_dispatcher, limiter, logger
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-BASE_URL = "https://roma-execution-bridge-asurdev.zocomputer.io"
+BASE_URL = config.PUBLIC_BASE_URL
 
 
 def _invite_link(email: str) -> str:

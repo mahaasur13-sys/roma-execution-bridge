@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import config
 import db_adapter as db
 
 # A1 — shared singletons/helpers (re-exported so main.* names stay intact)
@@ -327,7 +328,7 @@ def verify_api_key(x_api_key: str = Header(None)) -> dict:
     if not x_api_key:
         raise HTTPException(
             status_code=401,
-            detail="Missing X-API-Key header. Request a key at https://roma-execution-bridge-asurdev.zocomputer.io",
+            detail=f"Missing X-API-Key header. Request a key at {config.PUBLIC_BASE_URL}",
         )
     tenant = db.find_tenant_by_key(x_api_key)
     if not tenant:
@@ -638,25 +639,27 @@ app = FastAPI(
 app.state.limiter = limiter
 
 
-# CORS (C5) — allowlist from CORS_ALLOW_ORIGINS
+# CORS (C5) — allowlist from CORS_ALLOW_ORIGINS; CORS_ORIGINS is the legacy alias
 def _cors_allowed_origins() -> list[str]:
-    """Resolve CORS origins from CORS_ALLOW_ORIGINS (comma-separated).
+    """Resolve CORS origins from CORS_ALLOW_ORIGINS, falling back to CORS_ORIGINS.
 
+    - CORS_ALLOW_ORIGINS wins; CORS_ORIGINS is read only when it is empty
     - explicit list -> used as-is (trimmed, empty entries dropped)
     - production (ENV/ROMA_ENV=production) + empty -> fail-closed []
     - non-prod + empty -> localhost only
+
+    Only the count is logged — origin values never reach the log.
     """
-    raw = os.environ.get("CORS_ALLOW_ORIGINS", "")
+    raw = os.environ.get("CORS_ALLOW_ORIGINS", "").strip() or os.environ.get("CORS_ORIGINS", "").strip()
     origins = [o.strip() for o in raw.split(",") if o.strip()]
-    if origins:
-        return origins
-    production = (
-        os.environ.get("ENV", "").strip().lower() == "production"
-        or os.environ.get("ROMA_ENV", "").strip().lower() == "production"
-    )
-    if production:
-        return []  # fail-closed
-    return ["http://127.0.0.1:3080", "http://localhost:3080"]
+    if not origins:
+        production = (
+            os.environ.get("ENV", "").strip().lower() == "production"
+            or os.environ.get("ROMA_ENV", "").strip().lower() == "production"
+        )
+        origins = [] if production else ["http://127.0.0.1:3080", "http://localhost:3080"]  # fail-closed in prod
+    logger.info("CORS allowlist resolved: %d origin(s)", len(origins))
+    return origins
 
 
 def _cors_allow_credentials(origins: list[str]) -> bool:
