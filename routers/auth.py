@@ -354,8 +354,11 @@ async def signup(payload: dict, request: Request):
             expiry_hours=VERIFICATION_TOKEN_EXPIRY_HOURS,
         )
         logger.info("verification_email_sent", extra={"email": email, "tenant_id": tenant_id})
-    except Exception as e:
-        logger.warning("verification_email_failed", extra={"email": email, "error": str(e)})
+    except Exception:
+        # exc_info, а не str(e): текст исключения может содержать verify-ссылку
+        # с токеном — в лог он попадать не должен. Ответ пользователю не меняется:
+        # сбой письма по-прежнему не ломает signup.
+        logger.warning("verification_email_failed", extra={"email": email}, exc_info=True)
 
     # Mark invite as used
     if invite_code:

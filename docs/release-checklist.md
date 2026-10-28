@@ -44,7 +44,7 @@
 - [ ] `is_invoice_processed()` / `mark_invoice_processed()` — PASS
 - [ ] `add_lead()` — PASS
 - [ ] Параллельные запросы (20 шт) — 0 ошибок
-- [ ] `curl http://localhost:8900/stats/daily` → 200 OK
+- [ ] `curl http://localhost:8900/stats/daily` → 401 без сессии и без `X-API-Key` (публичным он больше не является)
 - [ ] Webhook `/webhooks/cloudpayments` — обрабатывает запросы без 500
 
 ## 6. Documentation

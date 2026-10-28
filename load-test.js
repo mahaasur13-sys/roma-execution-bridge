@@ -27,9 +27,6 @@ export default function () {
   r = http.get(`${BASE}/metrics`);
   check(r, { 'metrics 200': (x) => x.status === 200 });
 
-  r = http.get(`${BASE}/stats/daily`);
-  check(r, { 'stats/daily 200': (x) => x.status === 200 });
-
   r = http.get(`${BASE}/dashboard`);
   check(r, { 'dashboard 200': (x) => x.status === 200 });
 
@@ -44,6 +41,10 @@ export default function () {
   check(r, { 'feedback 200/422': (x) => x.status === 200 || x.status === 422 });
 
   // ── Protected (expect 401 without API key) ─────────
+  // /stats/daily больше не публичный: нужна сессия или X-API-Key.
+  r = http.get(`${BASE}/stats/daily`);
+  check(r, { 'stats/daily 401': (x) => x.status === 401 });
+
   r = http.get(`${BASE}/workers`);
   check(r, { 'workers 401': (x) => x.status === 401 });
 
