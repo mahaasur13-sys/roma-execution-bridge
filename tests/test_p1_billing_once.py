@@ -112,8 +112,10 @@ def test_complete_debits_exactly_once(tenant):
 
 
 def test_stats_daily_smoke(tenant):
+    """Эндпоинт больше не публичный: без ключа 401, с ключом — данные своего тенанта."""
     client = TestClient(main.app, raise_server_exceptions=False)
-    resp = client.get("/stats/daily")
+    assert client.get("/stats/daily").status_code == 401
+    resp = client.get("/stats/daily", headers={"X-API-Key": tenant["key"]})
     assert resp.status_code == 200
     data = resp.json()
     assert "dates" in data and "jobs_count" in data and "gpu_hours" in data

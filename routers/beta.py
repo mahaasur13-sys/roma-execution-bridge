@@ -11,6 +11,7 @@ Dependencies come from ``deps`` / ``auth.invites`` / ``db_adapter`` — never
 
 from __future__ import annotations
 
+import config
 import db_adapter as db
 from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.responses import Response
@@ -96,7 +97,7 @@ document.getElementById('betaForm').addEventListener('submit', async (e) => {
         source: document.getElementById('source').value,
     };
     try {
-        const resp = await fetch('/beta/apply', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
+        const resp = await fetch('{{ prefix }}/beta/apply', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
         if (resp.ok) {
             document.getElementById('success').style.display = 'block';
             document.getElementById('error').style.display = 'none';
@@ -118,7 +119,7 @@ document.getElementById('betaForm').addEventListener('submit', async (e) => {
 
 @router.get("/beta")
 async def beta_page():
-    return Response(content=BETA_FORM_HTML, media_type="text/html")
+    return Response(content=BETA_FORM_HTML.replace("{{ prefix }}", config.url_prefix()), media_type="text/html")
 
 
 @limiter.limit("5/minute")

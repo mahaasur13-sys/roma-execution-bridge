@@ -10,6 +10,7 @@ domain decision is made.
 from __future__ import annotations
 
 import os
+import re
 from urllib.parse import urlparse
 
 DEFAULT_PUBLIC_BASE_URL = "https://roma-execution-bridge-asurdev.zocomputer.io"
@@ -34,3 +35,33 @@ def is_production() -> bool:
 def cookie_secure() -> bool:
     """Session cookies carry ``Secure`` wherever the service is really served over https."""
     return is_production()
+
+
+_PREFIX_RE = re.compile(r"^/[A-Za-z0-9/_-]*$")
+
+
+def url_prefix() -> str:
+    """Mount point the service is proxied under, from ``ROMA_URL_PREFIX``.
+
+    Live is exposed through ``https://asurdev.zo.space/roma``, so every link and
+    redirect the app emits has to carry the same prefix the proxy strips. Empty
+    by default: served at the root, links unchanged.
+    """
+    raw = os.environ.get("ROMA_URL_PREFIX", "").strip()
+    if not raw or raw == "/":
+        return ""
+    if not raw.startswith("/"):
+        raw = "/" + raw
+    raw = raw.rstrip("/")
+    if "//" in raw or not _PREFIX_RE.match(raw):
+        raise ValueError("ROMA_URL_PREFIX must look like /roma: '/', letters, digits, '_', '-' only, got %r" % raw)
+    return raw
+
+
+def u(path: str) -> str:
+    """Prefix a root-relative path (``/dashboard``) for the current mount point."""
+    return url_prefix() + path
+
+
+# Validated at import so a bad prefix fails the start-up, not the first click.
+url_prefix()
