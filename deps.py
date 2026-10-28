@@ -22,7 +22,6 @@ import db_adapter as db
 import plan_source
 from fastapi import Header, HTTPException, Request
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from alerts import AlertDispatcher
 from billing.pg_ledger import PGBillingLedger as BillingLedger
@@ -31,8 +30,28 @@ from billing.spend_caps import MONEY_POLICY
 # ── Logging ────────────────────────────────────────────────────────────
 logger = logging.getLogger("roma")
 
+# ── Client address ─────────────────────────────────────────────────────
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def client_ip(request: Request) -> str:
+    """Real client address, proxy-aware only when a proxy really sits in front.
+
+    X-Forwarded-For is client-writable, so it is read only when the socket peer
+    is loopback (the proxy runs next to us) and ROMA_TRUST_PROXY=1. The rightmost
+    entry is the one the nearest proxy appended; anything left of it came from
+    the caller and can be spoofed.
+    """
+    peer = request.client.host if request.client else ""
+    if peer in _LOOPBACK_HOSTS and os.getenv("ROMA_TRUST_PROXY", "") == "1":
+        xff = request.headers.get("X-Forwarded-For", "")
+        if xff.strip():
+            return xff.split(",")[-1].strip()
+    return peer or "unknown"
+
+
 # ── Rate limiting ──────────────────────────────────────────────────────
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=client_ip)
 
 # ── Alerts ─────────────────────────────────────────────────────────────
 alert_dispatcher = AlertDispatcher()
@@ -175,20 +194,8 @@ def verify_api_key(x_api_key: str = Header(None)) -> dict:
 
 
 def _get_client_ip(request: Request) -> str:
-    """Get the client IP.
-
-    Proxy headers (X-Forwarded-For, X-Real-IP) are attacker-controlled, so they
-    are honoured only when ``ROMA_TRUST_PROXY=1`` says we sit behind a proxy
-    that overwrites them. Otherwise the socket peer address is the truth.
-    """
-    if os.getenv("ROMA_TRUST_PROXY", "") == "1":
-        xff = request.headers.get("X-Forwarded-For", "")
-        if xff:
-            return xff.split(",")[0].strip()
-        xri = request.headers.get("X-Real-IP", "")
-        if xri:
-            return xri.strip()
-    return request.client.host if request.client else "unknown"
+    """Admin allowlist view of the caller — same rules as the rate limiter."""
+    return client_ip(request)
 
 
 def _ip_allowed(client_ip: str) -> bool:
@@ -252,9 +259,9 @@ def _admin_only(request: Request) -> dict:
         logger.warning("Admin access denied — key not in ROMA_ADMIN_KEYS")
         raise HTTPException(status_code=403, detail="Admin access requires an admin API key")
 
-    client_ip = _get_client_ip(request)
-    if not _ip_allowed(client_ip):
-        logger.warning(f"Admin access denied — IP not in allowlist: {client_ip}")
-        raise HTTPException(status_code=403, detail=f"Access denied from {client_ip}")
+    caller = _get_client_ip(request)
+    if not _ip_allowed(caller):
+        logger.warning(f"Admin access denied — IP not in allowlist: {caller}")
+        raise HTTPException(status_code=403, detail=f"Access denied from {caller}")
 
     return {"tenant_id": "admin", "api_key": api_key_raw, "is_admin": True}

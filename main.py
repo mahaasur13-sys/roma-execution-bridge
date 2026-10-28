@@ -646,15 +646,7 @@ _LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 def _cors_is_production() -> bool:
     """Production when ENV/ROMA_ENV says so, or when the public base URL is a non-local https host."""
-    if (
-        os.environ.get("ENV", "").strip().lower() == "production"
-        or os.environ.get("ROMA_ENV", "").strip().lower() == "production"
-    ):
-        return True
-    base = config.PUBLIC_BASE_URL
-    if not base.lower().startswith("https://"):
-        return False
-    return (urlparse(base).hostname or "") not in _LOCAL_HOSTS
+    return config.is_production()
 
 
 def _cors_origin_allowed(origin: str) -> bool:
@@ -705,6 +697,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Edge gate: metrics and API docs are for the host, not the internet ─
+# Prometheus scrapes /metrics over loopback, so nothing legitimate breaks. A
+# request arriving with X-Forwarded-For is by definition proxied from outside.
+_LOOPBACK_PEERS = frozenset({"127.0.0.1", "::1"})
+_DOC_PATHS = frozenset({"/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"})
+_GUARDED_PATHS = _DOC_PATHS | {"/metrics"}
+
+
+@app.middleware("http")
+async def edge_gate(request: Request, call_next):
+    """404 /metrics and the docs for anything that is not a direct loopback call."""
+    path = request.url.path
+    if path in _GUARDED_PATHS:
+        peer = request.client.host if request.client else ""
+        local = peer in _LOOPBACK_PEERS and not request.headers.get("X-Forwarded-For")
+        public_docs = path in _DOC_PATHS and os.environ.get("ROMA_PUBLIC_DOCS", "") == "1"
+        if not local and not public_docs:
+            return Response(status_code=404)
+    return await call_next(request)
+
 
 # DecisionOS Week 2 — v1 API routes
 from routes.v1_router import router as v1_router
