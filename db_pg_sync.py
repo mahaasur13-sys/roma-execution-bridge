@@ -3,8 +3,23 @@
 
 import logging
 import json
+import os
 
 logger = logging.getLogger("roma.db_pg_sync")
+
+# Таблицы, которые создаёт init_db. При ROMA_DB_INIT_DDL=0 они обязаны уже быть.
+EXPECTED_TABLES = (
+    "tenants",
+    "webhook_events",
+    "processed_invoices",
+    "leads",
+    "email_logs",
+    "user_events",
+    "feedback",
+    "users",
+    "workers",
+    "submit_idempotency_keys",
+)
 
 
 def _key_digest(raw_key: str) -> str:
@@ -18,7 +33,28 @@ def _key_digest(raw_key: str) -> str:
     return key_digest(raw_key)
 
 
+def ddl_enabled() -> bool:
+    """ROMA_DB_INIT_DDL=0 отключает DDL на старте (схемой владеет миграция)."""
+    return os.environ.get("ROMA_DB_INIT_DDL", "1") != "0"
+
+
+def verify_schema(conn) -> None:
+    """Fail-closed проверка: все таблицы из EXPECTED_TABLES должны существовать."""
+    cur = conn.cursor()
+    missing = []
+    for table in EXPECTED_TABLES:
+        cur.execute("SELECT to_regclass(%s)", (table,))
+        row = cur.fetchone()
+        if not row or row[0] is None:
+            missing.append(table)
+    if missing:
+        raise RuntimeError("ROMA_DB_INIT_DDL=0, но в базе отсутствуют таблицы: " + ", ".join(missing))
+
+
 def init_db(conn) -> None:
+    if not ddl_enabled():
+        verify_schema(conn)
+        return
     cur = conn.cursor()
     cur.execute("""
         CREATE TABLE IF NOT EXISTS tenants (
