@@ -93,7 +93,7 @@ markers = [
 # Активных исключений НЕТ (2026-09-21): все три исторических --ignore сняты.
 #   test_ci.py                  → scripts/ci_smoke.py (вне коллекции: это раннер, вызывается CI-шагом)
 #   saas/.../test_rate_limiter.py → 7/7 проходят, un-ignore
-#   saas/.../test_gateway.py      → 9 проходят, 1 fail-open помечен xfail(strict=False) с issue R-5-gateway-auth
+#   saas/.../test_gateway.py      → 9 проходят, 1 fail-open помечен xfail(strict=False) с issue R-5-gateway-auth; модуль удалён (PR-F3)
 # Запись ниже — история решённого исключения, чтобы повторный "--ignore" не появился «на память».
 # "example/legacy_test.py" = { reason = "...", issue = "P1-XXX", expiry = "2026-11-01" }
 

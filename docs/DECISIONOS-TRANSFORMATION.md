@@ -20,7 +20,7 @@
 | Billing | `billing/cloudpayments_client.py` | 🟢 | CloudPayments webhook, `processed_invoices` table. |
 | PostgreSQL Adapter | `db_pg.py` (518 lines) | 🟢 | Full async PG adapter with connection pool. Exists, NOT wired as primary. |
 | Dual-DB Adapter | `db_adapter.py` (560 lines) | 🟡 | SQLite+PG router — `get_db()` returns correct adapter. Bridge exists. |
-| SaaS Gateway | `saas/gateway/` | 🟢 | Rate limiter, tenant middleware, auth middleware, branding injector. |
+| SaaS Gateway | `saas/gateway/` | — | **Удалён** (PR-F3, 2026-10-28). Был: rate limiter, tenant middleware, auth middleware, branding injector. |
 | SaaS Pricing | `saas/pricing.py`, `saas/pricing_engine.py` | 🟡 | Tier definitions exist. Not linked to Decision Gate. |
 | AI Assistant | `chat_stream()` + tool calling | 🟢 | Streaming SSE, tool execution, localStorage personalization. |
 | Observability | Prometheus + Grafana dashboards | 🟢 | Metrics endpoint at `/metrics`. |
