@@ -8,6 +8,9 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from enum import Enum
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
+
+import config
 
 try:
     import jinja2
@@ -135,6 +138,23 @@ TEMPLATES = {
 <div style="text-align:center;color:#94a3b8;font-size:12px;margin-top:24px">Powered by <a href="https://roma.ai" style="color:#94a3b8">ROMA</a></div>
 </body></html>""",
 }
+
+
+def _with_mount_prefix(url: str) -> str:
+    """Дописать ROMA_URL_PREFIX к пути ссылки, если его там ещё нет.
+
+    Вызывающий уже склеил базис (VERIFICATION_BASE_URL/PUBLIC_BASE_URL) с
+    ``/auth/verify-email``. Базис может быть как без префикса
+    (``https://asurdev.zo.space``), так и с ним (``https://asurdev.zo.space/roma``) —
+    во втором случае второй ``/roma`` не появится.
+    """
+    prefix = config.url_prefix()
+    if not prefix:
+        return url
+    parts = urlsplit(url)
+    if parts.path == prefix or parts.path.startswith(prefix + "/"):
+        return url
+    return urlunsplit((parts.scheme, parts.netloc, prefix + parts.path, parts.query, parts.fragment))
 
 
 class EmailService:
@@ -341,6 +361,24 @@ class EmailService:
             dashboard_url=dashboard_url,
         )
         return self.send(to_email, f"🔴 Low Balance — {brand.get('app_name', 'ROMA')}", html)
+
+    def send_verification_email(
+        self,
+        to_email: str,
+        tenant_name: str,
+        verification_url: str,
+        brand: dict[str, Any],
+        expiry_hours: int = 24,
+    ) -> bool:
+        """Письмо со ссылкой подтверждения адреса (вызывается из signup и resend)."""
+        html = self._render(
+            "verify_email",
+            tenant_name=tenant_name,
+            verification_url=_with_mount_prefix(verification_url),
+            brand=brand,
+            expiry_hours=expiry_hours,
+        )
+        return self.send(to_email, f"Verify your email — {brand.get('app_name', 'ROMA')}", html)
 
 
 if __name__ == "__main__":
