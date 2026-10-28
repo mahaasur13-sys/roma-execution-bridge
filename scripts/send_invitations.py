@@ -12,6 +12,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from urllib.parse import quote, urlencode
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent
@@ -24,8 +25,7 @@ load_env()
 # --- Config ---
 SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")
 FROM_EMAIL = os.environ.get("FROM_EMAIL", "beta@roma-execution-bridge.io")
-DEMO_API_KEY = os.environ.get("ROMA_DEMO_API_KEY", "")
-DASHBOARD_URL = "https://roma-execution-bridge-asurdev.zocomputer.io/dashboard"
+SIGNUP_URL = "https://roma-execution-bridge-asurdev.zocomputer.io/auth/signup"
 BATCH_SIZE = 10
 DELAY_SECONDS = 6
 MAX_RETRIES = 3
@@ -81,9 +81,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <h1>🚀 ROMA Execution Bridge</h1>
     <p>Здравствуйте, {{ name }},</p>
     <p>Мы рады пригласить вас в <strong>закрытое бета-тестирование</strong> <span class="highlight">ROMA Execution Bridge</span> — платформы для управления GPU-вычислениями с умным планированием, прогнозированием затрат и изоляцией ресурсов.</p>
-    <p><strong>Ваш демо-ключ:</strong> <span class="code">{{ demo_key }}</span></p>
     <p>Начните работу за 2 минуты:</p>
-    <p><a href="{{ invitation_link }}" class="button">👉 Открыть дашборд</a></p>
+    <p><a href="{{ invitation_link }}" class="button">👉 Зарегистрироваться</a></p>
     <p>Вы сможете:</p>
     <ul class="features">
       <li>✅ Отправлять задачи через API или интерфейс</li>
@@ -107,8 +106,6 @@ PLAIN_TEXT_TEMPLATE = """Здравствуйте, {{ name }}!
 
 Мы рады пригласить вас в закрытое бета-тестирование ROMA Execution Bridge — платформы для управления GPU-вычислениями.
 
-Ваш демо-ключ: {{ demo_key }}
-
 Начните работу: {{ invitation_link }}
 
 Возможности:
@@ -127,23 +124,39 @@ PLAIN_TEXT_TEMPLATE = """Здравствуйте, {{ name }}!
 # ============================================
 
 
-def _render(template: str, name: str, email: str, invitation_link: str, demo_key: str) -> str:
+def _render(template: str, name: str, email: str, invitation_link: str) -> str:
     return (
         template.replace("{{ name }}", name or "Valued Tester")
         .replace("{{ email }}", email)
         .replace("{{ invitation_link }}", invitation_link)
-        .replace("{{ demo_key }}", demo_key)
     )
 
 
-def generate_email_content(
-    recipient_name: str, email: str, invitation_link: str, demo_key: str = ""
-) -> tuple[str, str]:
+def generate_email_content(recipient_name: str, email: str, invitation_link: str) -> tuple[str, str]:
     """Return (html_body, plain_text_body)."""
     name = recipient_name or "Valued Tester"
-    html = _render(HTML_TEMPLATE, name, email, invitation_link, demo_key)
-    text = _render(PLAIN_TEXT_TEMPLATE, name, email, invitation_link, demo_key)
+    html = _render(HTML_TEMPLATE, name, email, invitation_link)
+    text = _render(PLAIN_TEXT_TEMPLATE, name, email, invitation_link)
     return html, text
+
+
+def invite_link(email: str, dry_run: bool = False) -> str:
+    """Signup link with a single-use invite code — no API key ever goes into a URL.
+
+    A dry run must not spend a real code: the slot carries a placeholder and the
+    invite table is left untouched.
+    """
+    code = "DRY-RUN" if dry_run else None
+    if not dry_run:
+        try:
+            from auth.invites import create_invite
+
+            code = (create_invite(max_uses=1, note=email) or {}).get("code")
+        except Exception as exc:
+            logger.warning(f"invite code not created: {type(exc).__name__}")
+    query = f"invite={quote(code)}&" if code else ""
+    query += urlencode({"email": email, "utm_source": "email", "utm_medium": "invite"})
+    return f"{SIGNUP_URL}?{query}"
 
 
 def load_leads_from_db(limit: int = 0):
@@ -251,9 +264,6 @@ def main():
         logger.error("FROM_EMAIL is not set. Aborting.")
         sys.exit(1)
 
-    if not DEMO_API_KEY:
-        logger.warning("⚠ ROMA_DEMO_API_KEY is not set — invitation links will not include a demo key")
-
     # Load leads
     if args.csv:
         leads = load_leads_from_csv(args.csv)
@@ -279,11 +289,9 @@ def main():
             continue
 
         name = lead.get("company", "") or lead.get("role", "") or ""
-        invitation_link = (
-            f"{DASHBOARD_URL}?api_key={DEMO_API_KEY}&ref=beta&utm_source=email&utm_medium=invite&email={email}"
-        )
+        invitation_link = invite_link(email, dry_run=dry_run)
 
-        html, _ = generate_email_content(name, email, invitation_link, DEMO_API_KEY)
+        html, _ = generate_email_content(name, email, invitation_link)
         lead_id = lead.get("id")
 
         if dry_run:

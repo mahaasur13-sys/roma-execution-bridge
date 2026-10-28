@@ -63,7 +63,7 @@ email_service = EmailService(
 
 VERIFICATION_TOKEN_EXPIRY_HOURS = int(os.environ.get("VERIFICATION_TOKEN_EXPIRY_HOURS", "24"))
 VERIFICATION_BASE_URL = os.environ.get("VERIFICATION_BASE_URL", "https://roma-execution-bridge-asurdev.zocomputer.io")
-DEMO_API_KEY = os.environ.get("ROMA_DEMO_API_KEY", "YOUR_API_KEY")
+DEMO_API_KEY = "YOUR_API_KEY"  # static placeholder on the login page; demo keys are no longer issued
 
 LOGIN_PAGE = """<!DOCTYPE html>
 <html lang="en">
@@ -102,6 +102,70 @@ button:hover { background:#2ea043 }
 
     <div class="hint">Test key: <code>{{ demo_key }}</code></div>
 </div>
+</body>
+</html>"""
+
+SIGNUP_PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ROMA — Sign up</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#0f1117; color:#e5e7eb; display:flex; align-items:center; justify-content:center; min-height:100vh }
+.card { background:#161b22; border:1px solid #30363d; border-radius:12px; padding:40px; max-width:420px; width:100% }
+h1 { font-size:24px; margin-bottom:8px; color:#f9fafb }
+p { color:#8b949e; font-size:14px; margin-bottom:24px }
+input { width:100%; padding:10px 14px; background:#0d1117; border:1px solid #30363d; border-radius:8px; color:#e5e7eb; font-size:15px; margin-bottom:16px; outline:none }
+input:focus { border-color:#3b82f6 }
+button { width:100%; padding:10px; background:#238636; border:none; border-radius:8px; color:#fff; font-size:15px; cursor:pointer; font-weight:600 }
+button:hover { background:#2ea043 }
+.error { background:rgba(239,68,68,0.1); border:1px solid #ef4444; border-radius:8px; padding:12px; color:#ef4444; font-size:14px; margin-bottom:16px }
+.ok { background:rgba(35,134,54,0.12); border:1px solid #238636; border-radius:8px; padding:12px; color:#3fb950; font-size:14px; margin-bottom:16px }
+.hint { font-size:12px; color:#6b7280; margin-top:16px; text-align:center }
+.hint a { color:#3b82f6; text-decoration:none }
+</style>
+</head>
+<body>
+<div class="card">
+    <h1>⚡ ROMA Execution Bridge</h1>
+    <p>Create an account — we will email you a confirmation link.</p>
+    <div id="msg" class="error" style="display:none"></div>
+    <form id="signup-form">
+        <input type="text" name="name" placeholder="Name" autocomplete="name">
+        <input type="email" name="email" placeholder="you@example.com" value="{{ email }}" autocomplete="email" required>
+        <input type="password" name="password" placeholder="Password (min 8 characters)" autocomplete="new-password" required>
+        <input type="text" name="invite_code" placeholder="Invite code (beta)" value="{{ invite_code }}">
+        <button type="submit">Sign Up</button>
+    </form>
+    <p class="hint">Already have an account? <a href="/auth/login">Sign in</a></p>
+</div>
+<script>
+document.getElementById('signup-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.target;
+    const body = {};
+    for (const [key, value] of new FormData(form).entries()) body[key] = String(value).trim();
+    const msg = document.getElementById('msg');
+    msg.style.display = 'none';
+    const resp = await fetch('/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    if (resp.status === 201) {
+        form.style.display = 'none';
+        msg.className = 'ok';
+        msg.textContent = 'Account created. Check your email to confirm your address.';
+    } else {
+        const data = await resp.json().catch(() => ({}));
+        msg.className = 'error';
+        msg.textContent = data.detail || 'Registration failed.';
+    }
+    msg.style.display = 'block';
+});
+</script>
 </body>
 </html>"""
 
@@ -198,6 +262,19 @@ async def logout(request: Request):
     resp = RedirectResponse(url="/auth/login", status_code=302)
     resp.delete_cookie("session_id")
     return resp
+
+
+@router.get("/signup")
+async def signup_page(request: Request):
+    """Signup form; ``invite`` and ``email`` come straight from the invitation link."""
+    page = SIGNUP_PAGE.replace("{{ email }}", html.escape(request.query_params.get("email", ""))).replace(
+        "{{ invite_code }}", html.escape(request.query_params.get("invite", ""))
+    )
+    return Response(
+        content=page,
+        media_type="text/html",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.post("/signup", status_code=201)

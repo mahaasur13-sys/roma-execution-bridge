@@ -10,6 +10,7 @@ Dependencies come from ``deps`` (never ``main``).
 from __future__ import annotations
 
 import os
+from urllib.parse import quote, urlencode
 
 import db_adapter as db
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -26,6 +27,20 @@ from auth.invites import (
 from deps import _admin_only, alert_dispatcher, limiter, logger
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+BASE_URL = "https://roma-execution-bridge-asurdev.zocomputer.io"
+
+
+def _invite_link(email: str) -> str:
+    """Signup link carrying a single-use invite code — no API key ever goes into a URL."""
+    try:
+        code = (create_invite(max_uses=1, note=email) or {}).get("code")
+    except Exception as exc:
+        logger.warning("invite code not created: %s", type(exc).__name__)
+        code = None
+    query = f"invite={quote(code)}&" if code else ""
+    query += urlencode({"email": email, "utm_source": "email", "utm_medium": "invite"})
+    return f"{BASE_URL}/auth/signup?{query}"
 
 
 class TestAlertRequest(BaseModel):
@@ -254,8 +269,7 @@ async def admin_invite(request: Request):
         if not email:
             continue
 
-        demo_api_key = os.environ.get("ROMA_DEMO_API_KEY", "")
-        invitation_link = f"https://roma-execution-bridge-asurdev.zocomputer.io/dashboard?api_key={demo_api_key}"
+        invitation_link = _invite_link(email)
 
         try:
             if dry_run:
