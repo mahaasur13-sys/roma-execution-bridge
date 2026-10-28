@@ -40,6 +40,7 @@
       "backends",
       "billing",
       "compiler",
+      "config.py",
       "consistency",
       "control_plane",
       "core",
@@ -201,6 +202,13 @@
       "date": "2026-10-19",
       "scope": "product-only, exclude += main_checks.py",
       "reason": "PR #142: корневой main_checks.py — набор проверок стартового retry-обёртки (не продукт), стал виден gate как 'unscoped: main_checks.py' после добавления файла в ветке fix/roma-init-db-retry"
+    },
+    {
+      "date": "2026-10-28",
+      "scope": "product-only",
+      "change": "в область измерения введён корневой модуль config.py (единственный источник PUBLIC_BASE_URL для исходящих ссылок). Гейт упал машинной проверкой 'файл вне области и вне exclude' — молчаливого включения новых корневых модулей нет, запись обязательна.",
+      "reason": "PR #180 sec/public-base-url: host исходящих ссылок вынесен из пяти литералов в config.PUBLIC_BASE_URL; модуль читается deps/main/routers/scripts. Полы не менялись (36.3/62.2).",
+      "commit": "PR #180 (2caa05c)"
     }
   ],
   "measured_on": {
