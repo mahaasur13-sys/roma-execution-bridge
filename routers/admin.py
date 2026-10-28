@@ -36,7 +36,7 @@ def _invite_link(email: str) -> str:
     try:
         code = (create_invite(max_uses=1, note=email) or {}).get("code")
     except Exception as exc:
-        logger.warning("invite code not created for %s: %s", email, type(exc).__name__)
+        logger.warning("invite code not created: %s", type(exc).__name__)
         code = None
     query = f"invite={quote(code)}&" if code else ""
     query += urlencode({"email": email, "utm_source": "email", "utm_medium": "invite"})

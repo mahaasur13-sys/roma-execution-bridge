@@ -82,7 +82,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <p>Здравствуйте, {{ name }},</p>
     <p>Мы рады пригласить вас в <strong>закрытое бета-тестирование</strong> <span class="highlight">ROMA Execution Bridge</span> — платформы для управления GPU-вычислениями с умным планированием, прогнозированием затрат и изоляцией ресурсов.</p>
     <p>Начните работу за 2 минуты:</p>
-    <p><a href="{{ invitation_link }}" class="button">👉 Открыть дашборд</a></p>
+    <p><a href="{{ invitation_link }}" class="button">👉 Зарегистрироваться</a></p>
     <p>Вы сможете:</p>
     <ul class="features">
       <li>✅ Отправлять задачи через API или интерфейс</li>
@@ -140,15 +140,20 @@ def generate_email_content(recipient_name: str, email: str, invitation_link: str
     return html, text
 
 
-def invite_link(email: str) -> str:
-    """Signup link with a single-use invite code — no API key ever goes into a URL."""
-    code = None
-    try:
-        from auth.invites import create_invite
+def invite_link(email: str, dry_run: bool = False) -> str:
+    """Signup link with a single-use invite code — no API key ever goes into a URL.
 
-        code = (create_invite(max_uses=1, note=email) or {}).get("code")
-    except Exception as exc:
-        logger.warning(f"invite code not created for {email}: {type(exc).__name__}")
+    A dry run must not spend a real code: the slot carries a placeholder and the
+    invite table is left untouched.
+    """
+    code = "DRY-RUN" if dry_run else None
+    if not dry_run:
+        try:
+            from auth.invites import create_invite
+
+            code = (create_invite(max_uses=1, note=email) or {}).get("code")
+        except Exception as exc:
+            logger.warning(f"invite code not created: {type(exc).__name__}")
     query = f"invite={quote(code)}&" if code else ""
     query += urlencode({"email": email, "utm_source": "email", "utm_medium": "invite"})
     return f"{SIGNUP_URL}?{query}"
@@ -284,7 +289,7 @@ def main():
             continue
 
         name = lead.get("company", "") or lead.get("role", "") or ""
-        invitation_link = invite_link(email)
+        invitation_link = invite_link(email, dry_run=dry_run)
 
         html, _ = generate_email_content(name, email, invitation_link)
         lead_id = lead.get("id")

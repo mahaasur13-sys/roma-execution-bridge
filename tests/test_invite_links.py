@@ -130,3 +130,75 @@ def test_demo_key_env_is_not_read_by_code():
 def test_create_invite_rejects_beta_off(monkeypatch):
     monkeypatch.setattr(invites, "BETA_MODE", False)
     assert "code" not in invites.create_invite(max_uses=1, note="x@y.z")
+
+
+# --- signup page -----------------------------------------------------------
+
+
+def _client():
+    from starlette.testclient import TestClient
+
+    import main
+
+    return TestClient(main.app)
+
+
+def test_signup_page_prefills_and_escapes():
+    resp = _client().get(
+        "/auth/signup",
+        params={"invite": "<script>alert(1)</script>", "email": "<script>alert(2)</script>"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    assert resp.headers["cache-control"] == "no-store"
+    body = resp.text
+    assert "alert(1)" not in body.replace("&lt;script&gt;alert(1)&lt;/script&gt;", "")
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in body
+    assert "&lt;script&gt;alert(2)&lt;/script&gt;" in body
+    assert "name=\"invite_code\"" in body and "name=\"password\"" in body and "name=\"email\"" in body
+
+
+def test_signup_page_empty_query_is_plain_form():
+    resp = _client().get("/auth/signup")
+
+    assert resp.status_code == 200
+    assert "{{" not in resp.text
+
+
+def test_dry_run_does_not_create_invite(monkeypatch):
+    module = _load_send_invitations()
+    calls = []
+
+    def fake_create_invite(**kwargs):
+        calls.append(kwargs)
+        return {"code": "ROMA-1111-2222"}
+
+    monkeypatch.setattr(invites, "create_invite", fake_create_invite)
+
+    link = module.invite_link("lead@example.com", dry_run=True)
+
+    assert calls == []
+    assert "invite=DRY-RUN" in link
+    assert "ROMA-1111-2222" not in link
+    assert "api_key" not in link
+
+
+def test_invite_link_logs_no_email(monkeypatch, caplog):
+    admin_mod = _load_admin()
+    module = _load_send_invitations()
+
+    def boom(**kwargs):
+        raise RuntimeError("pg down")
+
+    monkeypatch.setattr(admin_mod, "create_invite", boom)
+    monkeypatch.setattr(invites, "create_invite", boom)
+
+    with caplog.at_level("WARNING"):
+        admin_mod._invite_link("lead@example.com")
+        module.invite_link("lead@example.com")
+
+    assert caplog.records, "warning was expected"
+    for record in caplog.records:
+        assert "lead@example.com" not in record.getMessage()
+    assert any("RuntimeError" in record.getMessage() for record in caplog.records)

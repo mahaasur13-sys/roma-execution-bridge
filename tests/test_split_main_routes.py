@@ -43,6 +43,7 @@ EXPECTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/beta/validate-invite"),
     ("GET", "/auth/login"),
     ("GET", "/auth/logout"),
+    ("GET", "/auth/signup"),
     ("GET", "/auth/oauth/callback/{provider}"),
     ("GET", "/auth/oauth/login/{provider}"),
     ("GET", "/auth/verify-email"),
