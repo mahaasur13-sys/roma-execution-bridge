@@ -2,8 +2,8 @@
   "note": "A-6: канон полноты набора тестов. Числа — машинный факт последнего repo-wide прогона (junitxml), не оценка. Порог никогда не понижается: любое отличие от факта прогона роняет гейт, обновление — только явным диффом этого файла вместе с изменением набора тестов.",
   "rule": "collected == executed (нулевое расхождение) И collected/passed/failures/errors/skipped == canon. Проверяет scripts/ci_run_completeness.py, вызывается из ci/coverage_gate.sh и из CI-шага scripts/ci_junit_smoke.py. Прежний порог 'collected >= 244' пропускал исчезновение 19 тестов — заменён точным равенством. G-CI-PG-CANON: скипы классифицированы машинно по причине в junitxml — admission (постоянная канона, admission_skips) и env-skip (проверка не исполнена из-за отсутствия окружения): локально допустимо 0 или env_skips_expected, при CI/GITHUB_ACTIONS — строго 0, потому что CI поднимает реальный PostgreSQL. G-CANON-ENV-PARITY: ожидания по среде объявлены явно в объекте 'profiles' (node · ci): profiles[<env>].passed/admission_skips/env_skips_max/named_admissions. Профиль берётся из окружения (CI/GITHUB_ACTIONS → ci, иначе node); среда без профиля — отказ (fail-closed). Admission-скипы обязаны быть записаны поимённо (тройка класс·симптом·issue/expiry): скип без поимённой записи и предписанная запись, которой не было, — оба случая отказ.",
   "canon": {
-    "collected": 923,
-    "passed": 915,
+    "collected": 934,
+    "passed": 926,
     "failures": 0,
     "errors": 0,
     "skipped": 8,
@@ -11,9 +11,16 @@
     "run_scope": "repo-wide (target=., pytest -q -p no:cacheprovider -p no:warnings)",
     "admission_skips": 8,
     "env_skips_expected": 50,
-    "skip_classes": "sec/public-base-url CORS production-filter: +4 tests (tests/test_cors_allowlist.py: test_prod_drops_localhost_keeps_https, test_prod_drops_plain_http_origin, test_nonprod_keeps_localhost, test_prod_drops_wildcard_with_credentials) → collected 914→918, admission/env-skip не менялись · sec/public-base-url: +9 tests (tests/test_public_base_url.py) → collected 905→914, admission/env-skip не менялись · PR-F3: −22 (saas/gateway, 3 тест-файла удалены) → collected 927→905, состав admission/env-skip не менялся · F2b-2: +1 pg-marked (tests/test_users_api_key_hash.py::test_pg_get_user_by_api_key_empty_returns_none) → env_skips_expected 49→50 · admission=8 (живой GPU-воркер + 5 плейсхолдеров submit-роутера + R6-live на DSH-хосте + 015a container-scoped destructive) · env-skip=46 (PG-зависимые при отсутствии PG_DSN, включая test_usage_event_idempotency, test_migration_015a_preflight, test_migration_order и 11 pg-marked из test_migration_010a_legacy_reconcile)"
+    "skip_classes": "sec/public-base-url CORS production-filter: +4 tests (tests/test_cors_allowlist.py: test_prod_drops_localhost_keeps_https, test_prod_drops_plain_http_origin, test_nonprod_keeps_localhost, test_prod_drops_wildcard_with_credentials) → collected 914→918, admission/env-skip не менялись · sec/public-base-url: +9 tests (tests/test_public_base_url.py) → collected 905→914, admission/env-skip не менялись · PR-F3: −22 (saas/gateway, 3 тест-файла удалены) → collected 927→905, состав admission/env-skip не менялся · ops/migrations-runner: +11 tests (tests/test_apply_migrations.py) → collected 923→934 · F2b-2: +1 pg-marked (tests/test_users_api_key_hash.py::test_pg_get_user_by_api_key_empty_returns_none) → env_skips_expected 49→50 · admission=8 (живой GPU-воркер + 5 плейсхолдеров submit-роутера + R6-live на DSH-хосте + 015a container-scoped destructive) · env-skip=46 (PG-зависимые при отсутствии PG_DSN, включая test_usage_event_idempotency, test_migration_015a_preflight, test_migration_order и 11 pg-marked из test_migration_010a_legacy_reconcile)"
   },
   "history": [
+    {
+      "date": "2026-10-28-ops-migrations-runner",
+      "collected": 934,
+      "passed": 926,
+      "skipped": 8,
+      "change": "ops/migrations-runner (ветка от master 5749a15): scripts/apply_migrations.py — раннер миграций под выделенной owning-ролью. Админский DSN (ROMA_ADMIN_PG_DSN или --dsn-file, поддержаны и голый DSN, и KEY=DSN) только открывает соединение; тело каждой миграции исполняется внутри SET LOCAL ROLE roma_owner, поэтому новые объекты создаёт владелец, а рантайм-роль roma_app (ROMA_DB_INIT_DDL=0) DDL не требует. Границы: ledger schema_migrations создаётся админом и закрепляется за roma_owner (ALTER TABLE ... OWNER TO) до первой миграции; каждая миграция = отдельная транзакция (SET LOCAL ROLE + тело + строка ledger), ошибка → rollback и rc=1; --dry-run печатает только pending и ничего не пишет; после применения проверяется, что в public нет объектов с чужим владельцем (rc=1 со списком), а отсутствие роли roma_owner или DSN — fail-closed rc=2; DSN никогда не печатается. Тело берётся из migrations/*.sql по имени файла (общий с run_migrations.py стрип BEGIN/COMMIT и листинг файлов, без второй реализации). docs/ops/migrations.md: модель ролей (postgres — только админ/DDL, roma_owner — владелец объектов и миграций, roma_app — рантайм DML, ro_usage — read-only), порядок dry-run → pg_dump → apply → restart → пост-чек, откат через pg_restore и forward-fix. Deploy-путь не менялся: deploy/ops/zo_deploy_agent.py по-прежнему зовёт run_migrations.py. +11 офлайн-тестов tests/test_apply_migrations.py (порядок, пропуск применённых, SET LOCAL ROLE до тела, bootstrap ledger под roma_owner, rollback при ошибке, dry-run без записи, чужой владелец → rc=1, нет роли → rc=2, нет DSN/битый --dsn-file → rc=2, разбор голого и KEY=DSN файла, DSN не попадает в вывод). CI-факт run 40641350954 на f671b3ca: COLLECTED 934 / OUTCOMES 926 passed · 0 failed · 0 errors · 8 admission-скипов = 934, env-skip 0 (гейт падал только на устаревшем каноне 923/915). collected 923 → 934 (+11); CI passed 915 → 926; node passed 865 → 876 (= 934 − 8 admission − 50 env-skip; арифметика профиля, локальный node-прогон: 934 collected, те же 7 известных env-отказов, что и на 5749a15). admission 8 и env_skips_expected 50 не менялись — все 11 новых тестов зелёные и не требуют PG."
+    },
     {
       "date": "2026-10-28-sec-db-init-ddl-gate",
       "collected": 923,
@@ -665,7 +672,7 @@
     "node": {
       "label": "node",
       "env": "node",
-      "passed": 865,
+      "passed": 876,
       "admission_skips": 8,
       "env_skips_max": 50,
       "named_admissions": [
@@ -730,7 +737,7 @@
     "ci": {
       "label": "CI",
       "env": "ci",
-      "passed": 915,
+      "passed": 926,
       "admission_skips": 8,
       "env_skips_max": 0,
       "named_admissions": [
