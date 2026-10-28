@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 from starlette.testclient import TestClient
 
+import config
 import main
 
 
@@ -38,6 +39,15 @@ def _non_prod(monkeypatch, cors: str):
     monkeypatch.setenv("CORS_ALLOW_ORIGINS", cors)
     monkeypatch.delenv("ENV", raising=False)
     monkeypatch.delenv("ROMA_ENV", raising=False)
+    # the default PUBLIC_BASE_URL is a public https host, which reads as production
+    monkeypatch.setattr(config, "PUBLIC_BASE_URL", "http://localhost:8000")
+
+
+def _prod(monkeypatch, cors: str):
+    monkeypatch.setenv("CORS_ALLOW_ORIGINS", cors)
+    monkeypatch.delenv("ENV", raising=False)
+    monkeypatch.delenv("ROMA_ENV", raising=False)
+    monkeypatch.setattr(config, "PUBLIC_BASE_URL", "https://app.example.test")
 
 
 def test_explicit_origins_trimmed(monkeypatch):
@@ -98,3 +108,28 @@ def test_wildcard_disables_credentials(monkeypatch):
     client = TestClient(app)
     resp = client.get("/health", headers={"Origin": "http://anything.example"})
     assert resp.headers.get("access-control-allow-credentials") != "true"
+
+
+def test_prod_drops_localhost_keeps_https(monkeypatch):
+    _prod(monkeypatch, cors="http://localhost:5173,https://asurdev.zo.space")
+    assert main._cors_allowed_origins() == ["https://asurdev.zo.space"]
+
+
+def test_prod_drops_plain_http_origin(monkeypatch):
+    _prod(monkeypatch, cors="http://app.example.test,https://app.example.test")
+    assert main._cors_allowed_origins() == ["https://app.example.test"]
+
+
+def test_nonprod_keeps_localhost(monkeypatch):
+    _non_prod(monkeypatch, cors="http://localhost:5173,https://asurdev.zo.space")
+    assert main._cors_allowed_origins() == [
+        "http://localhost:5173",
+        "https://asurdev.zo.space",
+    ]
+
+
+def test_prod_drops_wildcard_with_credentials(monkeypatch):
+    _prod(monkeypatch, cors="*,https://asurdev.zo.space")
+    origins = main._cors_allowed_origins()
+    assert origins == ["https://asurdev.zo.space"]
+    assert main._cors_allow_credentials(origins) is True

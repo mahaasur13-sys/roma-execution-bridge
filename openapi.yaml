@@ -13,6 +13,7 @@ info:
 servers:
   - url: http://localhost:8900
     description: Zo sandbox
+  # Static doc copy of the host; the runtime value is config.PUBLIC_BASE_URL (env ROMA_PUBLIC_BASE_URL).
   - url: https://roma-execution-bridge-asurdev.zocomputer.io
     description: Production
 paths:

@@ -2,8 +2,8 @@
   "note": "A-6: канон полноты набора тестов. Числа — машинный факт последнего repo-wide прогона (junitxml), не оценка. Порог никогда не понижается: любое отличие от факта прогона роняет гейт, обновление — только явным диффом этого файла вместе с изменением набора тестов.",
   "rule": "collected == executed (нулевое расхождение) И collected/passed/failures/errors/skipped == canon. Проверяет scripts/ci_run_completeness.py, вызывается из ci/coverage_gate.sh и из CI-шага scripts/ci_junit_smoke.py. Прежний порог 'collected >= 244' пропускал исчезновение 19 тестов — заменён точным равенством. G-CI-PG-CANON: скипы классифицированы машинно по причине в junitxml — admission (постоянная канона, admission_skips) и env-skip (проверка не исполнена из-за отсутствия окружения): локально допустимо 0 или env_skips_expected, при CI/GITHUB_ACTIONS — строго 0, потому что CI поднимает реальный PostgreSQL. G-CANON-ENV-PARITY: ожидания по среде объявлены явно в объекте 'profiles' (node · ci): profiles[<env>].passed/admission_skips/env_skips_max/named_admissions. Профиль берётся из окружения (CI/GITHUB_ACTIONS → ci, иначе node); среда без профиля — отказ (fail-closed). Admission-скипы обязаны быть записаны поимённо (тройка класс·симптом·issue/expiry): скип без поимённой записи и предписанная запись, которой не было, — оба случая отказ.",
   "canon": {
-    "collected": 905,
-    "passed": 897,
+    "collected": 918,
+    "passed": 910,
     "failures": 0,
     "errors": 0,
     "skipped": 8,
@@ -11,9 +11,16 @@
     "run_scope": "repo-wide (target=., pytest -q -p no:cacheprovider -p no:warnings)",
     "admission_skips": 8,
     "env_skips_expected": 50,
-    "skip_classes": "PR-F3: −22 (saas/gateway, 3 тест-файла удалены) → collected 927→905, состав admission/env-skip не менялся · F2b-2: +1 pg-marked (tests/test_users_api_key_hash.py::test_pg_get_user_by_api_key_empty_returns_none) → env_skips_expected 49→50 · admission=8 (живой GPU-воркер + 5 плейсхолдеров submit-роутера + R6-live на DSH-хосте + 015a container-scoped destructive) · env-skip=46 (PG-зависимые при отсутствии PG_DSN, включая test_usage_event_idempotency, test_migration_015a_preflight, test_migration_order и 11 pg-marked из test_migration_010a_legacy_reconcile)"
+    "skip_classes": "sec/public-base-url CORS production-filter: +4 tests (tests/test_cors_allowlist.py: test_prod_drops_localhost_keeps_https, test_prod_drops_plain_http_origin, test_nonprod_keeps_localhost, test_prod_drops_wildcard_with_credentials) → collected 914→918, admission/env-skip не менялись · sec/public-base-url: +9 tests (tests/test_public_base_url.py) → collected 905→914, admission/env-skip не менялись · PR-F3: −22 (saas/gateway, 3 тест-файла удалены) → collected 927→905, состав admission/env-skip не менялся · F2b-2: +1 pg-marked (tests/test_users_api_key_hash.py::test_pg_get_user_by_api_key_empty_returns_none) → env_skips_expected 49→50 · admission=8 (живой GPU-воркер + 5 плейсхолдеров submit-роутера + R6-live на DSH-хосте + 015a container-scoped destructive) · env-skip=46 (PG-зависимые при отсутствии PG_DSN, включая test_usage_event_idempotency, test_migration_015a_preflight, test_migration_order и 11 pg-marked из test_migration_010a_legacy_reconcile)"
   },
   "history": [
+    {
+      "date": "2026-10-28-sec-public-base-url-cors-filter",
+      "collected": 918,
+      "passed": 910,
+      "skipped": 8,
+      "change": "PR #180 sec/public-base-url, коммит bf1c32a: CORS-фильтр продакшена (https-only, без loopback, без '*' при credentials) — +4 теста в tests/test_cors_allowlist.py, существующие 6 тестов файла и tests/test_public_base_url.py не менялись. CI-факт run 40622598343 на bf1c32a: COLLECTED 918 / OUTCOMES 910 passed · 0 failed · 0 errors · 8 admission-скипов = 918, env-skip 0 (гейт падал только на устаревшем каноне 914/906). collected 914 → 918, CI passed 906 → 910; node passed 856 → 860 (= 918 − 8 admission − 50 env-skip; арифметика профиля, локальный collect на bf1c32a: 918). admission 8 и env_skips_expected 50 не менялись — все 4 новых теста зелёные, не admission."
+    },
     {
       "date": "2026-10-28-sec-drop-saas-gateway",
       "collected": 905,
@@ -637,6 +644,13 @@
       "passed": 730,
       "skipped": 8,
       "change": "fix/deps-admin-keys-env: deps.py больше не содержит хардкод _ADMIN_KEYS {'admin-key-beta-2026','admin-super-key-xyz'}; добавлен deps.admin_keys() — единственный источник, ROMA_ADMIN_KEYS (череа запятые, trim), пустое/отсутствующее значение → пустое множество (fail-closed, admin-bypass невозможен). main.py:341 переведён на тот же helper (имя одно). +6 тестов (tests/test_admin_keys_env.py): пустое env → невалидированный тенант получает 403 через оба верификатора; ключ из env → 403 снят; бывшие литералы → 401; парсинг списка."
+    },
+    {
+      "date": "2026-10-28-sec-public-base-url",
+      "collected": 914,
+      "passed": 906,
+      "skipped": 8,
+      "change": "PR #180 sec/public-base-url: хост исходящих ссылок вынесен в config.PUBLIC_BASE_URL (env ROMA_PUBLIC_BASE_URL, дефолт прежний) — deps.py, main.py, routers/admin.py, routers/auth.py x2, scripts/send_invitations.py, scripts/gen_api_doc.py; CORS читает CORS_ALLOW_ORIGINS с откатом на CORS_ORIGINS, логируется только число доменов. +9 тестов. CI-факт run 40619591710 на 818daa8d: collected 914 / passed 906 / skipped 8 / 0 failed / 0 errors; node passed 856 = 914 − 8 − 50 (производная схемы, healthy node-прогон дал 849 passed / 58 skipped / те же 7 env-зависимых падений, что на master)."
     }
   ],
   "measurement": "2026-10-15: 010a audit_events legacy reconcile collect 711 (+14 tests/test_migration_010a_legacy_reconcile.py: 11 pg-marked + 3 офлайн); модуль 14/14 passed на disposable PG roma_test @127.0.0.1:55440 (Python 3.12, exit 0); node passed 703 = 711 − 8 (производная схемы, healthy node-прогон не выполнялся); CI passed 703 = 711 − 8; env_skips_expected 29 → 40 (+11 pg-marked).\n2026-10-15: PR #128 collect 697 (+41 tests/test_pg_connection_txn_context.py, офлайн, без pg-маркировки); CI-факт run 38550950356 на 1d3c5ad0 — 697 collected / 688 passed / 8 admission-скипов / env-skip 0 / 0 errors, единственный отказ — устаревший канон 656 в негативе полноты; node passed 689 = 697 − 8 (производная схемы). Node-прогон на DSH-хосте дал 687 passed / 3 failed (нет docker → test_migration_order; дрейф живого promtail-конфига → test_promtail_drift_check; устаревший канон), поэтому healthy node-прогон не выполнялся. collected 656 → 697; node passed 648 → 689; CI passed 648 → 689.\n2026-10-08: H2a-C1 agent reads collect 627; node 621/6 derived from admissions; CI run 37827607150 on 3b0155b measured 627 collected / 620 passed / 7 admission-skips / env-skip 0 (pre-canon run had the stale-canon completeness gate failure only); failures/errors 0.\n2026-10-08: H2a CAS collect 604; node 598/6 derived from admissions; CI run 37789348673 on 5d8abfe measured 604 collected / 7 admission-skips / env-skip 0 (pre-canon run had the stale-canon completeness gate failure only); failures/errors 0.\n2026-10-08: H2a collect 602; node 596/6 derived from admissions; CI run 37776669387 on 84462615 measured 602 collected / 7 admission-skips / env-skip 0 (pre-canon run had 1 stale-canon meta-test failure only); failures/errors 0.\n2026-10-08: H1 collect 563; node 557/6 derived from admissions; CI run 37751430054 measured 556/7; failures/errors 0.\n2026-10-07: CI run 37615821075 on head 837b5c8e measured 553/546/0/0/7; node 547 is derivative 553-6, not a measured healthy node run.\n2026-10-07: CI run 37584563460 on head a446a9b7 measured 548/541/0/0/7; node 542 is derivative 548-6, not a measured healthy node run.\nПрофили среды (G-CANON-ENV-PARITY): нода 539 = 533 passed + 6 admission-скипов (533 — производная схемы: 539−6; healthy node-прогон не выполнялся); CI 539 = 532 passed + 7 admission-скипов (CI-факт run 37570380068 на efcec446: 532 passed · 0 failed · 0 errors · 7 skipped; CI-исключительный — R6-live). collected одинаков в обеих средах: набор один. Предыдущее: 535 = 529 + 6 (нода) / 528 + 7 (CI); до него 531 = 525 + 6 (нода) / 524 + 7 (CI); до него 486 = 480 + 6 (нода) / 479 + 7 (CI). История набора: 254 → 263 → 270 → 276 → 280 → 281 → 287 → 331 → 335 → 338 → 362 → 371 → 382 → 384 → 396 → 412 → 417 → 423 → 429 → 431 → 434 → 436 → 438 → 441 → 449 → 451 → 456 → 458 → 459 → 460 → 461 → 467 → 471 → 472 → 486 → 531 → 535 → 539. 2026-10-24 (pr-deps-admin-keys-env): collect 738 = 732 + 6 (tests/test_admin_keys_env.py: ROMA_ADMIN_KEYS как единственный источник admin-ключей); node/CI passed 730. Измеренный node-прогон (PG выключен, 45 скипов): 691 passed + 39 env-skip = 730; 2 failed — env-зависимые, те же на master (promtail drift, cli tier path), не регрессия.",
@@ -644,7 +658,7 @@
     "node": {
       "label": "node",
       "env": "node",
-      "passed": 847,
+      "passed": 860,
       "admission_skips": 8,
       "env_skips_max": 50,
       "named_admissions": [
@@ -709,7 +723,7 @@
     "ci": {
       "label": "CI",
       "env": "ci",
-      "passed": 897,
+      "passed": 910,
       "admission_skips": 8,
       "env_skips_max": 0,
       "named_admissions": [

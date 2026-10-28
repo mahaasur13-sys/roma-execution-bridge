@@ -2,6 +2,12 @@
 """Generate ROMA API Reference markdown from OpenAPI spec."""
 
 import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import config
 
 with open("/home/workspace/roma-execution-bridge/docs/openapi.json") as f:
     spec = json.load(f)
@@ -11,7 +17,7 @@ output = []
 
 output.append("# ROMA Execution Bridge v1.2.0 — API Reference")
 output.append("")
-output.append("**Base URL:** https://roma-execution-bridge-asurdev.zocomputer.io")
+output.append(f"**Base URL:** {config.PUBLIC_BASE_URL}")
 output.append("**Local:** http://localhost:8900")
 output.append(f"**OpenAPI:** 3.1.0 | **Endpoints:** {len(paths)}")
 output.append("**Docs:** /docs (Swagger UI) | /redoc (ReDoc)")
