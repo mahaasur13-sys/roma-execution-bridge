@@ -1225,8 +1225,21 @@ async def chat_stream(
 
 @app.get("/stats/daily")
 async def daily_stats(request: Request):
-    """Daily job/GPU stats (last 7 days)."""
-    return db.get_daily_stats()
+    """Daily job/GPU stats (last 7 days) for the calling tenant only.
+
+    Was public and aggregated over every tenant; the dashboard reads it with the
+    session cookie, scripts with X-API-Key.
+    """
+    session_id = request.cookies.get("session_id")
+    session = get_session(session_id) if session_id else None
+    if session:
+        tenant_id = session["tenant_id"]
+    else:
+        info = lookup_key(request.headers.get("X-API-Key"))
+        if not info:
+            raise HTTPException(status_code=401, detail="Session or X-API-Key required")
+        tenant_id = info["tenant_id"]
+    return db.get_daily_stats(tenant_id=tenant_id)
 
 
 @app.get("/health")
@@ -1606,7 +1619,7 @@ def _render_dashboard(tenant_id: str, plan_name: str) -> str:
                 <td style="font-family:monospace;font-size:13px">{j['job_id'][:8]}...</td>
                 <td><span style="background:{status_cls};color:#fff;padding:2px 8px;border-radius:10px;font-size:12px">{j['status']}</span></td>
                 <td style="font-size:13px">{j.get('submitted_at', '—')[:19]}</td>
-                <td><a href="/status/{j['job_id']}" style="color:#3b82f6">details →</a></td>
+                <td><span style="font-family:monospace;font-size:12px;color:#8b949e">{j['job_id']}</span></td>
             </tr>"""
     else:
         jobs_html = (
@@ -1686,12 +1699,8 @@ footer .dot {{ display:inline-block; width:7px; height:7px; border-radius:50%; b
 <div class="card">
     <h3>Quick Actions</h3>
     <div class="actions">
-        <a href="/health">♥ /health</a>
-        <a href="/metrics">📊 /metrics</a>
-        <a href="/usage">📈 /usage</a>
-        <a href="/jobs">📋 /jobs</a>
-        <a href="/account">🔑 Account &amp; API key</a>
-        <a href="/docs/quickstart.md">📖 Quickstart</a>
+        <a href="{config.u('/health')}">♥ /health</a>
+        <a href="{config.u('/account')}">🔑 Account &amp; API key</a>
     </div>
 </div>
 
@@ -1706,7 +1715,7 @@ footer .dot {{ display:inline-block; width:7px; height:7px; border-radius:50%; b
     <script>
     (function() {{
         var xhr = new XMLHttpRequest();
-        xhr.open("GET", "/stats/daily", true);
+        xhr.open("GET", "{config.u('/stats/daily')}", true);
         xhr.onload = function() {{
             if (xhr.status !== 200) return;
             var data = JSON.parse(xhr.responseText);
@@ -1780,7 +1789,7 @@ footer .dot {{ display:inline-block; width:7px; height:7px; border-radius:50%; b
 (async function() {{
     let rows = [];
     try {{
-        const r = await fetch("/stats/daily");
+        const r = await fetch("{config.u('/stats/daily')}");
         if (r.ok) {{
             const d = await r.json();
             rows = d.dates.map((date, i) => ({{ date, jobs: d.jobs_count[i], gpu: d.gpu_hours[i] }}));
@@ -1837,7 +1846,7 @@ async def dashboard(request: Request):
         return Response(content=html, media_type="text/html")
 
     # 3. No valid auth — redirect to login page
-    return RedirectResponse(url="/auth/login", status_code=302)
+    return RedirectResponse(url=config.u("/auth/login"), status_code=302)
 
 
 # ============================================

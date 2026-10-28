@@ -597,7 +597,7 @@ def release_worker(conn, worker_id: str) -> None:
     conn.commit()
 
 
-def get_daily_stats(conn) -> dict:
+def get_daily_stats(conn, tenant_id: str | None = None) -> dict:
     """Daily job count + GPU hours over the last 7 days (for /stats/daily)."""
     cur = conn.cursor()
     cur.execute(
@@ -605,15 +605,20 @@ def get_daily_stats(conn) -> dict:
     )
     dates = [r[0] for r in cur.fetchall()]
 
+    scope = "" if tenant_id is None else " AND tenant_id = %s"
+    scope_params: tuple = () if tenant_id is None else (tenant_id,)
+
     cur.execute(
         "SELECT to_char(created_at, 'YYYY-MM-DD') d, count(*) FROM execution_jobs "
-        "WHERE created_at >= now() - interval '7 days' GROUP BY d"
+        "WHERE created_at >= now() - interval '7 days'" + scope + " GROUP BY d",
+        scope_params,
     )
     jobs_by_day = {r[0]: r[1] for r in cur.fetchall()}
 
     cur.execute(
         "SELECT to_char(created_at, 'YYYY-MM-DD') d, sum(value) FROM usage_events "
-        "WHERE created_at >= now() - interval '7 days' AND event_type='gpu_execution' GROUP BY d"
+        "WHERE created_at >= now() - interval '7 days' AND event_type='gpu_execution'" + scope + " GROUP BY d",
+        scope_params,
     )
     gpu_by_day = {r[0]: r[1] for r in cur.fetchall()}
 

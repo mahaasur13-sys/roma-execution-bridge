@@ -26,6 +26,7 @@ import html
 import time
 import uuid
 
+import config
 import db_adapter as db
 from fastapi import APIRouter, HTTPException, Request
 from starlette.responses import HTMLResponse
@@ -99,14 +100,14 @@ button {{ margin-top:16px; padding:10px 18px; border:0; border-radius:6px; backg
     <dt>Tenant</dt><dd>{html.escape(tenant_id)}</dd>
     <dt>Sign-in method</dt><dd>{html.escape(provider)}</dd>
 </dl>
-<form method="post" action="/account/rotate-key">
+<form method="post" action="{config.u('/account/rotate-key')}">
     <input type="hidden" name="csrf_token" value="{csrf_token}">
     {second_factor}
     <button type="submit">Rotate API key</button>
 </form>
 <p class="warn">The current key stops working immediately. The new one is shown once — copy it before leaving the page.</p>
 </div>
-<a class="back" href="/dashboard">← back to dashboard</a>
+<a class="back" href="{config.u('/dashboard')}">← back to dashboard</a>
 </div>
 </body>
 </html>"""
@@ -139,7 +140,7 @@ code {{ display:block; padding:14px; border-radius:8px; background:#0d1117; bord
 <code>{new_key}</code>
 <p class="warn">Shown once. The previous key no longer works. Send it as the X-API-Key header.</p>
 </div>
-<a class="back" href="/dashboard">← back to dashboard</a>
+<a class="back" href="{config.u('/dashboard')}">← back to dashboard</a>
 </div>
 </body>
 </html>"""

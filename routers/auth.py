@@ -66,6 +66,15 @@ VERIFICATION_TOKEN_EXPIRY_HOURS = int(os.environ.get("VERIFICATION_TOKEN_EXPIRY_
 VERIFICATION_BASE_URL = os.environ.get("VERIFICATION_BASE_URL", config.PUBLIC_BASE_URL)
 DEMO_API_KEY = "YOUR_API_KEY"  # static placeholder on the login page; demo keys are no longer issued
 
+
+def _fill(template: str, **subs: str) -> str:
+    """Substitute ``{{ name }}`` placeholders; ``prefix`` is always available."""
+    page = template.replace("{{ prefix }}", config.url_prefix())
+    for name, value in subs.items():
+        page = page.replace("{{ %s }}" % name, value)
+    return page
+
+
 LOGIN_PAGE = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -91,14 +100,14 @@ button:hover { background:#2ea043 }
 <div class="card">
     <h1>⚡ ROMA Execution Bridge</h1>
     <p>Enter your API key to access the dashboard.</p>
-    <form method="POST" action="/auth/login">
+    <form method="POST" action="{{ prefix }}/auth/login">
         <input type="text" name="api_key" placeholder="{{ demo_key }}" autofocus required>
         <button type="submit">Sign In</button>
     </form>
     <p style="margin-top:24px; color:#8b949e; text-align:center">— or sign in with —</p>
     <div style="display:flex; gap:12px; margin-top:16px">
-        <a href="/auth/oauth/login/google" style="flex:1; text-align:center; padding:10px; background:#1a1f2e; border:1px solid #30363d; border-radius:8px; color:#e5e7eb; text-decoration:none; font-size:14px">🔵 Google</a>
-        <a href="/auth/oauth/login/github" style="flex:1; text-align:center; padding:10px; background:#1a1f2e; border:1px solid #30363d; border-radius:8px; color:#e5e7eb; text-decoration:none; font-size:14px">🐙 GitHub</a>
+        <a href="{{ prefix }}/auth/oauth/login/google" style="flex:1; text-align:center; padding:10px; background:#1a1f2e; border:1px solid #30363d; border-radius:8px; color:#e5e7eb; text-decoration:none; font-size:14px">🔵 Google</a>
+        <a href="{{ prefix }}/auth/oauth/login/github" style="flex:1; text-align:center; padding:10px; background:#1a1f2e; border:1px solid #30363d; border-radius:8px; color:#e5e7eb; text-decoration:none; font-size:14px">🐙 GitHub</a>
     </div>
 
     <div class="hint">Test key: <code>{{ demo_key }}</code></div>
@@ -140,7 +149,7 @@ button:hover { background:#2ea043 }
         <input type="text" name="invite_code" placeholder="Invite code (beta)" value="{{ invite_code }}">
         <button type="submit">Sign Up</button>
     </form>
-    <p class="hint">Already have an account? <a href="/auth/login">Sign in</a></p>
+    <p class="hint">Already have an account? <a href="{{ prefix }}/auth/login">Sign in</a></p>
 </div>
 <script>
 document.getElementById('signup-form').addEventListener('submit', async (event) => {
@@ -150,7 +159,7 @@ document.getElementById('signup-form').addEventListener('submit', async (event) 
     for (const [key, value] of new FormData(form).entries()) body[key] = String(value).trim();
     const msg = document.getElementById('msg');
     msg.style.display = 'none';
-    const resp = await fetch('/auth/signup', {
+    const resp = await fetch('{{ prefix }}/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -207,7 +216,7 @@ code {{ display:block; padding:14px; border-radius:8px; background:#0d1117; bord
 <code>{new_key}</code>
 <p class="warn">Shown once — this page cannot be replayed. Send it as the X-API-Key header.</p>
 </div>
-<a class="back" href="/dashboard">→ dashboard</a>
+<a class="back" href="{config.u('/dashboard')}">→ dashboard</a>
 </div>
 </body>
 </html>"""
@@ -219,9 +228,9 @@ async def login_page(request: Request):
     # If already logged in, redirect to dashboard
     session_id = request.cookies.get("session_id")
     if session_id and get_session(session_id):
-        return RedirectResponse(url="/dashboard", status_code=302)
+        return RedirectResponse(url=config.u("/dashboard"), status_code=302)
     return Response(
-        content=LOGIN_PAGE.replace("{{ demo_key }}", DEMO_API_KEY),
+        content=_fill(LOGIN_PAGE, demo_key=DEMO_API_KEY),
         media_type="text/html",
     )
 
@@ -235,15 +244,18 @@ async def login(request: Request):
     info = lookup_key(api_key)
     if not info:
         # Show login page with error
-        error_html = LOGIN_PAGE.replace(
-            "</form>",
-            '<div class="error">Invalid API key. Try <code>{{ demo_key }}</code></div></form>',
-        ).replace("{{ demo_key }}", DEMO_API_KEY)
+        error_html = _fill(
+            LOGIN_PAGE.replace(
+                "</form>",
+                '<div class="error">Invalid API key. Try <code>{{ demo_key }}</code></div></form>',
+            ),
+            demo_key=DEMO_API_KEY,
+        )
         return Response(content=error_html, media_type="text/html", status_code=401)
 
     session_id = create_session(info["tenant_id"])
 
-    resp = RedirectResponse(url="/dashboard", status_code=302)
+    resp = RedirectResponse(url=config.u("/dashboard"), status_code=302)
     resp.set_cookie(
         "session_id",
         session_id,
@@ -261,7 +273,7 @@ async def logout(request: Request):
     session_id = request.cookies.get("session_id")
     if session_id:
         delete_session(session_id)
-    resp = RedirectResponse(url="/auth/login", status_code=302)
+    resp = RedirectResponse(url=config.u("/auth/login"), status_code=302)
     resp.delete_cookie("session_id")
     return resp
 
@@ -269,8 +281,10 @@ async def logout(request: Request):
 @router.get("/signup")
 async def signup_page(request: Request):
     """Signup form; ``invite`` and ``email`` come straight from the invitation link."""
-    page = SIGNUP_PAGE.replace("{{ email }}", html.escape(request.query_params.get("email", ""))).replace(
-        "{{ invite_code }}", html.escape(request.query_params.get("invite", ""))
+    page = _fill(
+        SIGNUP_PAGE,
+        email=html.escape(request.query_params.get("email", "")),
+        invite_code=html.escape(request.query_params.get("invite", "")),
     )
     return Response(
         content=page,
@@ -679,7 +693,7 @@ async def oauth_callback(provider: str, code: str = "", error: str = "", request
             headers={"Cache-Control": "no-store"},
         )
     else:
-        resp = RedirectResponse(url="/dashboard", status_code=302)
+        resp = RedirectResponse(url=config.u("/dashboard"), status_code=302)
     resp.set_cookie(
         "session_id",
         session_id,
@@ -708,6 +722,6 @@ a {{ color:#3b82f6 }}
 <div class="box">
     <h1>401</h1>
     <p>{message}</p>
-    <p style="margin-top:16px"><a href="/dashboard">Try again</a></p>
+    <p style="margin-top:16px"><a href="{config.u('/dashboard')}">Try again</a></p>
 </div>
 </body></html>"""

@@ -708,14 +708,14 @@ def release_worker(worker_id: str) -> None:
             _pg_return(conn)
 
 
-def get_daily_stats(days: int = 7) -> dict:
+def get_daily_stats(days: int = 7, tenant_id: str | None = None) -> dict:
     """Daily job count + GPU hours (last 7 days) for /stats/daily."""
     if _pg_enabled():
         from db_pg_sync import get_daily_stats as pg_fn
 
         conn = _pg_conn()
         try:
-            return pg_fn(conn)
+            return pg_fn(conn, tenant_id)
         finally:
             _pg_return(conn)
     return {"dates": [], "jobs_count": [], "gpu_hours": []}
