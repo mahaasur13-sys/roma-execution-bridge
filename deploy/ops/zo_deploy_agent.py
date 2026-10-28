@@ -26,10 +26,13 @@ GitHub Actions НА машину Zo по SSH. У раннера нет ни ма
   * память об отказе постоянна (по SHA) — повторов нет; снятие памяти `--retry-all`;
     первый алерт об отказе уходит сразу, стоячий — раз в сутки и не раньше часа после отказа;
     плюс один напоминающий алерт в сутки, пока выкат стоит;
-  * миграции ДО рестарта и с самопроверкой: если после `run_migrations.py` в
+  * миграции ДО рестарта и с самопроверкой: если после `apply_migrations.py` в
     schema_migrations остались неотмеченные файлы, выкат блокируется — код не поднимается,
     прод продолжает жить на старом. Молчаливый no-op миграций (например, .env не читается
     в env-only режиме) так ловится, а не прощается;
+  * миграции идут под админским DSN (`ROMA_ADMIN_PG_DSN_FILE`, роль postgres) — тело каждой
+    миграции исполняется в `SET LOCAL ROLE roma_owner`, сервисный DSN из .env к DDL не
+    допускается; нет файла — отказ, а не пропуск миграций;
   * рестартится ровно один сервис (roma-execution-bridge); чужое не трогаем;
   * авто-откат выключен по умолчанию (`--rollback-on-unhealthy`) — отказ регистрируется,
     алертится и лечится человеком; авто-перезапись без GO в этом проекте не делается;
@@ -53,6 +56,7 @@ import fcntl
 import json
 import os
 import pathlib
+import re
 import signal
 import subprocess
 import sys
@@ -74,6 +78,10 @@ HEALTH_URL = os.environ.get("ROMA_HEALTH_URL", "http://127.0.0.1:8900/health")
 STATUS_CONTEXT = os.environ.get("ROMA_DEPLOY_STATUS_CONTEXT", "deploy/zo")
 RELAY_URL = os.environ.get("ROMA_ALERT_RELAY_URL", "http://127.0.0.1:8099/notify")
 PG_DSN_DB = os.environ.get("ROMA_PG_DB", "roma")
+# Админский DSN для миграций (роль postgres, не сервисная roma_app): migrate идёт под roma_owner,
+# поэтому сервисному DSN из .env там делать нечего. Отсутствие файла = отказ, а не no-op.
+ADMIN_DSN_FILE = os.environ.get("ROMA_ADMIN_PG_DSN_FILE", "/root/.sealed/roma-pg-dsn.txt")
+_DSN_RE = re.compile(r"(?:postgres(?:ql)?|psql)://\S+", re.IGNORECASE)
 
 INTERVAL = int(os.environ.get("ROMA_DEPLOY_INTERVAL", "60"))
 HEALTH_TIMEOUT_S = int(os.environ.get("ROMA_DEPLOY_HEALTH_TIMEOUT", "90"))
@@ -139,6 +147,11 @@ def alert(title: str, summary: str, status: str = "firing") -> None:
             emit("alert_sent", title=title, http=resp.status)
     except Exception as exc:  # канал алертов — не причина отменять вердикт
         emit("alert_failed", title=title, error=f"{type(exc).__name__}: {exc}")
+
+
+def redact(text: str, limit: int = 200) -> str:
+    """Срезать DSN из текста миграции: ни журнал, ни алерт не место для коннекта."""
+    return _DSN_RE.sub("<dsn>", text or "")[:limit]
 
 
 def run(cmd: list[str], *, timeout: int, cwd: pathlib.Path = REPO) -> tuple[int, str, str]:
@@ -488,10 +501,18 @@ def do_deploy(sha: str, state: dict, *, dry_run: bool, rollback_on_unhealthy: bo
         post_status(sha, "error", "ledger миграций не читается")
         return False
     if pending_before:
-        rc, out, err = run([PYTHON, "scripts/run_migrations.py"], timeout=MIGRATE_TIMEOUT_S)
-        emit("migrations_run", rc=rc, pending_before=len(pending_before), out=(out or err)[-300:])
+        dsn_file = pathlib.Path(ADMIN_DSN_FILE)
+        if not dsn_file.is_file():
+            fail(state, sha, "migration_failed", f"нет admin DSN: {ADMIN_DSN_FILE}")
+            rollback_tree(previous, state)
+            post_status(sha, "failure", "нет admin DSN для миграций")
+            return False
+        rc, out, err = run(
+            [PYTHON, "scripts/apply_migrations.py", "--dsn-file", str(dsn_file)], timeout=MIGRATE_TIMEOUT_S
+        )
+        emit("migrations_run", rc=rc, pending_before=len(pending_before), out=redact(out or err, 300))
         if rc != 0:
-            fail(state, sha, "migration_failed", (err or out or "run_migrations rc!=0")[:300])
+            fail(state, sha, "migration_failed", redact(err or out) or "apply_migrations rc!=0")
             rollback_tree(previous, state)
             post_status(sha, "failure", "миграции не применились")
             return False
