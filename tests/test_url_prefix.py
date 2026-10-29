@@ -31,6 +31,7 @@ import db
 import db_adapter
 import deps
 import main
+import routers.auth as auth_routes
 from auth.sessions import create_session, delete_session
 
 
@@ -97,6 +98,10 @@ def test_prefix_empty_keeps_root_links(client):
 def test_prefix_is_applied_to_links_and_forms(client, monkeypatch):
     """С префиксом те же страницы ссылаются на /roma/... и форма шлёт туда же."""
     monkeypatch.setenv("ROMA_URL_PREFIX", "/roma")
+    # OAuth-кнопка рендерится только у настроенного провайдера
+    # (fix/login-hide-oauth-when-disabled), иначе проверять префикс не на чем.
+    monkeypatch.setattr(auth_routes, "GOOGLE_CLIENT_ID", "".join(["google", "-", "client", "-", "id"]))
+    monkeypatch.setattr(auth_routes, "OAUTH_ENABLED", True)
 
     login = client.get("/auth/login")
     assert login.status_code == 200, login.text

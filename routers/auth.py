@@ -75,6 +75,38 @@ def _fill(template: str, **subs: str) -> str:
     return page
 
 
+_OAUTH_BUTTON = (
+    '<a href="{href}" style="flex:1; text-align:center; padding:10px; '
+    "background:#1a1f2e; border:1px solid #30363d; border-radius:8px; color:#e5e7eb; "
+    'text-decoration:none; font-size:14px">{label}</a>'
+)
+
+
+def _oauth_block() -> str:
+    """Login page "or sign in with" block; empty unless a provider has a client id.
+
+    The buttons used to render unconditionally, so an unconfigured deploy
+    advertised sign-in links that could only reach the 503/400 error page.
+    """
+    if not OAUTH_ENABLED:
+        return ""
+    prefix = config.url_prefix()
+    buttons = "".join(
+        _OAUTH_BUTTON.format(href=f"{prefix}/auth/oauth/login/{provider}", label=label)
+        for provider, label, client_id in (
+            ("google", "🔵 Google", GOOGLE_CLIENT_ID),
+            ("github", "🐙 GitHub", GITHUB_CLIENT_ID),
+        )
+        if client_id
+    )
+    if not buttons:
+        return ""
+    return (
+        '<p style="margin-top:24px; color:#8b949e; text-align:center">— or sign in with —</p>\n'
+        f'    <div style="display:flex; gap:12px; margin-top:16px">{buttons}</div>'
+    )
+
+
 LOGIN_PAGE = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -104,11 +136,7 @@ button:hover { background:#2ea043 }
         <input type="text" name="api_key" placeholder="{{ demo_key }}" autofocus required>
         <button type="submit">Sign In</button>
     </form>
-    <p style="margin-top:24px; color:#8b949e; text-align:center">— or sign in with —</p>
-    <div style="display:flex; gap:12px; margin-top:16px">
-        <a href="{{ prefix }}/auth/oauth/login/google" style="flex:1; text-align:center; padding:10px; background:#1a1f2e; border:1px solid #30363d; border-radius:8px; color:#e5e7eb; text-decoration:none; font-size:14px">🔵 Google</a>
-        <a href="{{ prefix }}/auth/oauth/login/github" style="flex:1; text-align:center; padding:10px; background:#1a1f2e; border:1px solid #30363d; border-radius:8px; color:#e5e7eb; text-decoration:none; font-size:14px">🐙 GitHub</a>
-    </div>
+    {{ oauth_block }}
 
     <div class="hint">Test key: <code>{{ demo_key }}</code></div>
 </div>
@@ -230,7 +258,7 @@ async def login_page(request: Request):
     if session_id and get_session(session_id):
         return RedirectResponse(url=config.u("/dashboard"), status_code=302)
     return Response(
-        content=_fill(LOGIN_PAGE, demo_key=DEMO_API_KEY),
+        content=_fill(LOGIN_PAGE, demo_key=DEMO_API_KEY, oauth_block=_oauth_block()),
         media_type="text/html",
     )
 
@@ -250,6 +278,7 @@ async def login(request: Request):
                 '<div class="error">Invalid API key. Try <code>{{ demo_key }}</code></div></form>',
             ),
             demo_key=DEMO_API_KEY,
+            oauth_block=_oauth_block(),
         )
         return Response(content=error_html, media_type="text/html", status_code=401)
 
