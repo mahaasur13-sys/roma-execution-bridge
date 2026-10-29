@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import smtplib
 import sys
@@ -138,6 +139,23 @@ TEMPLATES = {
 </div>
 <div style="text-align:center;color:#94a3b8;font-size:12px;margin-top:24px">Powered by <a href="https://roma.ai" style="color:#94a3b8">ROMA</a></div>
 </body></html>""",
+
+    "invite": """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Invitation</title></head>
+<body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+<div style="background:{{ brand.get('primary_color','#6366f1') }};color:white;padding:24px;text-align:center;border-radius:8px 8px 0 0">
+  <h1>{{ brand.get('app_name','ROMA') }}</h1>
+</div>
+<div style="background:#f8fafc;padding:32px;border-radius:0 0 8px 8px;border:1px solid #e2e8f0">
+  <h2 style="color:#1e293b;margin-top:0">You are invited</h2>
+  <p style="color:#475569;line-height:1.6">Hi {{ name }}, your private beta access to {{ brand.get('app_name','ROMA') }} is ready.</p>
+  <p style="text-align:center;margin:32px 0">
+    <a href="{{ invitation_link }}" style="display:inline-block;background:{{ brand.get('primary_color','#6366f1') }};color:white;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:bold;font-size:16px">Accept invitation</a>
+  </p>
+  <p style="color:#94a3b8;font-size:13px">Or copy this link: <br><code>{{ invitation_link }}</code></p>
+</div>
+<div style="text-align:center;color:#94a3b8;font-size:12px;margin-top:24px">Powered by <a href="https://roma.ai" style="color:#94a3b8">ROMA</a></div>
+</body></html>""",
 }
 
 
@@ -210,6 +228,24 @@ class EmailService:
         else:
             self._env = None
             self._templates = {}
+
+    @classmethod
+    def from_env(cls) -> "EmailService":
+        """Сервис из EMAIL_* переменных — имена и умолчания как в routers/auth.py."""
+        name = os.environ.get("EMAIL_PROVIDER", "console").upper()
+        provider = EmailProvider[name] if name in EmailProvider.__members__ else EmailProvider.CONSOLE
+        return cls(
+            provider=provider,
+            smtp_host=os.environ.get("EMAIL_SMTP_HOST", "smtp.gmail.com"),
+            smtp_port=int(os.environ.get("EMAIL_SMTP_PORT", "587")),
+            smtp_user=os.environ.get("EMAIL_SMTP_USER", ""),
+            smtp_password=os.environ.get("EMAIL_SMTP_PASSWORD", ""),
+            from_email=os.environ.get("FROM_EMAIL", "beta@roma-execution-bridge.io"),
+            from_name=os.environ.get("FROM_NAME", "ROMA Platform"),
+            sendgrid_api_key=os.environ.get("SENDGRID_API_KEY", ""),
+            resend_api_key=os.environ.get("RESEND_API_KEY", ""),
+            resend_domain=os.environ.get("RESEND_DOMAIN", ""),
+        )
 
     def _render(self, template_name: str, **kwargs) -> str:
         if template_name not in self._templates:
@@ -391,6 +427,17 @@ class EmailService:
             expiry_hours=expiry_hours,
         )
         return self.send(to_email, f"Verify your email — {brand.get('app_name', 'ROMA')}", html)
+
+    def send_invite(self, to_email: str, invitation_link: str, name: str | None = None) -> bool:
+        """Приглашение в бету. Ссылка не логируется: в ней одноразовый invite-код."""
+        brand = {"app_name": self.cfg.from_name or "ROMA"}
+        html = self._render(
+            "invite",
+            name=name or "there",
+            invitation_link=invitation_link,
+            brand=brand,
+        )
+        return self.send(to_email, f"You are invited to {brand['app_name']}", html)
 
 
 if __name__ == "__main__":
