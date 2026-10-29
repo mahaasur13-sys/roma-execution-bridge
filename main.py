@@ -249,6 +249,7 @@ import re as _re
 
 _REDACT_QS = _re.compile(r"([?&](?:token|code|key|api_key)=)[^&\s\"]*", _re.IGNORECASE)
 
+
 class _RedactQueryFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         try:
@@ -259,6 +260,7 @@ class _RedactQueryFilter(logging.Filter):
         except Exception:  # never break logging
             pass
         return True
+
 
 logging.getLogger("uvicorn.access").addFilter(_RedactQueryFilter())
 logger.addHandler(_log_handler)
