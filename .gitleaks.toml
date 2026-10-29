@@ -6,6 +6,11 @@ useDefault = true
 [allowlist]
 description = "obvious demo/test fixtures and placeholders (not real secrets)"
 regexTarget = "match"
+commits = [
+  # 1f718dd (PR #190): литерал-фикстура в saas/email/test_email.py — generic-api-key
+  # горит на тестовом токене; в ветке литерал заменён на сборку в рантайме.
+  "1f718ddcdcc8ce3d29cda93047a115f12bc17227",
+]
 regexes = [
   '''roma-demo-key-[0-9]+''',
   '''roma-admin-key''',

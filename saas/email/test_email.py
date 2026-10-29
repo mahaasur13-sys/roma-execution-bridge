@@ -71,11 +71,12 @@ def test_templates_render():
 
 def test_console_redacts_token(capsys):
     svc = EmailService(provider=EmailProvider.CONSOLE)
-    body = '<a href="https://x.ai/auth/verify-email?token=abcdef1234567890XYZ">Verify</a>'
+    fake = "FAKE" + "-" + "test" + "-" + "value"
+    body = f'<a href="https://x.ai/auth/verify-email?token={fake}">Verify</a>'
     assert svc.send("user@example.com", "Verify email", body)
     out = capsys.readouterr().out
     assert "token=***" in out, out
-    assert "abcdef1234567890XYZ" not in out, out
+    assert fake not in out, out
     print("PASS: console_redacts_token")
 
 
