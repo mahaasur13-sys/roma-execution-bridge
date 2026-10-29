@@ -139,7 +139,6 @@ TEMPLATES = {
 </div>
 <div style="text-align:center;color:#94a3b8;font-size:12px;margin-top:24px">Powered by <a href="https://roma.ai" style="color:#94a3b8">ROMA</a></div>
 </body></html>""",
-
     "invite": """<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Invitation</title></head>
 <body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
@@ -178,7 +177,7 @@ def _with_mount_prefix(url: str) -> str:
 
 def _redact(s: str) -> str:
     """Погасить значения секретов в тексте, который уходит в stdout/лог."""
-    return re.sub(r'(?i)((?:token|code|key|api_key)=)[^&"\s<]+', r"\1***", s)
+    return re.sub(r'(?i)((?:token|code|key|api_key|invite)=)[^&"\s<]+', r"\1***", s)
 
 
 def _mask_email(addr: str) -> str:
