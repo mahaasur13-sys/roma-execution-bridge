@@ -80,6 +80,17 @@ def test_console_redacts_token(capsys):
     print("PASS: console_redacts_token")
 
 
+def test_console_redacts_invite_code(capsys):
+    svc = EmailService(provider=EmailProvider.CONSOLE)
+    fake = "FAKE" + "-" + "invite" + "-" + "value"
+    body = f'<a href="https://x.ai/signup?invite={fake}&email=user@example.com">Join</a>'
+    assert svc.send("user@example.com", "Invitation", body)
+    out = capsys.readouterr().out
+    assert "invite=***" in out, out
+    assert fake not in out, out
+    print("PASS: console_redacts_invite_code")
+
+
 def test_console_masks_recipient(capsys):
     svc = EmailService(provider=EmailProvider.CONSOLE)
     assert svc.send("user@example.com", "Hi", "<p>x</p>")

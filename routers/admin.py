@@ -26,6 +26,7 @@ from auth.invites import (
     list_invites,
 )
 from deps import _admin_only, alert_dispatcher, limiter, logger
+from saas.email.service import EmailProvider, EmailService
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -244,14 +245,14 @@ async def admin_email_stats(request: Request):
 @router.post("/invite", dependencies=[Depends(_admin_only)])
 @limiter.limit("20/minute")
 async def admin_invite(request: Request):
-    """Send beta invitations. Dry-run if no SendGrid API key."""
+    """Send beta invitations. Dry-run while the email provider is console-only."""
     try:
         body = await request.json()
     except Exception:
         body = {}
 
-    sendgrid_key = os.environ.get("SENDGRID_API_KEY", "")
-    dry_run = body.get("dry_run", not bool(sendgrid_key))
+    email_service = EmailService.from_env()
+    dry_run = body.get("dry_run", email_service.cfg.provider == EmailProvider.CONSOLE)
 
     leads = db.list_leads(status="new")
     if not leads:
@@ -275,10 +276,16 @@ async def admin_invite(request: Request):
         try:
             if dry_run:
                 db.log_email_sent(email, name, "tenant-demo", invitation_link)
-            else:
-                # Real SendGrid send would go here
+                sent += 1
+                continue
+            if email_service.send_invite(email, invitation_link, name=name):
                 db.log_email_sent(email, name, "tenant-demo", invitation_link)
-            sent += 1
+                sent += 1
+                db.update_lead_status(lead["id"], "invited")
+            else:
+                logger.warning(f"Invite email not sent for {email}")
+                db.log_email_failed(email, "send_invite returned False")
+                failed += 1
         except Exception as e:
             logger.warning(f"Failed to invite {email}: {e}")
             failed += 1
@@ -286,13 +293,6 @@ async def admin_invite(request: Request):
                 db.log_email_failed(email, str(e))
             except Exception:
                 pass
-
-    # Mark leads as invited
-    for lead in leads:
-        try:
-            db.update_lead_status(lead["id"], "invited")
-        except Exception:
-            pass
 
     logger.info(f"Admin invite: {sent} sent, {failed} failed (dry_run={dry_run})")
     return {
