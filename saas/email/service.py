@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import smtplib
 import sys
 from email.mime.multipart import MIMEMultipart
@@ -157,6 +158,17 @@ def _with_mount_prefix(url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, prefix + parts.path, parts.query, parts.fragment))
 
 
+def _redact(s: str) -> str:
+    """Погасить значения секретов в тексте, который уходит в stdout/лог."""
+    return re.sub(r'(?i)((?:token|code|key|api_key)=)[^&"\s<]+', r"\1***", s)
+
+
+def _mask_email(addr: str) -> str:
+    """Оставить первую букву локальной части и домен."""
+    local, _, domain = addr.partition("@")
+    return f"{local[:1]}***@{domain}" if domain else "***"
+
+
 class EmailService:
     def __init__(
         self,
@@ -273,7 +285,7 @@ class EmailService:
     def send(self, to_email: str, subject: str, html_body: str) -> bool:
         if self.cfg.provider == EmailProvider.CONSOLE:
             print(
-                f"\n{'=' * 60}\n[EmailService] CONSOLE — would send:\n  To: {to_email}\n  Subject: {subject}\n  Body: {html_body[:200]}...\n{'=' * 60}\n"
+                f"\n{'=' * 60}\n[EmailService] CONSOLE — would send:\n  To: {_mask_email(to_email)}\n  Subject: {subject}\n  Body: {_redact(html_body[:200])}...\n{'=' * 60}\n"
             )
             return True
         if self.cfg.provider == EmailProvider.SMTP:
