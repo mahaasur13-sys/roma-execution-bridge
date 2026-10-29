@@ -243,6 +243,26 @@ _log_handler.setFormatter(JSONFormatter())
 _log_handler.setLevel(logging.INFO)
 
 logger = logging.getLogger("roma")
+
+# ── redact secrets from uvicorn access log query strings ─────────────────
+import re as _re
+
+_REDACT_QS = _re.compile(r"([?&](?:token|code|key|api_key)=)[^&\s\"]*", _re.IGNORECASE)
+
+
+class _RedactQueryFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            if isinstance(record.args, tuple) and record.args:
+                record.args = tuple(_REDACT_QS.sub(r"\1***", a) if isinstance(a, str) else a for a in record.args)
+            if isinstance(record.msg, str):
+                record.msg = _REDACT_QS.sub(r"\1***", record.msg)
+        except Exception:  # never break logging
+            pass
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_RedactQueryFilter())
 logger.addHandler(_log_handler)
 logger.setLevel(logging.INFO)
 logger.propagate = False
