@@ -69,6 +69,26 @@ def test_templates_render():
     print("PASS: templates_render")
 
 
+def test_console_redacts_token(capsys):
+    svc = EmailService(provider=EmailProvider.CONSOLE)
+    fake = "FAKE" + "-" + "test" + "-" + "value"
+    body = f'<a href="https://x.ai/auth/verify-email?token={fake}">Verify</a>'
+    assert svc.send("user@example.com", "Verify email", body)
+    out = capsys.readouterr().out
+    assert "token=***" in out, out
+    assert fake not in out, out
+    print("PASS: console_redacts_token")
+
+
+def test_console_masks_recipient(capsys):
+    svc = EmailService(provider=EmailProvider.CONSOLE)
+    assert svc.send("user@example.com", "Hi", "<p>x</p>")
+    out = capsys.readouterr().out
+    assert "u***@example.com" in out, out
+    assert "user@example.com" not in out, out
+    print("PASS: console_masks_recipient")
+
+
 if __name__ == "__main__":
     test_console_welcome()
     test_console_all_types()
