@@ -84,3 +84,6 @@ cd ~/roma-execution-bridge
 ## Прочее
 - Каждая задача несёт одноразовый job-токен: повторная отправка результата отклоняется.
 - Агент отказывается от задач любого типа, кроме `verify`.
+
+## User-Agent
+Агент всегда шлёт `User-Agent: roma-host-agent/<AGENT_VERSION>` (сейчас `roma-host-agent/0.1`), в обоих режимах `--token-header`. Причина: Cloudflare перед zo.space отвечает 403 (не JSON) на стандартный `Python-urllib/3.x`, а агент видел это как `heartbeat rejected code=403 error=bad_response`.
