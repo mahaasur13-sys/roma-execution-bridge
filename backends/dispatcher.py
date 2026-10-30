@@ -31,6 +31,15 @@ def get_backend(name: str | None = None) -> BaseBackend:
             logger.warning("VASTAI selected but VAST_KEY (or VASTAI_API_KEY) not configured — falling back to local")
             _backend = LocalBackend()
             _backend_name = "local"
+    elif current == "runpod" and os.getenv("ROMA_RUNPOD_ENABLED", "0").strip() == "1":
+        # Phase-1 aggregator stub: interface only, every call is fail-closed `not_implemented`.
+        from backends.runpod import RunpodBackend
+
+        _backend = RunpodBackend()
+        if not _backend.enabled:
+            logger.warning("RUNPOD selected but RUNPOD_API_KEY not configured — falling back to local")
+            _backend = LocalBackend()
+            _backend_name = "local"
     elif current == "gpu_worker":
         from backends.gpu_worker_backend import GpuWorkerBackend
 
@@ -75,7 +84,42 @@ def list_backends() -> dict:
             "active": False,
             "error": "import failed",
         }
+    if os.getenv("ROMA_RUNPOD_ENABLED", "0").strip() == "1":
+        try:
+            from backends.runpod import RunpodBackend
+
+            rp = RunpodBackend()
+            backends["runpod"] = {"enabled": rp.enabled, "active": _backend_name == "runpod", "stub": True}
+        except Exception:
+            backends["runpod"] = {"enabled": False, "active": False, "error": "import failed"}
     return backends
+
+
+_host_registry = None
+
+
+def get_host_registry():
+    """Process-local host registry (in-memory; PG persistence is a later step)."""
+    global _host_registry
+    if _host_registry is None:
+        from gpu_worker.host_registry import HostRegistry
+
+        _host_registry = HostRegistry()
+    return _host_registry
+
+
+def _routing_preference(p: dict) -> list[str] | None:
+    """Advisory host-first order. None when flags are off (zero behaviour change)."""
+    if not (os.getenv("ROMA_HOSTS_ENABLED", "0").strip() == "1"
+            and os.getenv("ROMA_PREFER_OWN_HOSTS", "0").strip() == "1"):
+        return None
+    try:
+        from scheduler.host_preference import backend_order
+
+        return backend_order(get_host_registry(), min_vram_gb=float(p.get("min_vram_gb", 0) or 0))
+    except Exception:
+        logger.warning("dispatcher.host_preference_error -> ignored")
+        return None
 
 
 async def dispatch_job(job_id: str = "", tenant_id: str = "", payload: dict = None) -> dict:
@@ -91,7 +135,13 @@ async def dispatch_job(job_id: str = "", tenant_id: str = "", payload: dict = No
         payload=p,
     )
     backend = get_backend(p.get("backend"))
-    return await backend.dispatch(ctx)
+    pref = _routing_preference(p)
+    result = await backend.dispatch(ctx)
+    if pref is not None and isinstance(result, dict):
+        # Execution on ROMA hosts is NOT implemented yet: the job still runs on the
+        # configured backend; the preferred order is only recorded for observability.
+        result = {**result, "routing_preference": pref, "host_execution": "not_implemented"}
+    return result
 
 
 async def backend_cancel_job(job_id: str, tenant_id: str = "") -> dict:
