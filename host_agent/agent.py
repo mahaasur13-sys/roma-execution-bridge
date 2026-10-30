@@ -5,7 +5,7 @@ Runs ONLY verification jobs (type == "verify"). Any other job type is refused:
 real workloads stay disabled until container isolation (gVisor/Kata) exists.
 
 Config (env, or a KEY=VALUE file via --config):
-  ROMA_URL              base URL of the ROMA agent endpoint
+  ROMA_URL              base URL of ROMA's host agent API, e.g. https://roma.example/hosts/agent
   ROMA_HOST_ID          host id issued by the operator
   ROMA_HOST_TOKEN_FILE  path to a file holding the host token (preferred)
   ROMA_HOST_TOKEN       token (fallback; avoid: visible in the process env)
@@ -21,6 +21,7 @@ import logging
 import os
 import sys
 import time
+import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -80,14 +81,45 @@ def load_config(config_file: str | None = None, env: dict | None = None) -> Agen
     )
 
 
-def http_transport(url: str, timeout: float = 20.0):
-    """Real transport: one outbound HTTPS POST per request. Not used in tests."""
+ROUTES = {"heartbeat": "/heartbeat", "fetch_job": "/job", "submit_result": "/result"}
+
+
+def _urllib_post(url: str, headers: dict, data: bytes, timeout: float) -> tuple[int, bytes]:
+    r = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(r, timeout=timeout) as resp:  # nosec B310 - URL from operator config
+            return resp.status, resp.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+def http_transport(base_url: str, timeout: float = 20.0, post=None):
+    """Outbound HTTPS transport to ROMA's /hosts/agent/* routes.
+
+    base_url example: https://roma.example/hosts/agent. ``post`` is injectable for tests.
+    The token travels only in the Authorization header and is never logged.
+    """
+    post = post or _urllib_post
+    base = base_url.rstrip("/")
 
     def send(req: dict) -> dict:
-        data = json.dumps(req).encode()
-        r = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
-        with urllib.request.urlopen(r, timeout=timeout) as resp:  # nosec B310 - URL from operator config
-            return json.loads(resp.read().decode())
+        req = dict(req)
+        action = req.pop("action")
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {req.pop('token', '')}",
+            "X-Roma-Host-Id": str(req.pop("host_id", "")),
+        }
+        status, raw = post(base + ROUTES[action], headers, json.dumps(req).encode(), timeout)
+        if status == 204:
+            return {"code": 204, "job": None}
+        try:
+            body = json.loads(raw.decode() or "{}")
+        except ValueError:
+            body = {"error": "bad_response"}
+        if not isinstance(body, dict):
+            body = {"error": "bad_response"}
+        return {**body, "code": status}
 
     return send
 

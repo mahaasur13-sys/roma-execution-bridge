@@ -96,9 +96,29 @@ class HostRecord:
 
 
 class HostRegistry:
-    def __init__(self) -> None:
+    def __init__(self, store=None) -> None:
         self._hosts: dict[str, HostRecord] = {}
         self._mu = threading.Lock()
+        self._store = store
+        self._persisted_events: dict[str, int] = {}
+
+    def _persist(self, h: HostRecord) -> None:
+        """Write-through to the store (no-op without one). Called under self._mu."""
+        if self._store is None:
+            return
+        done = self._persisted_events.get(h.host_id, 0)
+        self._store.save_host(h, list(h.history[done:]))
+        self._persisted_events[h.host_id] = len(h.history)
+
+    def load_from_store(self) -> int:
+        """Replace in-memory state with the store's (on process start)."""
+        if self._store is None:
+            return 0
+        hosts = self._store.load_hosts()
+        with self._mu:
+            self._hosts = {h.host_id: h for h in hosts}
+            self._persisted_events = {h.host_id: len(h.history) for h in hosts}
+        return len(hosts)
 
     @staticmethod
     def _guard() -> None:
@@ -136,6 +156,7 @@ class HostRegistry:
         )
         with self._mu:
             self._hosts[rec.host_id] = rec
+            self._persist(rec)
         return rec
 
     def get(self, host_id: str) -> HostRecord:
@@ -177,6 +198,7 @@ class HostRegistry:
             self._transition(h, VERIFYING, "verification reserved")  # raises if already verifying
             h.verify_reservation = token
             h.pending_verification = None
+            self._persist(h)
 
         seed = uuid.uuid4().hex  # fresh per run: host can't precompute
         try:
@@ -186,6 +208,7 @@ class HostRegistry:
                 if h.verify_reservation == token and h.status == VERIFYING:
                     h.history.append((VERIFYING, prev_status, "verification reservation released"))
                     h.status = prev_status
+                    self._persist(h)
                 if h.verify_reservation == token:
                     h.verify_reservation = None
             raise
@@ -207,6 +230,8 @@ class HostRegistry:
             )
             h.verify_reservation = None
             h.pending_verification = spec
+            if self._store is not None:
+                self._store.start_verification(spec)
             return spec
 
     def submit_verification(self, host_id: str, job_id: str, output_sha256: str, elapsed_s: float) -> HostRecord:
@@ -230,6 +255,11 @@ class HostRegistry:
             else:
                 h.trust_tier = "none"
                 self._transition(h, SUSPENDED, "hash mismatch" if not ok_hash else "benchmark outside bounds")
+            if self._store is not None:
+                self._store.finish_verification(
+                    job_id, str(output_sha256 or "")[:128], score, elapsed_s, bool(ok_hash and ok_score)
+                )
+            self._persist(h)
             return h
 
     def promote(self, host_id: str) -> HostRecord:
@@ -240,6 +270,7 @@ class HostRegistry:
             if h.status != ACTIVE:
                 raise InvalidTransition("only active hosts can be promoted")
             h.trust_tier = "verified"
+            self._persist(h)
             return h
 
     def suspend(self, host_id: str, reason: str) -> HostRecord:
@@ -250,6 +281,7 @@ class HostRegistry:
             h.trust_tier = "none"
             h.verify_reservation = None
             h.pending_verification = None
+            self._persist(h)
             return h
 
     # -- heartbeat SLA ----------------------------------------------------
@@ -260,6 +292,7 @@ class HostRegistry:
             if h is None or h.status != ACTIVE:
                 return False
             h.last_heartbeat = _now()
+            self._persist(h)
             return True
 
     def is_schedulable(self, host_id: str, now: datetime | None = None) -> bool:
@@ -281,6 +314,7 @@ class HostRegistry:
                 ):
                     self._transition(h, SUSPENDED, "heartbeat SLA missed")
                     h.trust_tier = "none"
+                    self._persist(h)
                     out.append(h.host_id)
         return out
 
