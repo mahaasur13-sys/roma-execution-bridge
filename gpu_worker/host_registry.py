@@ -216,7 +216,7 @@ class HostRegistry:
         token = uuid.uuid4().hex
         with self._mu:
             h = self._hosts[host_id]
-            t = th.get(h.gpu_model) or {}
+            t = host_bench.lookup_threshold(th, h.gpu_model)
             lo, hi = t.get("min_tflops"), t.get("max_tflops")
             if not (isinstance(lo, int | float) and isinstance(hi, int | float) and 0 < lo < hi):
                 raise InvalidTransition(f"no benchmark threshold configured for {h.gpu_model}")
