@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import os
 import struct
 import time
@@ -110,6 +111,29 @@ def run_host_bench(seed: str, n: int, reps: int = DEFAULT_REPS, device: str = "c
 
 def tflops(n: int, reps: int, elapsed_s: float) -> float:
     return 2.0 * n**3 * reps / elapsed_s / 1e12
+
+
+def normalize_gpu_model(name: str) -> str:
+    """Canonical form for threshold lookup: case-insensitive, runs of spaces,
+    hyphens and underscores are equivalent ('RTX 3060' == 'RTX_3060' == 'rtx-3060')."""
+    if not isinstance(name, str):
+        return ""
+    return "_".join(re.split(r"[\s_\-]+", name.strip().lower())).strip("_")
+
+
+def lookup_threshold(thresholds: dict, gpu_model: str) -> dict:
+    """Threshold entry for gpu_model. Exact key wins; otherwise a unique match on
+    normalize_gpu_model. Unknown model or ambiguous normalized match => {} (fail closed)."""
+    exact = thresholds.get(gpu_model)
+    if isinstance(exact, dict):
+        return exact
+    key = normalize_gpu_model(gpu_model)
+    if not key:
+        return {}
+    hits = [v for k, v in thresholds.items() if isinstance(v, dict) and normalize_gpu_model(k) == key]
+    if len(hits) != 1:
+        return {}
+    return hits[0]
 
 
 def load_thresholds() -> dict:
