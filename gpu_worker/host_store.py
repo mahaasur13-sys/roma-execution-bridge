@@ -81,31 +81,58 @@ class PgHostStore:
         self._dsn = dsn if dsn is not None else os.getenv("PG_DSN", "")
         if not self._dsn and connect is None:
             raise RuntimeError("PgHostStore: PG_DSN is not set")
-        if connect is None:
-            import psycopg2
+        self._connect = connect  # injected (tests) => plain connect per call, no pool
+        self._pool = None
+        self._pool_mu = threading.Lock()
 
-            connect = psycopg2.connect
-        self._connect = connect
+    def _pool_max(self) -> int:
+        try:
+            v = int(os.getenv("ROMA_HOSTS_PG_POOL_MAX", "5"))
+        except ValueError:
+            return 5
+        return v if 1 <= v <= 50 else 5
+
+    def _getconn(self):
+        if self._connect is not None:
+            return self._connect(self._dsn)
+        with self._pool_mu:
+            if self._pool is None:
+                from psycopg2.pool import ThreadedConnectionPool
+
+                self._pool = ThreadedConnectionPool(1, self._pool_max(), self._dsn)
+        return self._pool.getconn()
+
+    def _putconn(self, conn, broken: bool) -> None:
+        if self._pool is None:
+            conn.close()
+            return
+        self._pool.putconn(conn, close=broken or bool(getattr(conn, "closed", 0)))
+
+    def close(self) -> None:
+        with self._pool_mu:
+            if self._pool is not None:
+                self._pool.closeall()
+                self._pool = None
 
     def __repr__(self) -> str:
         return "PgHostStore(dsn=***)"
 
     def _run(self, sql: str, args=(), fetch: str | None = None):
-        conn = self._connect(self._dsn)
+        conn = self._getconn()
+        broken = True
         try:
             with conn:
                 with conn.cursor() as cur:
                     cur.execute(sql, args)
-                    if fetch == "one":
-                        return cur.fetchone()
-                    if fetch == "all":
-                        return cur.fetchall()
-                    return None
+                    res = cur.fetchone() if fetch == "one" else cur.fetchall() if fetch == "all" else None
+            broken = False
+            return res
         finally:
-            conn.close()
+            self._putconn(conn, broken)
 
     def save_host(self, h, new_events) -> None:
-        conn = self._connect(self._dsn)
+        conn = self._getconn()
+        broken = True
         try:
             with conn:
                 with conn.cursor() as cur:
@@ -137,8 +164,9 @@ class PgHostStore:
                             "VALUES (%s,%s,%s,%s)",
                             (h.host_id, frm, to, reason),
                         )
+            broken = False
         finally:
-            conn.close()
+            self._putconn(conn, broken)
 
     def start_verification(self, spec) -> None:
         self._run(
@@ -179,7 +207,8 @@ class PgHostStore:
 
         sql = """SELECT host_id, owner_contact_ref, gpu_model, gpu_count, vram_gb, region, own_host, status,
                         trust_tier, benchmark_score, last_heartbeat, created_at FROM hosts"""
-        rows = self._run(sql + (" WHERE host_id=%s" if host_id else ""), (host_id,) if host_id else (), fetch="all")
+        flt = host_id is not None
+        rows = self._run(sql + (" WHERE host_id=%s" if flt else ""), (host_id,) if flt else (), fetch="all")
         out = []
         for r in rows or []:
             h = HostRecord(

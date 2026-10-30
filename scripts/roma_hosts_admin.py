@@ -48,14 +48,45 @@ def mask_dsn(dsn: str) -> str:
         return "***"
 
 
-def write_secret_file(path: str, secret: str) -> None:
-    """Create ``path`` with mode 0600; refuse if it already exists (O_EXCL)."""
+def open_secret_file(path: str) -> int:
+    """Create ``path`` exclusively (O_EXCL) with mode 0600 and return the fd. Refuses to overwrite."""
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    os.fchmod(fd, 0o600)
+    return fd
+
+
+def _issue_token_to_file(api, store, host_id: str, path: str | None):
+    """Create the file FIRST, then rotate the token and write it to the open fd.
+
+    If the file cannot be created, nothing is rotated (the old token stays valid).
+    If issuing or writing fails afterwards, the file is removed and the previous
+    token hash is restored (or the token revoked if there was none)."""
+    fd = open_secret_file(path) if path else None
+    previous = store.get_host_token_hash(host_id)
     try:
-        os.fchmod(fd, 0o600)
-        os.write(fd, (secret + "\n").encode())
+        tok = api.issue_host_token(host_id)
+        try:
+            if fd is not None:
+                data = (tok + "\n").encode()
+                if os.write(fd, data) != len(data):
+                    raise OSError("short write")
+                os.fsync(fd)
+        except BaseException:
+            if previous is not None:
+                store.set_host_token(host_id, previous)
+            else:
+                store.revoke_host_token(host_id)
+            raise
+    except BaseException:
+        if fd is not None:
+            os.close(fd)
+            fd = None
+            os.unlink(path)
+        raise
     finally:
-        os.close(fd)
+        if fd is not None:
+            os.close(fd)
+    return tok
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -141,13 +172,12 @@ def main(argv: list[str] | None = None, store=None) -> int:
             if not args.out and not args.print_once:
                 print("refused: give --out FILE (or --print-once)", file=sys.stderr)
                 return 2
-            if args.out and os.path.exists(args.out):
+            if args.out and os.path.lexists(args.out):
                 print("refused: output file already exists (will not overwrite)", file=sys.stderr)
                 return 2
             reg.get(args.host_id)
-            tok = api.issue_host_token(args.host_id)
+            tok = _issue_token_to_file(api, store, args.host_id, args.out)
             if args.out:
-                write_secret_file(args.out, tok)
                 print(f"token for {args.host_id} written to {args.out} (mode 0600); previous token is invalid")
             if args.print_once:
                 print(
@@ -185,6 +215,9 @@ def main(argv: list[str] | None = None, store=None) -> int:
         return 1
     except (ValueError, hr.InvalidTransition) as e:
         print(f"error: {e}", file=sys.stderr)
+        return 1
+    except OSError as e:
+        print(f"error: {type(e).__name__}: {e.strerror or e}", file=sys.stderr)
         return 1
     return 0
 

@@ -172,3 +172,117 @@ def test_mask_dsn():
     masked = m.mask_dsn("postgresql://admin:s3cr3t-value@db.internal:5432/roma")
     assert "s3cr3t" not in masked and "admin" not in masked and "db.internal:5432/roma" in masked
     assert m.mask_dsn("") == "<unset>"
+
+
+def _server(store):
+    reg = hr.HostRegistry(store=store)
+    reg.load_from_store()
+    return HostApi(reg, store=store)
+
+
+def _hb(api, hid, tok):
+    return api.handle({"action": "heartbeat", "host_id": hid, "token": tok})
+
+
+def _issue(m, store, hid, path):
+    assert m.main(["issue-token", "--host-id", hid, "--out", str(path)], store=store) == 0
+    return path.read_text().strip()
+
+
+def test_rotation_old_401_new_200(cli, capsys, tmp_path):
+    m, store = cli
+    _reg(m, store, capsys)
+    api = _server(store)
+    old = _issue(m, store, "felix-3060", tmp_path / "t1")
+    assert _hb(api, "felix-3060", old)["code"] == 200
+    new = _issue(m, store, "felix-3060", tmp_path / "t2")
+    assert _hb(api, "felix-3060", old)["code"] == 401
+    assert _hb(api, "felix-3060", new)["code"] == 200
+
+
+def test_token_of_host_a_rejected_for_host_b(cli, capsys, tmp_path):
+    m, store = cli
+    _reg(m, store, capsys, host_id="host-a")
+    _reg(m, store, capsys, host_id="host-b")
+    ta = _issue(m, store, "host-a", tmp_path / "a")
+    _issue(m, store, "host-b", tmp_path / "b")
+    api = _server(store)
+    assert _hb(api, "host-a", ta)["code"] == 200
+    assert _hb(api, "host-b", ta) == {"code": 401, "error": "unauthorized"}
+
+
+def test_cli_suspend_seen_by_separate_registry(cli, capsys, tmp_path):
+    m, store = cli
+    _reg(m, store, capsys)
+    tok = _issue(m, store, "felix-3060", tmp_path / "t")
+    api = _server(store)
+    assert m.main(["suspend", "--host-id", "felix-3060", "--reason", "ops"], store=store) == 0
+    r = _hb(api, "felix-3060", tok)
+    assert (r["code"], r["status"], r["heartbeat_accepted"]) == (200, "suspended", False)
+
+
+def test_file_creation_failure_keeps_old_token(cli, capsys, tmp_path):
+    m, store = cli
+    _reg(m, store, capsys)
+    old = _issue(m, store, "felix-3060", tmp_path / "t")
+    capsys.readouterr()
+    bad = tmp_path / "no-such-dir" / "t"
+    assert m.main(["issue-token", "--host-id", "felix-3060", "--out", str(bad)], store=store) == 1
+    err = capsys.readouterr().err
+    assert "Traceback" not in err and "error: FileNotFoundError" in err
+    assert not bad.exists()
+    assert _hb(_server(store), "felix-3060", old)["code"] == 200
+
+
+def test_write_failure_removes_file_and_restores_old_token(cli, capsys, tmp_path, monkeypatch):
+    m, store = cli
+    _reg(m, store, capsys)
+    old = _issue(m, store, "felix-3060", tmp_path / "t")
+    capsys.readouterr()
+
+    def boom(fd, data):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(m.os, "write", boom)
+    out = tmp_path / "t2"
+    assert m.main(["issue-token", "--host-id", "felix-3060", "--out", str(out)], store=store) == 1
+    assert not out.exists() and "Traceback" not in capsys.readouterr().err
+    assert _hb(_server(store), "felix-3060", old)["code"] == 200
+
+
+def test_pg_load_host_empty_string_filters():
+    from gpu_worker.host_store import PgHostStore
+
+    seen = []
+
+    class Cur:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, sql, args):
+            seen.append((sql, args))
+
+        def fetchall(self):
+            return []
+
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def cursor(self):
+            return Cur()
+
+        def close(self):
+            pass
+
+    st = PgHostStore(dsn="", connect=lambda dsn: Conn())
+    assert st.load_host("") is None
+    assert "WHERE host_id=%s" in seen[-1][0] and seen[-1][1] == ("",)
+    st.load_hosts()
+    assert "WHERE" not in seen[-1][0]

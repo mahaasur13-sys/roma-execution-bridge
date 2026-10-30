@@ -115,7 +115,7 @@ def test_cli_on_pg_issue_revoke_seen_by_running_server(monkeypatch, tmp_path, ca
     )
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
-    hid = "pg-cli-test"
+    hid, hid_b = "pg-cli-test", "pg-cli-test-b"
     server_store = PgHostStore()
     api = HostApi(hr.HostRegistry(store=server_store), store=server_store)  # "running server"
     try:
@@ -147,7 +147,23 @@ def test_cli_on_pg_issue_revoke_seen_by_running_server(monkeypatch, tmp_path, ca
         )
         job = api.handle({"action": "fetch_job", "host_id": hid, "token": tok})["job"]
         assert job is not None
-        assert m.main(["revoke-token", "--host-id", hid], store=PgHostStore()) == 0
+        # rotation: old token 401, new token 200 — on the already running server
+        f2 = tmp_path / "t2"
+        assert m.main(["issue-token", "--host-id", hid, "--out", str(f2)], store=PgHostStore()) == 0
+        tok2 = f2.read_text().strip()
         assert api.handle({"action": "heartbeat", "host_id": hid, "token": tok})["code"] == 401
+        assert api.handle({"action": "heartbeat", "host_id": hid, "token": tok2})["code"] == 200
+        # host A's token is useless for host B
+        argv[2] = hid_b
+        assert m.main(argv, store=PgHostStore()) == 0
+        assert api.handle({"action": "heartbeat", "host_id": hid_b, "token": tok2})["code"] == 401
+        # suspend via CLI is visible to the running server's registry (refresh from PG)
+        assert m.main(["suspend", "--host-id", hid, "--reason", "ops"], store=PgHostStore()) == 0
+        r = api.handle({"action": "heartbeat", "host_id": hid, "token": tok2})
+        assert (r["code"], r["status"], r["heartbeat_accepted"]) == (200, "suspended", False)
+        assert server_store.load_host("") is None
+        assert m.main(["revoke-token", "--host-id", hid], store=PgHostStore()) == 0
+        assert api.handle({"action": "heartbeat", "host_id": hid, "token": tok2})["code"] == 401
     finally:
-        _cleanup([hid])
+        _cleanup([hid, hid_b])
+        server_store.close()
