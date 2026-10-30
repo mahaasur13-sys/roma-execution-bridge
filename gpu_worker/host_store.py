@@ -19,14 +19,18 @@ from datetime import datetime, timezone
 
 
 class MemoryHostStore:
+    persistent = False
+
     def __init__(self) -> None:
         self._mu = threading.Lock()
         self.token_hash: dict[str, str] = {}
         self.job_tokens: dict[str, tuple[str, str]] = {}
+        self.hosts: dict = {}
 
-    # registry hooks (no-op in memory)
+    # registry hooks: keep the latest record so a new registry can reload it
     def save_host(self, h, new_events) -> None:
-        return None
+        with self._mu:
+            self.hosts[h.host_id] = h
 
     def start_verification(self, spec) -> None:
         return None
@@ -35,12 +39,21 @@ class MemoryHostStore:
         return None
 
     def load_hosts(self) -> list:
-        return []
+        with self._mu:
+            return list(self.hosts.values())
+
+    def load_host(self, host_id: str):
+        with self._mu:
+            return self.hosts.get(host_id)
 
     # tokens
     def load_host_tokens(self) -> dict[str, str]:
         with self._mu:
             return dict(self.token_hash)
+
+    def get_host_token_hash(self, host_id: str) -> str | None:
+        with self._mu:
+            return self.token_hash.get(host_id)
 
     def set_host_token(self, host_id: str, token_sha256: str) -> None:
         with self._mu:
@@ -61,6 +74,8 @@ class MemoryHostStore:
 
 class PgHostStore:
     """psycopg2 store. ``connect`` is injectable for tests."""
+
+    persistent = True
 
     def __init__(self, dsn: str | None = None, connect=None) -> None:
         self._dsn = dsn if dsn is not None else os.getenv("PG_DSN", "")
@@ -149,14 +164,22 @@ class PgHostStore:
             (reported_sha256, score, elapsed_s if isinstance(elapsed_s, int | float) else None, passed, job_id),
         )
 
-    def load_hosts(self) -> list:
+    def load_host(self, host_id: str):
+        hosts = self.load_hosts(host_id=host_id)
+        return hosts[0] if hosts else None
+
+    def get_host_token_hash(self, host_id: str) -> str | None:
+        r = self._run(
+            "SELECT token_sha256 FROM host_tokens WHERE host_id=%s AND revoked_at IS NULL", (host_id,), fetch="one"
+        )
+        return r[0] if r else None
+
+    def load_hosts(self, host_id: str | None = None) -> list:
         from gpu_worker.host_registry import VERIFYING, HostRecord, VerificationJobSpec
 
-        rows = self._run(
-            """SELECT host_id, owner_contact_ref, gpu_model, gpu_count, vram_gb, region, own_host, status,
-                      trust_tier, benchmark_score, last_heartbeat, created_at FROM hosts""",
-            fetch="all",
-        )
+        sql = """SELECT host_id, owner_contact_ref, gpu_model, gpu_count, vram_gb, region, own_host, status,
+                        trust_tier, benchmark_score, last_heartbeat, created_at FROM hosts"""
+        rows = self._run(sql + (" WHERE host_id=%s" if host_id else ""), (host_id,) if host_id else (), fetch="all")
         out = []
         for r in rows or []:
             h = HostRecord(
