@@ -11,6 +11,9 @@ Config (env, or a KEY=VALUE file via --config):
   ROMA_HOST_TOKEN       token (fallback; avoid: visible in the process env)
   ROMA_AGENT_POLL_S     poll interval, default 30
   ROMA_AGENT_DEVICE     torch device for the benchmark, default "cuda"
+  ROMA_TOKEN_HEADER     "authorization" (default: Authorization: Bearer <token>) or
+                        "x-roma-host-token" (token only in X-Roma-Host-Token; for fronts
+                        that strip Authorization and translate it back, e.g. zo.space)
 """
 
 from __future__ import annotations
@@ -30,6 +33,15 @@ logger = logging.getLogger("roma.host_agent")
 
 ALLOWED_JOB_TYPES = frozenset({"verify"})
 
+TOKEN_HEADER_CHOICES = ("authorization", "x-roma-host-token")
+DEFAULT_TOKEN_HEADER = "authorization"
+
+
+def _check_token_header(value: str) -> str:
+    if value not in TOKEN_HEADER_CHOICES:
+        raise ValueError(f"token header must be one of {', '.join(TOKEN_HEADER_CHOICES)}")
+    return value
+
 
 @dataclass
 class AgentConfig:
@@ -38,6 +50,7 @@ class AgentConfig:
     token: str = field(repr=False)
     poll_s: float = 30.0
     device: str = "cuda"
+    token_header: str = "authorization"
 
     def __repr__(self) -> str:  # never show the token
         return f"AgentConfig(url={self.url!r}, host_id={self.host_id!r}, token=***, poll_s={self.poll_s})"
@@ -78,7 +91,15 @@ def load_config(config_file: str | None = None, env: dict | None = None) -> Agen
         token=token,
         poll_s=float(src.get("ROMA_AGENT_POLL_S", "30")),
         device=src.get("ROMA_AGENT_DEVICE", "cuda"),
+        token_header=_token_header_from(src),
     )
+
+
+def _token_header_from(src: dict) -> str:
+    try:
+        return _check_token_header(src.get("ROMA_TOKEN_HEADER", DEFAULT_TOKEN_HEADER) or DEFAULT_TOKEN_HEADER)
+    except ValueError as e:
+        raise SystemExit(f"config invalid: ROMA_TOKEN_HEADER: {e}") from None
 
 
 ROUTES = {"heartbeat": "/heartbeat", "fetch_job": "/job", "submit_result": "/result"}
@@ -93,23 +114,35 @@ def _urllib_post(url: str, headers: dict, data: bytes, timeout: float) -> tuple[
         return e.code, e.read()
 
 
-def http_transport(base_url: str, timeout: float = 20.0, post=None):
+def http_transport(base_url: str, timeout: float = 20.0, post=None, token_header: str = DEFAULT_TOKEN_HEADER):
     """Outbound HTTPS transport to ROMA's /hosts/agent/* routes.
 
     base_url example: https://roma.example/hosts/agent. ``post`` is injectable for tests.
-    The token travels only in the Authorization header and is never logged.
+    The token is never logged. ``token_header="authorization"`` (default) sends it as
+    ``Authorization: Bearer <token>``; ``"x-roma-host-token"`` sends it only as
+    ``X-Roma-Host-Token: <token>`` (no Authorization header) for a front that strips
+    Authorization and translates the header back; ROMA's server contract is unchanged.
     """
+    _check_token_header(token_header)
     post = post or _urllib_post
     base = base_url.rstrip("/")
 
     def send(req: dict) -> dict:
         req = dict(req)
         action = req.pop("action")
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {req.pop('token', '')}",
-            "X-Roma-Host-Id": str(req.pop("host_id", "")),
-        }
+        token = req.pop("token", "")
+        if token_header == "x-roma-host-token":
+            headers = {
+                "Content-Type": "application/json",
+                "X-Roma-Host-Token": str(token),
+                "X-Roma-Host-Id": str(req.pop("host_id", "")),
+            }
+        else:
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {token}",
+                "X-Roma-Host-Id": str(req.pop("host_id", "")),
+            }
         status, raw = post(base + ROUTES[action], headers, json.dumps(req).encode(), timeout)
         if status == 204:
             return {"code": 204, "job": None}
@@ -184,10 +217,17 @@ def main(argv=None) -> int:
     p.add_argument("--config", help="KEY=VALUE file")
     p.add_argument("--once", action="store_true", help="run one cycle and exit")
     p.add_argument("--dry-run", action="store_true", help="fetch the job but do not run or submit it")
+    p.add_argument(
+        "--token-header",
+        choices=TOKEN_HEADER_CHOICES,
+        default=None,
+        help="how to send the token: authorization (default) or x-roma-host-token (env ROMA_TOKEN_HEADER)",
+    )
     a = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     cfg = load_config(a.config)
-    agent = HostAgent(cfg, http_transport(cfg.url), dry_run=a.dry_run)
+    token_header = a.token_header or cfg.token_header
+    agent = HostAgent(cfg, http_transport(cfg.url, token_header=token_header), dry_run=a.dry_run)
     if a.once or a.dry_run:
         print(json.dumps(agent.run_once()))
         return 0

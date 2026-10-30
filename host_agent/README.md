@@ -74,6 +74,13 @@ cd ~/roma-execution-bridge
 
 ## Безопасность
 - Токен не пишется в логи и в `repr` конфига. Храните его в файле с правами 600, а не в переменной окружения.
-- Токен передаётся только в заголовке `Authorization: Bearer`, идентификатор хоста — в `X-Roma-Host-Id`. Используйте только https-адрес ROMA.
+- По умолчанию токен передаётся только в заголовке `Authorization: Bearer`, идентификатор хоста — в `X-Roma-Host-Id`. Используйте только https-адрес ROMA.
+
+## Заголовок токена (`--token-header`)
+- `--token-header authorization` (по умолчанию, или `ROMA_TOKEN_HEADER=authorization`) — запросы побайтно как раньше.
+- `--token-header x-roma-host-token` (или `ROMA_TOKEN_HEADER=x-roma-host-token`) — токен идёт только в `X-Roma-Host-Token: <token>`, без `Authorization`. Нужен для публичного фронта на Zo (API-роут zo.space): он вырезает `Authorization`, пропуская `X-*`, и сам переводит `X-Roma-Host-Token` обратно в `Authorization: Bearer` перед отправкой в ROMA. Контракт сервера ROMA не меняется: напрямую ROMA принимает только `Authorization`.
+- В обоих режимах токен не попадает в логи и в вывод `--dry-run`.
+
+## Прочее
 - Каждая задача несёт одноразовый job-токен: повторная отправка результата отклоняется.
 - Агент отказывается от задач любого типа, кроме `verify`.
