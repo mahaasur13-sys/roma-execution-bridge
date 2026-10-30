@@ -769,6 +769,12 @@ app.include_router(public_jobs_router)
 app.include_router(submit_router)
 app.include_router(beta_router)
 app.include_router(account_router)
+
+# Host agent pull API: registered ONLY when the feature flag is on (off by default).
+if os.getenv("ROMA_HOSTS_ENABLED", "0").strip() == "1":
+    from routers.hosts_agent import router as hosts_agent_router
+
+    app.include_router(hosts_agent_router)
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 if tracing_enabled:

@@ -45,12 +45,14 @@ def _rpm() -> int:
 
 
 class HostApi:
-    def __init__(self, registry: hr.HostRegistry, clock=time.monotonic) -> None:
+    def __init__(self, registry: hr.HostRegistry, clock=time.monotonic, store=None) -> None:
+        from gpu_worker.host_store import MemoryHostStore
+
         self._reg = registry
         self._clock = clock
         self._mu = threading.Lock()
-        self._token_hash: dict[str, str] = {}
-        self._job_token_hash: dict[str, tuple[str, str]] = {}  # job_id -> (host_id, sha256)
+        self._store = store if store is not None else MemoryHostStore()
+        self._token_hash: dict[str, str] = self._store.load_host_tokens()
         self._hits: dict[str, deque] = {}
 
     # -- operator side ----------------------------------------------------
@@ -61,11 +63,13 @@ class HostApi:
         self._reg.get(host_id)  # KeyError for unknown host
         tok = secrets.token_urlsafe(32)
         with self._mu:
+            self._store.set_host_token(host_id, _h(tok))
             self._token_hash[host_id] = _h(tok)
         return tok
 
     def revoke_host_token(self, host_id: str) -> None:
         with self._mu:
+            self._store.revoke_host_token(host_id)
             self._token_hash.pop(host_id, None)
 
     # -- request handling -------------------------------------------------
@@ -122,8 +126,7 @@ class HostApi:
         if h.status != hr.VERIFYING or spec is None:
             return {"code": 204, "job": None}
         jt = secrets.token_urlsafe(24)
-        with self._mu:
-            self._job_token_hash[spec.job_id] = (host_id, _h(jt))
+        self._store.put_job_token(spec.job_id, host_id, _h(jt))
         return {
             "code": 200,
             "job": {
@@ -138,8 +141,7 @@ class HostApi:
 
     def _submit(self, host_id: str, req: dict) -> dict:
         job_id, jt = str(req.get("job_id") or ""), req.get("job_token")
-        with self._mu:
-            entry = self._job_token_hash.pop(job_id, None)  # single use: consumed now
+        entry = self._store.consume_job_token(job_id)  # single use: consumed now (atomic in PG)
         valid = (
             entry is not None and entry[0] == host_id and isinstance(jt, str) and hmac.compare_digest(_h(jt), entry[1])
         )
