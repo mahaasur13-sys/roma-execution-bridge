@@ -100,3 +100,70 @@ def test_pg_store_roundtrip_reload_and_single_use(monkeypatch):
         assert api3.handle({"action": "heartbeat", "host_id": h.host_id, "token": tok})["code"] == 401
     finally:
         _cleanup([h.host_id])
+
+
+@pytest.mark.pg
+def test_cli_on_pg_issue_revoke_seen_by_running_server(monkeypatch, tmp_path, capsys):
+    """CLI and server are separate processes: token issue/revoke and approval must apply without restart."""
+    import importlib.util
+
+    from gpu_worker.host_store import PgHostStore
+
+    monkeypatch.setenv("ROMA_HOSTS_ENABLED", "1")
+    spec = importlib.util.spec_from_file_location(
+        "roma_hosts_admin", Path(__file__).resolve().parent.parent / "scripts" / "roma_hosts_admin.py"
+    )
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    hid, hid_b = "pg-cli-test", "pg-cli-test-b"
+    server_store = PgHostStore()
+    api = HostApi(hr.HostRegistry(store=server_store), store=server_store)  # "running server"
+    try:
+        argv = [
+            "register",
+            "--host-id",
+            hid,
+            "--gpu-model",
+            "RTX_3060",
+            "--gpu-count",
+            "1",
+            "--vram-gb",
+            "12",
+            "--owner-label",
+            "t",
+        ]
+        assert m.main(argv, store=PgHostStore()) == 0
+        f = tmp_path / "t"
+        assert m.main(["issue-token", "--host-id", hid, "--out", str(f)], store=PgHostStore()) == 0
+        tok = f.read_text().strip()
+        cap = capsys.readouterr()
+        assert tok not in cap.out + cap.err and "s3cr3t" not in cap.err
+        assert api.handle({"action": "heartbeat", "host_id": hid, "token": tok})["code"] == 200
+        th = tmp_path / "th.json"
+        th.write_text('{"RTX_3060": {"min_tflops": 1e-9, "max_tflops": 1e9}}')
+        assert (
+            m.main(["start-verification", "--host-id", hid, "--thresholds", str(th), "--n", "8"], store=PgHostStore())
+            == 0
+        )
+        job = api.handle({"action": "fetch_job", "host_id": hid, "token": tok})["job"]
+        assert job is not None
+        # rotation: old token 401, new token 200 — on the already running server
+        f2 = tmp_path / "t2"
+        assert m.main(["issue-token", "--host-id", hid, "--out", str(f2)], store=PgHostStore()) == 0
+        tok2 = f2.read_text().strip()
+        assert api.handle({"action": "heartbeat", "host_id": hid, "token": tok})["code"] == 401
+        assert api.handle({"action": "heartbeat", "host_id": hid, "token": tok2})["code"] == 200
+        # host A's token is useless for host B
+        argv[2] = hid_b
+        assert m.main(argv, store=PgHostStore()) == 0
+        assert api.handle({"action": "heartbeat", "host_id": hid_b, "token": tok2})["code"] == 401
+        # suspend via CLI is visible to the running server's registry (refresh from PG)
+        assert m.main(["suspend", "--host-id", hid, "--reason", "ops"], store=PgHostStore()) == 0
+        r = api.handle({"action": "heartbeat", "host_id": hid, "token": tok2})
+        assert (r["code"], r["status"], r["heartbeat_accepted"]) == (200, "suspended", False)
+        assert server_store.load_host("") is None
+        assert m.main(["revoke-token", "--host-id", hid], store=PgHostStore()) == 0
+        assert api.handle({"action": "heartbeat", "host_id": hid, "token": tok2})["code"] == 401
+    finally:
+        _cleanup([hid, hid_b])
+        server_store.close()

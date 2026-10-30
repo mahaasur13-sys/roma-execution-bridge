@@ -10,11 +10,15 @@ never logged or echoed. Storage: ROMA_HOSTS_STORE=memory (default) | pg.
 from __future__ import annotations
 
 import logging
+import os
 import threading
+import time
+from collections import deque
 
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse, Response
 
+from deps import client_ip
 from gpu_worker.host_api import HostApi
 from gpu_worker.host_registry import HostRegistry
 from gpu_worker.host_store import store_from_env
@@ -45,6 +49,43 @@ def set_host_api(api: HostApi | None) -> None:
         _api = api
 
 
+class IpRateLimiter:
+    """Pre-auth sliding window per client IP (in-process). Runs BEFORE token verification,
+    so a flood of bad tokens cannot reach the token store. ROMA_HOSTS_AGENT_IP_RPM (default 120/min)."""
+
+    def __init__(self, clock=time.monotonic, window_s: float = 60.0, max_keys: int = 10000) -> None:
+        self._clock, self._window, self._max_keys = clock, window_s, max_keys
+        self._hits: dict[str, deque] = {}
+        self._mu = threading.Lock()
+
+    @staticmethod
+    def limit() -> int:
+        try:
+            v = int(os.getenv("ROMA_HOSTS_AGENT_IP_RPM", "120"))
+        except ValueError:
+            return 120
+        return v if v > 0 else 120
+
+    def allow(self, key: str) -> bool:
+        now, lim = self._clock(), self.limit()
+        with self._mu:
+            if key not in self._hits and len(self._hits) >= self._max_keys:
+                for k in [k for k, q in self._hits.items() if not q or now - q[-1] >= self._window]:
+                    del self._hits[k]
+                if len(self._hits) >= self._max_keys:
+                    return False  # fail-closed under key-space flooding
+            q = self._hits.setdefault(key, deque())
+            while q and now - q[0] >= self._window:
+                q.popleft()
+            if len(q) >= lim:
+                return False
+            q.append(now)
+            return True
+
+
+ip_limiter = IpRateLimiter()
+
+
 def _bearer(authorization: str | None) -> str:
     if authorization and authorization.lower().startswith("bearer "):
         return authorization[7:].strip()
@@ -52,6 +93,8 @@ def _bearer(authorization: str | None) -> str:
 
 
 async def _call(action: str, request: Request, authorization: str | None, host_id: str | None) -> Response:
+    if not ip_limiter.allow(client_ip(request) or "unknown"):
+        return JSONResponse({"error": "rate_limited"}, status_code=429)
     body: dict = {}
     if action == "submit_result":
         try:

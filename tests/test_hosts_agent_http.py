@@ -26,6 +26,7 @@ def setup(monkeypatch):
     reg = hr.HostRegistry(store=store)
     api = HostApi(reg, store=store)
     hosts_agent.set_host_api(api)
+    monkeypatch.setattr(hosts_agent, "ip_limiter", hosts_agent.IpRateLimiter())
     app = FastAPI()
     app.include_router(hosts_agent.router)
     h = reg.apply(owner_contact_ref="r", gpu_model="RTX_3060", gpu_count=1, vram_gb=12, region="EU", own_host=True)
@@ -116,3 +117,29 @@ def test_routes_not_registered_when_flag_off(monkeypatch):
 def test_store_from_env_defaults_to_memory(monkeypatch):
     monkeypatch.delenv("ROMA_HOSTS_STORE", raising=False)
     assert isinstance(store_from_env(), MemoryHostStore)
+
+
+def test_ip_rate_limit_runs_before_auth(setup, monkeypatch):
+    c, _, h, tok = setup
+    monkeypatch.setenv("ROMA_HOSTS_AGENT_IP_RPM", "2")
+    calls = []
+
+    class Counting:
+        def handle(self, req):
+            calls.append(req["action"])
+            return {"code": 401, "error": "unauthorized"}
+
+    hosts_agent.set_host_api(Counting())
+    codes = [c.post("/hosts/agent/heartbeat", headers={"Authorization": "Bearer bad"}).status_code for _ in range(4)]
+    assert codes == [401, 401, 429, 429]
+    assert len(calls) == 2  # throttled requests never reached token verification
+
+
+def test_ip_limiter_window_and_key_cap(monkeypatch):
+    monkeypatch.setenv("ROMA_HOSTS_AGENT_IP_RPM", "1")
+    now = [0.0]
+    lim = hosts_agent.IpRateLimiter(clock=lambda: now[0], max_keys=2)
+    assert lim.allow("a") and not lim.allow("a") and lim.allow("b")
+    assert not lim.allow("c")  # key table full, entries still fresh: fail closed
+    now[0] = 61.0
+    assert lim.allow("a") and lim.allow("c")  # window passed; stale keys evicted

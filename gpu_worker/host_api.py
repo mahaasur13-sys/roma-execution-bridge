@@ -52,7 +52,6 @@ class HostApi:
         self._clock = clock
         self._mu = threading.Lock()
         self._store = store if store is not None else MemoryHostStore()
-        self._token_hash: dict[str, str] = self._store.load_host_tokens()
         self._hits: dict[str, deque] = {}
 
     # -- operator side ----------------------------------------------------
@@ -64,13 +63,11 @@ class HostApi:
         tok = secrets.token_urlsafe(32)
         with self._mu:
             self._store.set_host_token(host_id, _h(tok))
-            self._token_hash[host_id] = _h(tok)
         return tok
 
     def revoke_host_token(self, host_id: str) -> None:
         with self._mu:
             self._store.revoke_host_token(host_id)
-            self._token_hash.pop(host_id, None)
 
     # -- request handling -------------------------------------------------
     def handle(self, req: dict) -> dict:
@@ -84,6 +81,7 @@ class HostApi:
             return {"code": 401, "error": "unauthorized"}
         if not self._allow(host_id):
             return {"code": 429, "error": "rate_limited"}
+        self._reg.refresh(host_id)  # persistent store: pick up operator changes (CLI) made elsewhere
         action = req.get("action")
         try:
             if action == "heartbeat":
@@ -99,8 +97,7 @@ class HostApi:
     def _authenticated(self, host_id: str, token) -> bool:
         if not isinstance(token, str) or not token:
             return False
-        with self._mu:
-            stored = self._token_hash.get(host_id)
+        stored = self._store.get_host_token_hash(host_id)  # always current: CLI issue/revoke apply at once
         ok = hmac.compare_digest(_h(token), stored or _DUMMY_HASH)
         return ok and stored is not None
 

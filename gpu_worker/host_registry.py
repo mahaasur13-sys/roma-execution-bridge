@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hmac
 import os
+import re
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -31,6 +32,8 @@ ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     ACTIVE: frozenset({SUSPENDED}),
     SUSPENDED: frozenset({VERIFYING}),  # re-verification is the only way back
 }
+
+HOST_ID_RE = re.compile(r"[a-z0-9_-]{3,64}")
 
 TRUST_TIERS = ("none", "probation", "verified")
 
@@ -141,12 +144,17 @@ class HostRegistry:
         vram_gb: float,
         region: str,
         own_host: bool = False,
+        host_id: str | None = None,
     ) -> HostRecord:
         self._guard()
         if gpu_count < 1 or vram_gb <= 0 or not gpu_model.strip():
             raise ValueError("invalid hardware declaration")
+        if host_id is not None and not HOST_ID_RE.fullmatch(host_id):
+            raise ValueError("host_id must match [a-z0-9_-]{3,64}")
+        if host_id is not None and host_id in self._hosts:
+            raise ValueError("host_id already registered")
         rec = HostRecord(
-            host_id=f"host_{uuid.uuid4().hex[:12]}",
+            host_id=host_id or f"host_{uuid.uuid4().hex[:12]}",
             owner_contact_ref=owner_contact_ref,
             gpu_model=gpu_model.strip(),
             gpu_count=gpu_count,
@@ -155,9 +163,27 @@ class HostRegistry:
             own_host=own_host,
         )
         with self._mu:
+            if rec.host_id in self._hosts:
+                raise ValueError("host_id already registered")
             self._hosts[rec.host_id] = rec
             self._persist(rec)
         return rec
+
+    def refresh(self, host_id: str) -> None:
+        """Re-read one host from a persistent store (another process, e.g. the operator CLI, may
+        have changed it). No-op for the in-memory store or while a verification is being reserved."""
+        if self._store is None or not getattr(self._store, "persistent", False):
+            return
+        fresh = self._store.load_host(host_id)
+        with self._mu:
+            cur = self._hosts.get(host_id)
+            if cur is not None and cur.verify_reservation is not None:
+                return
+            if fresh is None:
+                self._hosts.pop(host_id, None)
+                return
+            self._hosts[host_id] = fresh
+            self._persisted_events[host_id] = len(fresh.history)
 
     def get(self, host_id: str) -> HostRecord:
         return self._hosts[host_id]
