@@ -95,7 +95,8 @@
       "tenancy",
       "tier_profiles.py",
       "validator",
-      "worker.py"
+      "worker.py",
+      "host_agent"
     ],
     "exclude": [
       "tests/",
@@ -209,6 +210,12 @@
       "change": "в область измерения введён корневой модуль config.py (единственный источник PUBLIC_BASE_URL для исходящих ссылок). Гейт упал машинной проверкой 'файл вне области и вне exclude' — молчаливого включения новых корневых модулей нет, запись обязательна.",
       "reason": "PR #180 sec/public-base-url: host исходящих ссылок вынесен из пяти литералов в config.PUBLIC_BASE_URL; модуль читается deps/main/routers/scripts. Полы не менялись (36.3/62.2).",
       "commit": "PR #180 (2caa05c)"
+    },
+    {
+      "date": "2026-10-30",
+      "scope": "product-only",
+      "change": "в область измерения введён пакет host_agent/ (агент хоста ROMA). Гейт упал машинной проверкой 'файл вне области и вне exclude' на PR #195.",
+      "reason": "feat/host-agent: агент хоста — продуктовый код, покрыт tests/test_host_agent.py и tests/test_hosts_agent_http.py. Полы не менялись."
     }
   ],
   "measured_on": {
