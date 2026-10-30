@@ -52,7 +52,9 @@ def test_invalid_choice_rejected(capsys):
     with pytest.raises(SystemExit):
         ag.main(["--token-header", "cookie"])
     with pytest.raises(SystemExit):
-        ag.load_config(None, env={"ROMA_URL": "u", "ROMA_HOST_ID": "h", "ROMA_HOST_TOKEN": TOK, "ROMA_TOKEN_HEADER": "bogus"})
+        ag.load_config(
+            None, env={"ROMA_URL": "u", "ROMA_HOST_ID": "h", "ROMA_HOST_TOKEN": TOK, "ROMA_TOKEN_HEADER": "bogus"}
+        )
     assert TOK not in capsys.readouterr().err
 
 
