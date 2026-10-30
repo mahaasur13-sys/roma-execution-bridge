@@ -22,8 +22,9 @@ def on(monkeypatch):
 
 
 def _apply(reg, own=True):
-    return reg.apply(owner_contact_ref="ref-1", gpu_model="RTX_4090", gpu_count=1,
-                     vram_gb=24, region="EU", own_host=own)
+    return reg.apply(
+        owner_contact_ref="ref-1", gpu_model="RTX_4090", gpu_count=1, vram_gb=24, region="EU", own_host=own
+    )
 
 
 from gpu_worker import host_bench
@@ -79,8 +80,9 @@ def test_timing_outside_bounds_suspends(on, elapsed):
     assert h.status == hr.SUSPENDED and h.history[-1][2] == "benchmark outside bounds"
 
 
-@pytest.mark.parametrize("th", [{}, {"RTX_4090": {"min_tflops": None, "max_tflops": None}},
-                                {"RTX_4090": {"min_tflops": 5, "max_tflops": 1}}])
+@pytest.mark.parametrize(
+    "th", [{}, {"RTX_4090": {"min_tflops": None, "max_tflops": None}}, {"RTX_4090": {"min_tflops": 5, "max_tflops": 1}}]
+)
 def test_missing_threshold_fails_closed(on, th):
     h = _apply(on)
     with pytest.raises(hr.InvalidTransition):

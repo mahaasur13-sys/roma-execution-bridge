@@ -24,8 +24,7 @@ class RunpodBackend(BaseBackend):
         return self._has_key and self._flag
 
     def _refuse(self, op: str, **extra) -> dict:
-        return {"status": "not_implemented", "backend": "runpod", "op": op,
-                "enabled": self.enabled, **extra}
+        return {"status": "not_implemented", "backend": "runpod", "op": op, "enabled": self.enabled, **extra}
 
     def search_offers(self, *args, **kwargs) -> list:
         return []

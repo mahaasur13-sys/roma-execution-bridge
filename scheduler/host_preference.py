@@ -16,12 +16,12 @@ DEFAULT_FALLBACK = ("vastai", "runpod")
 
 
 def prefer_own_hosts() -> bool:
-    return (os.getenv("ROMA_PREFER_OWN_HOSTS", "0").strip() == "1"
-            and os.getenv("ROMA_HOSTS_ENABLED", "0").strip() == "1")
+    return (
+        os.getenv("ROMA_PREFER_OWN_HOSTS", "0").strip() == "1" and os.getenv("ROMA_HOSTS_ENABLED", "0").strip() == "1"
+    )
 
 
-def backend_order(registry=None, fallback: tuple[str, ...] = DEFAULT_FALLBACK,
-                  min_vram_gb: float = 0.0) -> list[str]:
+def backend_order(registry=None, fallback: tuple[str, ...] = DEFAULT_FALLBACK, min_vram_gb: float = 0.0) -> list[str]:
     order = list(fallback)
     if not prefer_own_hosts() or registry is None:
         return order

@@ -111,14 +111,28 @@ class HostRegistry:
         h.status = to
 
     # -- application ------------------------------------------------------
-    def apply(self, *, owner_contact_ref: str, gpu_model: str, gpu_count: int,
-              vram_gb: float, region: str, own_host: bool = False) -> HostRecord:
+    def apply(
+        self,
+        *,
+        owner_contact_ref: str,
+        gpu_model: str,
+        gpu_count: int,
+        vram_gb: float,
+        region: str,
+        own_host: bool = False,
+    ) -> HostRecord:
         self._guard()
         if gpu_count < 1 or vram_gb <= 0 or not gpu_model.strip():
             raise ValueError("invalid hardware declaration")
-        rec = HostRecord(host_id=f"host_{uuid.uuid4().hex[:12]}", owner_contact_ref=owner_contact_ref,
-                         gpu_model=gpu_model.strip(), gpu_count=gpu_count, vram_gb=vram_gb,
-                         region=region, own_host=own_host)
+        rec = HostRecord(
+            host_id=f"host_{uuid.uuid4().hex[:12]}",
+            owner_contact_ref=owner_contact_ref,
+            gpu_model=gpu_model.strip(),
+            gpu_count=gpu_count,
+            vram_gb=vram_gb,
+            region=region,
+            own_host=own_host,
+        )
         with self._mu:
             self._hosts[rec.host_id] = rec
         return rec
@@ -127,12 +141,18 @@ class HostRegistry:
         return self._hosts[host_id]
 
     # -- verification -----------------------------------------------------
-    def start_verification(self, host_id: str, *, thresholds: dict | None = None,
-                           image: str = "roma/host-bench:pinned", n: int | None = None,
-                           reps: int = host_bench.DEFAULT_REPS) -> VerificationJobSpec:
+    def start_verification(
+        self,
+        host_id: str,
+        *,
+        thresholds: dict | None = None,
+        image: str = "roma/host-bench:pinned",
+        n: int | None = None,
+        reps: int = host_bench.DEFAULT_REPS,
+    ) -> VerificationJobSpec:
         """Fail-closed: no configured {min,max}_tflops for the declared model => InvalidTransition."""
         self._guard()
-        th = (thresholds if thresholds is not None else host_bench.load_thresholds())
+        th = thresholds if thresholds is not None else host_bench.load_thresholds()
         with self._mu:
             h = self._hosts[host_id]
             t = th.get(h.gpu_model) or {}
@@ -142,16 +162,22 @@ class HostRegistry:
             n = n or host_bench.bench_n()
             seed = uuid.uuid4().hex  # fresh per run: host can't precompute
             spec = VerificationJobSpec(
-                job_id=f"verify_{uuid.uuid4().hex[:12]}", host_id=host_id, image=image,
-                command=f"roma-bench --seed {seed} --n {n} --reps {reps}", seed=seed, n=n,
-                reps=reps, expected_sha256=host_bench.reference_hash(seed, n),
-                min_tflops=float(lo), max_tflops=float(hi))
+                job_id=f"verify_{uuid.uuid4().hex[:12]}",
+                host_id=host_id,
+                image=image,
+                command=f"roma-bench --seed {seed} --n {n} --reps {reps}",
+                seed=seed,
+                n=n,
+                reps=reps,
+                expected_sha256=host_bench.reference_hash(seed, n),
+                min_tflops=float(lo),
+                max_tflops=float(hi),
+            )
             self._transition(h, VERIFYING, "verification started")
             h.pending_verification = spec
             return spec
 
-    def submit_verification(self, host_id: str, job_id: str, output_sha256: str,
-                            elapsed_s: float) -> HostRecord:
+    def submit_verification(self, host_id: str, job_id: str, output_sha256: str, elapsed_s: float) -> HostRecord:
         self._guard()
         with self._mu:
             h = self._hosts[host_id]
@@ -216,8 +242,9 @@ class HostRegistry:
         out = []
         with self._mu:
             for h in self._hosts.values():
-                if h.status == ACTIVE and (h.last_heartbeat is None or
-                        now - h.last_heartbeat > timedelta(seconds=heartbeat_sla_seconds())):
+                if h.status == ACTIVE and (
+                    h.last_heartbeat is None or now - h.last_heartbeat > timedelta(seconds=heartbeat_sla_seconds())
+                ):
                     self._transition(h, SUSPENDED, "heartbeat SLA missed")
                     h.trust_tier = "none"
                     out.append(h.host_id)

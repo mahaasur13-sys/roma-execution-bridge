@@ -110,8 +110,9 @@ def get_host_registry():
 
 def _routing_preference(p: dict) -> list[str] | None:
     """Advisory host-first order. None when flags are off (zero behaviour change)."""
-    if not (os.getenv("ROMA_HOSTS_ENABLED", "0").strip() == "1"
-            and os.getenv("ROMA_PREFER_OWN_HOSTS", "0").strip() == "1"):
+    if not (
+        os.getenv("ROMA_HOSTS_ENABLED", "0").strip() == "1" and os.getenv("ROMA_PREFER_OWN_HOSTS", "0").strip() == "1"
+    ):
         return None
     try:
         from scheduler.host_preference import backend_order

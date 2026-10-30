@@ -16,6 +16,8 @@ if __name__ == "__main__":
     reps = int(sys.argv[2]) if len(sys.argv) > 2 else 20
     r = hb.run_host_bench("selftest-seed", n, reps=reps)
     ok = r["output_sha256"] == hb.reference_hash("selftest-seed", n)
-    print(f"device={r['device']} n={n} reps={reps} match={ok} "
-          f"elapsed_s={r['elapsed_s']:.4f} tflops={hb.tflops(n, reps, r['elapsed_s']):.3f}")
+    print(
+        f"device={r['device']} n={n} reps={reps} match={ok} "
+        f"elapsed_s={r['elapsed_s']:.4f} tflops={hb.tflops(n, reps, r['elapsed_s']):.3f}"
+    )
     sys.exit(0 if ok else 1)

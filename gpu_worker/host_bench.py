@@ -75,9 +75,9 @@ def reference_hash(seed: str, n: int) -> str:
     except ImportError:
         rows = []
         for i in range(n):
-            ai = a[i * n:(i + 1) * n]
+            ai = a[i * n : (i + 1) * n]
             rows.append([sum(ai[k] * b[k * n + j] for k in range(n)) for j in range(n)])
-        flat = struct.pack(f"<{n*n}i", *(v for r in rows for v in r))
+        flat = struct.pack(f"<{n * n}i", *(v for r in rows for v in r))
         return _hash_result(n, flat)
 
 
@@ -100,8 +100,12 @@ def run_host_bench(seed: str, n: int, reps: int = DEFAULT_REPS, device: str = "c
         torch.cuda.synchronize()
     elapsed = time.perf_counter() - t0
     flat = torch.round(C).to(torch.int32).cpu().numpy().astype("<i4").tobytes()
-    return {"output_sha256": _hash_result(n, flat), "elapsed_s": elapsed, "reps": reps,
-            "device": torch.cuda.get_device_name(dev) if dev.type == "cuda" else "cpu"}
+    return {
+        "output_sha256": _hash_result(n, flat),
+        "elapsed_s": elapsed,
+        "reps": reps,
+        "device": torch.cuda.get_device_name(dev) if dev.type == "cuda" else "cpu",
+    }
 
 
 def tflops(n: int, reps: int, elapsed_s: float) -> float:

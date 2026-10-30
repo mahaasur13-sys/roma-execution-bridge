@@ -55,7 +55,7 @@ def test_float32_accumulation_is_exact():
             for k in range(n):
                 acc = f32(acc + f32(a[i * n + k] * b[k * n + j]))
             flat.append(int(round(acc)))
-    assert hb._hash_result(n, struct.pack(f"<{n*n}i", *flat)) == hb.reference_hash("f32", n)
+    assert hb._hash_result(n, struct.pack(f"<{n * n}i", *flat)) == hb.reference_hash("f32", n)
     assert 64 * hb.MAX_EXACT_N < 2**24 + 1
 
 
@@ -81,5 +81,7 @@ def test_thresholds_loader(tmp_path, monkeypatch):
 def test_shipped_example_has_no_numbers():
     from pathlib import Path
 
-    data = json.loads((Path(__file__).resolve().parent.parent / "config/host_bench_thresholds.example.json").read_text())
+    data = json.loads(
+        (Path(__file__).resolve().parent.parent / "config/host_bench_thresholds.example.json").read_text()
+    )
     assert all(v["min_tflops"] is None and v["max_tflops"] is None for k, v in data.items() if not k.startswith("_"))
