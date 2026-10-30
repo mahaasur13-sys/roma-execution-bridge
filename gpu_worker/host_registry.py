@@ -92,6 +92,7 @@ class HostRecord:
     created_at: datetime = field(default_factory=_now)
     history: list[tuple[str, str, str]] = field(default_factory=list)  # (from, to, reason)
     pending_verification: VerificationJobSpec | None = None
+    verify_reservation: str | None = None  # token while the reference hash is computed
 
 
 class HostRegistry:
@@ -150,17 +151,48 @@ class HostRegistry:
         n: int | None = None,
         reps: int = host_bench.DEFAULT_REPS,
     ) -> VerificationJobSpec:
-        """Fail-closed: no configured {min,max}_tflops for the declared model => InvalidTransition."""
+        """Fail-closed: no configured {min,max}_tflops for the declared model => InvalidTransition.
+
+        Locking: the O(n^3) reference hash is computed OUTSIDE ``self._mu``.
+          1. under the lock: validate thresholds / n / state, move the host to
+             VERIFYING and store a reservation token (a second caller now fails);
+          2. without the lock: compute the reference hash;
+          3. under the lock: the token must still match and the host must still be
+             VERIFYING, then the spec is stored. On any error in step 2 the
+             reservation is released and the previous status restored.
+        """
         self._guard()
         th = thresholds if thresholds is not None else host_bench.load_thresholds()
+        n = host_bench.bench_n() if n is None else n
+        if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= host_bench.MAX_EXACT_N:
+            raise ValueError(f"n must be an int in [1, {host_bench.MAX_EXACT_N}]")
+        token = uuid.uuid4().hex
         with self._mu:
             h = self._hosts[host_id]
             t = th.get(h.gpu_model) or {}
             lo, hi = t.get("min_tflops"), t.get("max_tflops")
             if not (isinstance(lo, int | float) and isinstance(hi, int | float) and 0 < lo < hi):
                 raise InvalidTransition(f"no benchmark threshold configured for {h.gpu_model}")
-            n = n or host_bench.bench_n()
-            seed = uuid.uuid4().hex  # fresh per run: host can't precompute
+            prev_status = h.status
+            self._transition(h, VERIFYING, "verification reserved")  # raises if already verifying
+            h.verify_reservation = token
+            h.pending_verification = None
+
+        seed = uuid.uuid4().hex  # fresh per run: host can't precompute
+        try:
+            expected = host_bench.reference_hash(seed, n)
+        except BaseException:
+            with self._mu:
+                if h.verify_reservation == token and h.status == VERIFYING:
+                    h.history.append((VERIFYING, prev_status, "verification reservation released"))
+                    h.status = prev_status
+                if h.verify_reservation == token:
+                    h.verify_reservation = None
+            raise
+
+        with self._mu:
+            if h.verify_reservation != token or h.status != VERIFYING:
+                raise InvalidTransition("verification reservation lost (host changed state)")
             spec = VerificationJobSpec(
                 job_id=f"verify_{uuid.uuid4().hex[:12]}",
                 host_id=host_id,
@@ -169,11 +201,11 @@ class HostRegistry:
                 seed=seed,
                 n=n,
                 reps=reps,
-                expected_sha256=host_bench.reference_hash(seed, n),
+                expected_sha256=expected,
                 min_tflops=float(lo),
                 max_tflops=float(hi),
             )
-            self._transition(h, VERIFYING, "verification started")
+            h.verify_reservation = None
             h.pending_verification = spec
             return spec
 
@@ -216,6 +248,8 @@ class HostRegistry:
             h = self._hosts[host_id]
             self._transition(h, SUSPENDED, reason)
             h.trust_tier = "none"
+            h.verify_reservation = None
+            h.pending_verification = None
             return h
 
     # -- heartbeat SLA ----------------------------------------------------
