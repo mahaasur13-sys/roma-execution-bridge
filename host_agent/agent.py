@@ -36,6 +36,11 @@ ALLOWED_JOB_TYPES = frozenset({"verify"})
 TOKEN_HEADER_CHOICES = ("authorization", "x-roma-host-token")
 DEFAULT_TOKEN_HEADER = "authorization"
 
+# Explicit User-Agent: Cloudflare in front of zo.space answers 403 to the
+# default "Python-urllib/3.x" UA, so the agent identifies itself instead.
+AGENT_VERSION = "0.1"
+USER_AGENT = f"roma-host-agent/{AGENT_VERSION}"
+
 
 def _check_token_header(value: str) -> str:
     if value not in TOKEN_HEADER_CHOICES:
@@ -106,6 +111,9 @@ ROUTES = {"heartbeat": "/heartbeat", "fetch_job": "/job", "submit_result": "/res
 
 
 def _urllib_post(url: str, headers: dict, data: bytes, timeout: float) -> tuple[int, bytes]:
+    headers = dict(headers)
+    if not any(k.lower() == "user-agent" for k in headers):
+        headers["User-Agent"] = USER_AGENT
     r = urllib.request.Request(url, data=data, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(r, timeout=timeout) as resp:  # nosec B310 - URL from operator config
@@ -136,12 +144,14 @@ def http_transport(base_url: str, timeout: float = 20.0, post=None, token_header
                 "Content-Type": "application/json",
                 "X-Roma-Host-Token": str(token),
                 "X-Roma-Host-Id": str(req.pop("host_id", "")),
+                "User-Agent": USER_AGENT,
             }
         else:
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {token}",
                 "X-Roma-Host-Id": str(req.pop("host_id", "")),
+                "User-Agent": USER_AGENT,
             }
         status, raw = post(base + ROUTES[action], headers, json.dumps(req).encode(), timeout)
         if status == 204:

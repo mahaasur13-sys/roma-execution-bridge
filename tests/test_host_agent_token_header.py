@@ -28,8 +28,13 @@ def test_default_sends_authorization_bearer_byte_for_byte():
     send({"action": "heartbeat", "host_id": "h1", "token": TOK, "x": 1})
     url, headers, data = calls[0]
     assert url == "https://roma.invalid/hosts/agent/heartbeat"
-    assert headers == {"Content-Type": "application/json", "Authorization": f"Bearer {TOK}", "X-Roma-Host-Id": "h1"}
-    assert list(headers) == ["Content-Type", "Authorization", "X-Roma-Host-Id"]
+    assert headers == {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {TOK}",
+        "X-Roma-Host-Id": "h1",
+        "User-Agent": ag.USER_AGENT,
+    }
+    assert list(headers) == ["Content-Type", "Authorization", "X-Roma-Host-Id", "User-Agent"]
     assert data == json.dumps({"x": 1}).encode()
     assert not any(k.lower() == "x-roma-host-token" for k in headers)
 
