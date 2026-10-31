@@ -10,6 +10,9 @@ commits = [
   # 1f718dd (PR #190): литерал-фикстура в saas/email/test_email.py — generic-api-key
   # горит на тестовом токене; в ветке литерал заменён на сборку в рантайме.
   "1f718ddcdcc8ce3d29cda93047a115f12bc17227",
+  # f31609a (PR #201, 2026-10-31): фейковый тестовый ключ в tests/test_submit_router.py:18 —
+  # generic-api-key; в 99d6c33 заменён на низкоэнтропийную сборку в рантайме.
+  "f31609a716331ee30205227d393e8037a23b82ef",
 ]
 regexes = [
   '''roma-demo-key-[0-9]+''',

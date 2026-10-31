@@ -1873,6 +1873,66 @@ def get_queued_execution_jobs(limit: int = 10) -> list[dict]:
         c.close()
 
 
+# Статусы, из которых клиентская отмена запрещена: терминальные (воркер пишет
+# в execution_jobs и сырой статус backend'а: error/stopped/destroyed) и
+# billing_pending — работа выполнена, дебет ещё не сохранён; отмена здесь
+# увела бы задачу из-под свипера = бесплатное выполнение.
+CANCEL_BLOCKED_STATUSES = (
+    "completed",
+    "timeout",
+    "failed",
+    "cancelled",
+    "error",
+    "stopped",
+    "destroyed",
+    "billing_pending",
+)
+
+
+def get_billing_pending_jobs(limit: int = 50) -> list[dict]:
+    """Выполненные джобы, дебет которых не сохранился (status='billing_pending'), старые первыми."""
+    if _pg_enabled():
+        conn = _pg_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT * FROM execution_jobs WHERE status='billing_pending' ORDER BY completed_at ASC LIMIT %s",
+                    (limit,),
+                )
+                rows = cur.fetchall()
+                cols = [d[0] for d in cur.description]
+                return [dict(zip(cols, r)) for r in rows] if rows else []
+        finally:
+            _pg_return(conn)
+    c = _sqlite_conn()
+    try:
+        _ensure_execution_jobs_table(c)
+        rows = c.execute(
+            "SELECT * FROM execution_jobs WHERE status='billing_pending' ORDER BY completed_at ASC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows] if rows else []
+    finally:
+        c.close()
+
+
+def count_billing_pending_jobs() -> int:
+    if _pg_enabled():
+        conn = _pg_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM execution_jobs WHERE status='billing_pending'")
+                return int(cur.fetchone()[0])
+        finally:
+            _pg_return(conn)
+    c = _sqlite_conn()
+    try:
+        _ensure_execution_jobs_table(c)
+        return int(c.execute("SELECT COUNT(*) FROM execution_jobs WHERE status='billing_pending'").fetchone()[0])
+    finally:
+        c.close()
+
+
 def list_completed_execution_jobs(limit: int = 1000) -> list[dict]:
     """Завершённые execution_jobs, свежие первыми: [{'duration_seconds': float}].
 

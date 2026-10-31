@@ -47,12 +47,20 @@ async def cancel_job(job_id: str, key_info: dict = Depends(verify_api_key)):
     job = db.get_execution_job(job_id)
     if not job or job.get("tenant_id") != tenant_id:
         raise HTTPException(status_code=404, detail="Job not found")
-    db.update_execution_job(
+    # Атомарно: условие по статусу в самом UPDATE закрывает гонку проверка→запись.
+    n = db.update_execution_job(
         job_id,
         status="cancelled",
         completed_at=datetime.now(timezone.utc).isoformat(),
         tenant_id=tenant_id,
+        if_status_not_in=db.CANCEL_BLOCKED_STATUSES,
     )
+    if not n:
+        current = (db.get_execution_job(job_id) or job).get("status")
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "job_not_cancellable", "job_id": job_id, "status": current},
+        )
     # Гасим backend-инстанс (Vast.ai destroy и т.п.)
     try:
         await backend_cancel_job(tenant_id=tenant_id, job_id=job_id)

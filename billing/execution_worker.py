@@ -32,6 +32,17 @@ JOB_ORPHAN_TIMEOUT_SECONDS = int(os.environ.get("JOB_ORPHAN_TIMEOUT", str(MAX_JO
 _ORPHAN_SWEEP_INTERVAL_S = 300.0
 _last_orphan_sweep = 0.0
 
+# Свипер billing_pending: задание выполнено, но дебет не сохранился
+# (pg_error / error / no_funds). Повторный finalize идемпотентен по ключу
+# job:<id> (pg_ledger.debit_if_funds), так что двойного DEBIT быть не может.
+BILLING_PENDING_BATCH = int(os.environ.get("BILLING_PENDING_BATCH", "50"))
+_BILLING_PENDING_SWEEP_INTERVAL_S = 60.0
+# no_funds не лечится сам — не долбим ledger и лог каждую минуту.
+BILLING_PENDING_NO_FUNDS_RETRY_S = float(os.environ.get("BILLING_PENDING_NO_FUNDS_RETRY_S", "3600"))
+_last_billing_pending_sweep = 0.0
+_no_funds_next_try: dict[str, float] = {}
+_TERMINAL_STATUSES = ("completed", "timeout", "failed", "cancelled")
+
 
 def _track(task):
     _INFLIGHT.add(task)
@@ -81,9 +92,89 @@ def sweep_orphans_once() -> int:
     return n
 
 
+def _job_cost_usd(duration_seconds) -> float:
+    try:
+        d = float(duration_seconds or 0.0)
+    except (TypeError, ValueError):
+        d = 0.0
+    return round(max(d, 0.0) * 0.00001, 8)
+
+
+def sweep_billing_pending_once(now: float | None = None) -> dict:
+    """Повторно финализировать биллинг для billing_pending-джобов.
+
+    Задание НЕ исполняется заново: только finalize_job_billing с тем же job_id.
+    ok → completed с реальным cost_usd; pg_error/error/no_funds → остаётся
+    billing_pending. Возвращает счётчики исходов.
+    """
+    from monitoring.metrics import roma_billing_pending_jobs, roma_billing_pending_sweep_total
+
+    outcomes = {"ok": 0, "pg_error": 0, "error": 0, "no_funds": 0, "skip": 0, "deferred": 0}
+    if _db_adapter is None:
+        return outcomes
+    now = time.monotonic() if now is None else now
+    try:
+        roma_billing_pending_jobs.set(_db_adapter.count_billing_pending_jobs())
+    except Exception as exc:
+        logger.warning("billing_pending.count_failed: %s", exc)
+    jobs = _db_adapter.get_billing_pending_jobs(limit=BILLING_PENDING_BATCH)
+    from main import finalize_job_billing
+
+    for job in jobs:
+        jid = job["id"]
+        tid = job.get("tenant_id")
+        if _no_funds_next_try.get(jid, 0.0) > now:
+            outcomes["deferred"] += 1
+            continue
+        try:
+            status = finalize_job_billing(
+                tid,
+                jid,
+                gpu_sec=float(job.get("duration_seconds") or 0.0),
+                plan_name="free",
+                backend=job.get("backend"),
+            )
+        except PGUnavailableError as exc:
+            logger.warning("billing_pending.pg_error job=%s: %s", jid, exc)
+            status = "pg_error"
+        except Exception as exc:
+            logger.error("billing_pending.error job=%s: %s", jid, exc)
+            status = "error"
+
+        if status == "ok":
+            _no_funds_next_try.pop(jid, None)
+            _db_adapter.update_execution_job(
+                jid,
+                status="completed",
+                cost_usd=_job_cost_usd(job.get("duration_seconds")),
+                error="",
+                tenant_id=tid,
+                if_status_not_in=_TERMINAL_STATUSES,
+            )
+            logger.info("billing_pending.billed job=%s tenant=%s", jid, tid)
+        elif status == "no_funds":
+            if jid not in _no_funds_next_try:
+                logger.warning("billing_pending.no_funds job=%s tenant=%s", jid, tid)
+            _no_funds_next_try[jid] = now + BILLING_PENDING_NO_FUNDS_RETRY_S
+            if job.get("error") != "billing:no_funds":
+                _db_adapter.update_execution_job(jid, error="billing:no_funds", tenant_id=tid)
+        elif status not in outcomes:
+            status = "error"
+        outcomes[status] += 1
+    if len(jobs) < BILLING_PENDING_BATCH:
+        # Видели все pending: выкинуть бэкофф по джобам, которые ушли из очереди.
+        seen = {j["id"] for j in jobs}
+        for stale in [k for k in _no_funds_next_try if k not in seen]:
+            _no_funds_next_try.pop(stale, None)
+    for k, v in outcomes.items():
+        if v:
+            roma_billing_pending_sweep_total.labels(outcome=k).inc(v)
+    return outcomes
+
+
 async def poll_and_execute():
     """Фоновый цикл: опрашивает БД на наличие queued-джобов и запускает execute_and_bill."""
-    global _last_orphan_sweep
+    global _last_orphan_sweep, _last_billing_pending_sweep
     logger.info("poll_and_execute started")
     while True:
         try:
@@ -93,6 +184,12 @@ async def poll_and_execute():
                     sweep_orphans_once()
                 except Exception as e:
                     logger.warning("poll_and_execute.orphan_sweep_error: %s", e)
+            if time.monotonic() - _last_billing_pending_sweep >= _BILLING_PENDING_SWEEP_INTERVAL_S:
+                _last_billing_pending_sweep = time.monotonic()
+                try:
+                    sweep_billing_pending_once()
+                except Exception as e:
+                    logger.warning("poll_and_execute.billing_pending_sweep_error: %s", e)
             jobs = _db_adapter.get_queued_execution_jobs(limit=5)
             for job in jobs:
                 jid = job["id"]
