@@ -190,13 +190,13 @@ async def poll_and_execute():
                     sweep_billing_pending_once()
                 except Exception as e:
                     logger.warning("poll_and_execute.billing_pending_sweep_error: %s", e)
-            jobs = _db_adapter.get_queued_execution_jobs(limit=5)
+            # Атомарный claim: queued → running уже выполнен в БД, и вернулись
+            # только джобы, захваченные ЭТОЙ репликой (P1: двойной захват).
+            jobs = _db_adapter.claim_queued_execution_jobs(limit=5)
             for job in jobs:
                 jid = job["id"]
                 tid = job["tenant_id"]
-                payload = job.get("payload", {})
-                # Переводим из queued в running и запускаем
-                _db_adapter.update_execution_job(jid, status="running", tenant_id=tid)
+                payload = job.get("payload") or {}
                 _track(asyncio.ensure_future(execute_and_bill(jid, tid, payload)))
                 logger.info("poll_and_execute.started job=%s tenant=%s", jid, tid)
         except Exception as e:
