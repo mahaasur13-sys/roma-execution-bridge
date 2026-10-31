@@ -1880,8 +1880,13 @@ def claim_queued_execution_jobs(limit: int = 10) -> list[dict]:
     каждая джоба достаётся ровно одному вызывающему (реплике) либо никому.
     PG: один UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED) RETURNING *,
     commit до возврата. SQLite: BEGIN IMMEDIATE + условный UPDATE
-    … AND status='queued' с проверкой rowcount. Ошибка БД → [] (ничего не
-    захвачено: при rollback статус не меняется).
+    … AND status='queued' … RETURNING * (SQLite ≥ 3.35), поэтому обе ветки
+    возвращают актуальные status/started_at/updated_at из БД.
+
+    Ошибка БД НЕ маскируется пустым списком: обе ветки делают rollback (статус
+    джоб не меняется, ничего не захвачено) и пробрасывают исключение. Пустой
+    список означает только «queued-джоб нет». Вызывающий (poll_and_execute)
+    логирует исключение и повторяет опрос на следующем тике.
     """
     if _pg_enabled():
         conn = None
@@ -1910,7 +1915,7 @@ def claim_queued_execution_jobs(limit: int = 10) -> list[dict]:
                     conn.rollback()
             except Exception:
                 pass
-            return []
+            raise
         finally:
             _pg_return(conn, close_on_error=failed)
     c = _sqlite_conn()
@@ -1925,15 +1930,13 @@ def claim_queued_execution_jobs(limit: int = 10) -> list[dict]:
             ).fetchall()
             claimed = []
             for r in rows:
-                cur = c.execute(
+                upd = c.execute(
                     "UPDATE execution_jobs SET status='running', started_at=datetime('now'), "
-                    "updated_at=datetime('now') WHERE id=? AND status='queued'",
+                    "updated_at=datetime('now') WHERE id=? AND status='queued' RETURNING *",
                     (r["id"],),
-                )
-                if cur.rowcount == 1:
-                    d = dict(r)
-                    d["status"] = "running"
-                    claimed.append(d)
+                ).fetchone()
+                if upd is not None:
+                    claimed.append(dict(upd))
             c.commit()
         except Exception:
             c.rollback()
