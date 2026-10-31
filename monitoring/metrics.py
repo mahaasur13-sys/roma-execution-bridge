@@ -163,6 +163,16 @@ roma_ledger_reconcile_last_success_timestamp_seconds = Gauge(
     "Epoch seconds последней успешной сверки ledger",
     [],
 )
+roma_billing_pending_jobs = Gauge(
+    "roma_billing_pending_jobs",
+    "Выполненные задания, по которым дебет ещё не сохранён (status=billing_pending)",
+    [],
+)
+roma_billing_pending_sweep_total = Counter(
+    "roma_billing_pending_sweep_total",
+    "Исходы свипера billing_pending",
+    ["outcome"],
+)
 
 # алиасы для нового префикса (совместимость)
 roma_spend_cap_balance_usd = spend_cap_balance

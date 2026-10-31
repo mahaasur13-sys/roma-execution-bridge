@@ -112,3 +112,31 @@ tests:
       - eval_time: 12m
         alertname: ROMABillingWebhookDown
         exp_alerts: []
+
+  # (bp1) billing_pending > 0 longer than 30m -> unpaid work alert fires; 0 stays silent.
+  - name: bp1_billing_pending_fires_after_30m
+    interval: 1m
+    input_series:
+      - series: 'roma_billing_pending_jobs'
+        values: '2x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ROMABillingPendingJobs
+        exp_alerts: []
+      - eval_time: 35m
+        alertname: ROMABillingPendingJobs
+        exp_alerts:
+          - exp_labels: {severity: warning, category: billing}
+            exp_annotations:
+              summary: "2 completed job(s) not billed (billing_pending) for 30m"
+              description: "Job ran but its DEBIT was not saved (PG error / no funds). The billing_pending sweeper retries finalize idempotently (key job:<id>); outcomes in roma_billing_pending_sweep_total{outcome}. Persisting value = unpaid work."
+
+  - name: bp2_billing_pending_zero_silent
+    interval: 1m
+    input_series:
+      - series: 'roma_billing_pending_jobs'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: ROMABillingPendingJobs
+        exp_alerts: []
