@@ -180,3 +180,81 @@ def test_batch_limit(env, monkeypatch):
     out = ew.sweep_billing_pending_once()
     assert out["ok"] == 2
     assert db.count_billing_pending_jobs() == 1
+
+
+# --- P1: клиентская отмена не должна уводить billing_pending из-под свипера ---
+
+from fastapi import HTTPException  # noqa: E402
+
+import router_jobs  # noqa: E402
+from routers import public_jobs  # noqa: E402
+
+KEY = {"tenant_id": TENANT}
+
+
+@pytest.fixture
+def cancel_env(env, monkeypatch):
+    cleaned = []
+
+    async def fake_backend_cancel(tenant_id, job_id):
+        cleaned.append(job_id)
+
+    monkeypatch.setattr(public_jobs, "backend_cancel_job", fake_backend_cancel)
+    monkeypatch.setattr(public_jobs, "write_event", lambda *a, **k: None)
+    monkeypatch.setattr(router_jobs, "_tenant_from_key", lambda key=None: TENANT)
+    monkeypatch.setattr(router_jobs, "evaluate_policies", lambda *a, **k: {"result": "allowed"})
+    monkeypatch.setattr(router_jobs, "write_audit_event", lambda *a, **k: None)
+    env["cleaned"] = cleaned
+    return env
+
+
+def _public_cancel(job_id):
+    return asyncio.run(public_jobs.cancel_job(job_id, key_info=KEY))
+
+
+def test_public_cancel_billing_pending_409_then_sweeper_debits_once(cancel_env):
+    _insert(cancel_env, "c1", "billing_pending", error="billing:pg_error")
+    with pytest.raises(HTTPException) as ei:
+        _public_cancel("c1")
+    assert ei.value.status_code == 409
+    assert "billing_pending" in str(ei.value.detail)
+    assert _row(cancel_env, "c1")["status"] == "billing_pending"
+    assert cancel_env["cleaned"] == []
+    ew.sweep_billing_pending_once()
+    assert _row(cancel_env, "c1")["status"] == "completed"
+    assert len(cancel_env["ledger"].debits) == 1
+
+
+@pytest.mark.parametrize("status", ["completed", "timeout", "failed", "cancelled", "error"])
+def test_public_cancel_terminal_409_status_unchanged(cancel_env, status):
+    _insert(cancel_env, "c2", status)
+    with pytest.raises(HTTPException) as ei:
+        _public_cancel("c2")
+    assert ei.value.status_code == 409
+    assert _row(cancel_env, "c2")["status"] == status
+
+
+@pytest.mark.parametrize("status", ["queued", "running"])
+def test_public_cancel_active_still_works(cancel_env, status):
+    _insert(cancel_env, "c3", status)
+    assert _public_cancel("c3") == {"status": "cancelled", "job_id": "c3"}
+    assert _row(cancel_env, "c3")["status"] == "cancelled"
+    assert cancel_env["cleaned"] == ["c3"]
+
+
+def test_v1_cancel_race_running_to_billing_pending_409(cancel_env, monkeypatch):
+    # Проверка видит running, но к моменту записи воркер уже поставил billing_pending.
+    _insert(cancel_env, "c4", "billing_pending", error="billing:pg_error")
+    monkeypatch.setattr(
+        router_jobs.db, "get_execution_job", lambda jid: {"id": jid, "tenant_id": TENANT, "status": "running"}
+    )
+    with pytest.raises(HTTPException) as ei:
+        asyncio.run(router_jobs.cancel_job("c4", x_api_key="k"))
+    assert ei.value.status_code == 409
+    assert _row(cancel_env, "c4")["status"] == "billing_pending"
+
+
+def test_v1_cancel_running_still_works(cancel_env):
+    _insert(cancel_env, "c5", "running")
+    assert asyncio.run(router_jobs.cancel_job("c5", x_api_key="k"))["status"] == "cancelled"
+    assert _row(cancel_env, "c5")["status"] == "cancelled"

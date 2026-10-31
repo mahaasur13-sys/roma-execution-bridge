@@ -1873,6 +1873,22 @@ def get_queued_execution_jobs(limit: int = 10) -> list[dict]:
         c.close()
 
 
+# Статусы, из которых клиентская отмена запрещена: терминальные (воркер пишет
+# в execution_jobs и сырой статус backend'а: error/stopped/destroyed) и
+# billing_pending — работа выполнена, дебет ещё не сохранён; отмена здесь
+# увела бы задачу из-под свипера = бесплатное выполнение.
+CANCEL_BLOCKED_STATUSES = (
+    "completed",
+    "timeout",
+    "failed",
+    "cancelled",
+    "error",
+    "stopped",
+    "destroyed",
+    "billing_pending",
+)
+
+
 def get_billing_pending_jobs(limit: int = 50) -> list[dict]:
     """Выполненные джобы, дебет которых не сохранился (status='billing_pending'), старые первыми."""
     if _pg_enabled():

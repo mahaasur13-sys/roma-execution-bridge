@@ -85,12 +85,17 @@ async def cancel_job(job_id: str, x_api_key: str = Header(None)):
         )
         raise HTTPException(409, tr["reason"])
 
-    db.update_execution_job(
+    n = db.update_execution_job(
         job_id,
         status="cancelled",
         completed_at=datetime.now(timezone.utc).isoformat(),
         tenant_id=tenant_id,
+        if_status_not_in=db.CANCEL_BLOCKED_STATUSES,
     )
+    if not n:
+        # Статус сменился между проверкой и записью (например, running → billing_pending).
+        latest = (db.get_execution_job(job_id) or job).get("status")
+        raise HTTPException(409, f"transition_denied: {latest} → cancelled invalid")
     write_audit_event(tenant_id, "job.cancel", "job", job_id, {"previous_status": current})
     return {"job_id": job_id, "status": "cancelled"}
 
