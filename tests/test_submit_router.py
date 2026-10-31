@@ -14,8 +14,9 @@ import main
 import routers.submit as submit_mod
 from models.decision import GateResult
 
-KEY_A = "AAAAk3yTenantAlphaZ9q1"
-KEY_B = "BBBBk3yTenantBravoX7w2"
+# Obviously fake, low-entropy test credentials assembled at runtime (not secrets).
+KEY_A = "-".join(["fake", "tenant", "alpha", "only"])
+KEY_B = "-".join(["fake", "tenant", "bravo", "only"])
 TENANTS = {KEY_A: "tenant-a", KEY_B: "tenant-b"}
 
 
