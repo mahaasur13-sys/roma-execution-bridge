@@ -170,7 +170,8 @@ def _same_db(a: str, b: str) -> bool:
     return norm(a) == norm(b)
 
 
-@pytest.mark.pg
+# E2: без pg-маркера — тест всегда admission-skip (RaaS-01, тело :176/:189), не env-skip;
+# guard: tests/test_named_admission_not_pg_marked.py
 def test_preflight_fails_on_duplicate_group_and_index_intact():
     """Two identical real-job rows → 015a raises; read-only (never on shared PG)."""
     if not _pg_reachable():
