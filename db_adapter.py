@@ -1873,6 +1873,81 @@ def get_queued_execution_jobs(limit: int = 10) -> list[dict]:
         c.close()
 
 
+def claim_queued_execution_jobs(limit: int = 10) -> list[dict]:
+    """Атомарно захватить до `limit` queued-джоб: queued → running, started_at=now.
+
+    Возвращает ТОЛЬКО строки, которые перевёл в running именно этот вызов:
+    каждая джоба достаётся ровно одному вызывающему (реплике) либо никому.
+    PG: один UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED) RETURNING *,
+    commit до возврата. SQLite: BEGIN IMMEDIATE + условный UPDATE
+    … AND status='queued' … RETURNING * (SQLite ≥ 3.35), поэтому обе ветки
+    возвращают актуальные status/started_at/updated_at из БД.
+
+    Ошибка БД НЕ маскируется пустым списком: обе ветки делают rollback (статус
+    джоб не меняется, ничего не захвачено) и пробрасывают исключение. Пустой
+    список означает только «queued-джоб нет». Вызывающий (poll_and_execute)
+    логирует исключение и повторяет опрос на следующем тике.
+    """
+    if _pg_enabled():
+        conn = None
+        failed = False
+        try:
+            conn = _pg_conn()
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE execution_jobs SET status='running', started_at=now(), updated_at=now() "
+                    "WHERE id IN (SELECT id FROM execution_jobs WHERE status='queued' "
+                    "ORDER BY created_at ASC LIMIT %s FOR UPDATE SKIP LOCKED) "
+                    "AND status='queued' RETURNING *",
+                    (limit,),
+                )
+                rows = cur.fetchall()
+                cols = [d[0] for d in cur.description]
+            conn.commit()
+            out = [dict(zip(cols, r)) for r in rows]
+            out.sort(key=lambda d: (d.get("created_at") is None, d.get("created_at")))
+            return out
+        except Exception as e:
+            failed = True
+            logger.warning("claim_queued_execution_jobs.pg_error: %s", e)
+            try:
+                if conn is not None:
+                    conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            _pg_return(conn, close_on_error=failed)
+    c = _sqlite_conn()
+    try:
+        _ensure_execution_jobs_table(c)
+        c.commit()  # закрыть неявную транзакцию DDL, если она открыта
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            rows = c.execute(
+                "SELECT * FROM execution_jobs WHERE status='queued' ORDER BY created_at ASC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            claimed = []
+            for r in rows:
+                upd = c.execute(
+                    "UPDATE execution_jobs SET status='running', started_at=datetime('now'), "
+                    "updated_at=datetime('now') WHERE id=? AND status='queued' RETURNING *",
+                    (r["id"],),
+                ).fetchone()
+                if upd is not None:
+                    claimed.append(dict(upd))
+            c.commit()
+        except Exception:
+            c.rollback()
+            raise
+        for d in claimed:
+            d["payload"] = _json_col(d.get("payload"), {})
+        return claimed
+    finally:
+        c.close()
+
+
 # Статусы, из которых клиентская отмена запрещена: терминальные (воркер пишет
 # в execution_jobs и сырой статус backend'а: error/stopped/destroyed) и
 # billing_pending — работа выполнена, дебет ещё не сохранён; отмена здесь
