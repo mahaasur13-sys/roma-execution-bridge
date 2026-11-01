@@ -281,8 +281,12 @@ def _run_two_replicas(dsn, iterations, connect_timeout=10):
         for i in range(iterations):
             ids = [f"claim-{i}-{k}-{uuid.uuid4().hex[:8]}" for k in range(JOBS_PER_ITER)]
             for jid in ids:
+                # created_at в прошлом: claim берёт ORDER BY created_at ASC LIMIT 5, и
+                # чужие queued-строки, оставленные другими тестами в общей тестовой БД
+                # (повторные прогоны CI: parity/coverage), не вытесняют джобы этого запуска.
                 cur.execute(
-                    "INSERT INTO execution_jobs (id, tenant_id, status, backend) VALUES (%s,%s,'queued','local')",
+                    "INSERT INTO execution_jobs (id, tenant_id, status, backend, created_at) "
+                    "VALUES (%s,%s,'queued','local', TIMESTAMPTZ '1970-01-01 00:00:00+00')",
                     (jid, tenant),
                 )
                 created.append(jid)
@@ -314,7 +318,8 @@ def test_pg_two_replicas_never_double_claim():
     dsn = os.environ.get("PG_DSN")
     if not dsn:
         pytest.skip("PG_DSN не задан; issue: G-CI-PG-CANON · expiry: 2026-12-31")
-    pytest.importorskip("psycopg2")
+    import psycopg2  # noqa: F401  # жёсткая зависимость CI (requirements-ci.txt), без немого скипа
+
     st = _run_two_replicas(dsn, ITER)
     print(
         f"\nCLAIM iterations={ITER} jobs={st['inserted']} claimed={st['claimed']} "
@@ -327,8 +332,9 @@ def test_pg_two_replicas_never_double_claim():
 @pytest.mark.timeout(60)
 def test_pg_harness_unreachable_dsn_cleans_up_processes():
     """Недоступный DSN: connect падает быстро, дочерние процессы остановлены, без зависания."""
-    psycopg2 = pytest.importorskip("psycopg2")
     import time
+
+    import psycopg2  # жёсткая зависимость CI (requirements-ci.txt), без немого скипа
 
     before = {p.pid for p in mp.active_children()}
     t0 = time.monotonic()
