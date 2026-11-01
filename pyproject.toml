@@ -167,6 +167,12 @@ ci = [
 ]
 
 [tool.uv]
+# P-DEPS-LOCK: dependency cooldown (semgrep uv-missing-dependency-cooldown) — резолв не берёт
+# версии моложе 7 дней: свежеопубликованный пакет может оказаться вредоносным или сырым.
+exclude-newer = "7 days"
+# Исключение из cooldown — только для security-фикса, у которого нет более старой исправленной
+# версии: pyasn1 0.6.5 (CVE-2026-119194..119197, опубликован 2026-10-27).
+exclude-newer-package = { pyasn1 = false }
 # P-DEPS-LOCK (2026-11-01): полы безопасности для ТРАНЗИТИВНЫХ зависимостей. Действуют
 # только на резолв uv (uv lock / uv sync / uv export), не добавляют пакетов. Прямые
 # зависимости поднимаются в [project].dependencies, а не здесь.

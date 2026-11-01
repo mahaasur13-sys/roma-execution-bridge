@@ -23,6 +23,10 @@ CI-джоба `deps-drift` (`.github/workflows/ci.yml`, uv 0.13.6) валитс�
 `security.yml` аудирует оба производных файла (`pip-audit -r`).
 
 Замечания:
+- Cooldown: `[tool.uv] exclude-newer = "7 days"` — резолв не берёт версии моложе 7 дней
+  (semgrep `uv-missing-dependency-cooldown`). Исключение `exclude-newer-package` — только для
+  security-фикса без более старой исправленной версии (сейчас pyasn1 0.6.5). Если свежий фикс
+  нужен срочно, исключение добавляется точечно и с комментарием, а не снятием cooldown.
 - `prometheus-client` = 0.8.0 не «пин из прошлого», а следствие `prometheus-fastapi-instrumentator<2.0`
   (последний 1.x = 1.3.0 требует `prometheus-client>=0.8.0,<0.9.0`). Подъём — отдельная задача
   (instrumentator 7.x, проверка `/metrics`).
