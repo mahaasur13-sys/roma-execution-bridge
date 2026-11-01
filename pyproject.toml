@@ -171,8 +171,10 @@ ci = [
 # версии моложе 7 дней: свежеопубликованный пакет может оказаться вредоносным или сырым.
 exclude-newer = "7 days"
 # Исключение из cooldown — только для security-фикса, у которого нет более старой исправленной
-# версии: pyasn1 0.6.5 (CVE-2026-119194..119197, опубликован 2026-10-27).
-exclude-newer-package = { pyasn1 = false }
+# версии: pyasn1 0.6.5 (CVE-2026-119194..119197, опубликован 2026-10-27); websockets 17.4
+# (DoS исчерпанием памяти фрагментированными сообщениями, CVE pending, опубликован 2026-10-30;
+# uvicorn[standard] обслуживает /ws/* через websockets).
+exclude-newer-package = { pyasn1 = false, websockets = false }
 # P-DEPS-LOCK (2026-11-01): полы безопасности для ТРАНЗИТИВНЫХ зависимостей. Действуют
 # только на резолв uv (uv lock / uv sync / uv export), не добавляют пакетов. Прямые
 # зависимости поднимаются в [project].dependencies, а не здесь.
@@ -183,4 +185,5 @@ constraint-dependencies = [
     "anyio>=4.14.2",        # critical: подмена имени хоста в TLS
     "cryptography>=50.0.0", # PKCS#7
     "certifi>=2026.10.18",  # PYSEC-2026-4320 (critical)
+    "websockets>=17.4",     # DoS: фрагментированные сообщения без лимита (upstream security fix)
 ]

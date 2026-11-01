@@ -25,7 +25,7 @@ CI-джоба `deps-drift` (`.github/workflows/ci.yml`, uv 0.13.6) валитс�
 Замечания:
 - Cooldown: `[tool.uv] exclude-newer = "7 days"` — резолв не берёт версии моложе 7 дней
   (semgrep `uv-missing-dependency-cooldown`). Исключение `exclude-newer-package` — только для
-  security-фикса без более старой исправленной версии (сейчас pyasn1 0.6.5). Если свежий фикс
+  security-фикса без более старой исправленной версии (сейчас pyasn1 0.6.5 и websockets 17.4). Если свежий фикс
   нужен срочно, исключение добавляется точечно и с комментарием, а не снятием cooldown.
 - `prometheus-client` = 0.8.0 не «пин из прошлого», а следствие `prometheus-fastapi-instrumentator<2.0`
   (последний 1.x = 1.3.0 требует `prometheus-client>=0.8.0,<0.9.0`). Подъём — отдельная задача
@@ -67,7 +67,7 @@ python3.12 -m venv /opt/roma-venv
    (с тем же окружением, что у сервиса), затем временный экземпляр на свободном порту
    (не 8900) → `/health`, `/billing/*` и админ-маршруты в `app.routes` (route-surface).
    Отличия от текущего прода в рантайм-наборе: 40 из 79 пакетов (среди заметных kubernetes
-   29→31, psutil 5→6, websockets 15→17, wrapt 1→2, structlog 25→26, protobuf 6→7).
+   29→31, psutil 5→6, websockets 15→17.4, wrapt 1→2, structlog 25→26, protobuf 6→7).
 3. **Переключение.** Резервная копия `/root/.sealed/roma-start.sh`; в нём заменить
    интерпретатор на `/opt/roma-venv/bin/python` (только эта строка; секреты в скрипте не
    трогаются и не выводятся). `supervisorctl restart roma-execution-bridge` → `/health`,
