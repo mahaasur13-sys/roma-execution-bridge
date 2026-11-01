@@ -21,6 +21,8 @@ jobs:
       - name: Install deps
         # G-CI-DEPS-INCOMPLETE: список зависимостей живёт в репозитории
         # (requirements-ci.txt), а не в этом файле — иначе он разъезжается с деревом.
+        # P-DEPS-LOCK: requirements-ci.txt — экспорт uv.lock (scripts/gen_requirements.sh),
+        # сверяется с lock в job deps-drift.
         run: pip install -r requirements-ci.txt
       - name: Compile check
         run: |
@@ -113,6 +115,33 @@ jobs:
         # конвенцией и оставаться «зелёным». Версия ruff та же, что у Lint выше:
         # форматтер между версиями меняет вывод, и рассинхрон даёт ложный красный.
         run: ruff format --check .
+
+  # P-DEPS-LOCK (2026-11-01): uv.lock — канон зависимостей, requirements-*.txt — его экспорт.
+  # Раньше requirements-ci.txt правился руками и разъехался с lock (35 из 64 пинов; lock
+  # не проходил `uv lock --check`; прод на Zo стоял по CI-списку со старыми транзитивами).
+  # Джоба валится, если (1) uv.lock не соответствует pyproject.toml или (2) закоммиченные
+  # requirements-ci.txt / requirements-runtime.txt отличаются от свежего экспорта lock.
+  # Лечение: `uv lock` (если менялся pyproject) и `bash scripts/gen_requirements.sh`.
+  deps-drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - name: Install uv
+        # G-TOOL-PIN: точный пин — формат lock/экспорта зависит от версии uv.
+        run: pip install uv==0.13.6
+      - name: uv lock --check (uv.lock соответствует pyproject.toml)
+        run: uv lock --check
+      - name: requirements-*.txt == экспорт uv.lock
+        run: |
+          set -euo pipefail
+          bash scripts/gen_requirements.sh /tmp/deps-regen
+          diff -u requirements-ci.txt /tmp/deps-regen/requirements-ci.txt
+          diff -u requirements-runtime.txt /tmp/deps-regen/requirements-runtime.txt
+          echo "deps-drift OK: uv.lock consistent, requirements-*.txt match export"
 
   helm-validate:
     runs-on: ubuntu-latest

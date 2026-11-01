@@ -72,6 +72,10 @@ jobs:
       # версиями не видно (23 advisories на пинах против 0 на pyproject).
       - name: pip-audit (requirements-ci.txt pins)
         run: pip-audit -r requirements-ci.txt --progress-spinner off
+      # P-DEPS-LOCK: аудит рантайм-набора изолированного venv сервиса (экспорт uv.lock без
+      # dev/ci-групп, полный и с хешами → --no-deps --disable-pip: без резолва, ровно пины).
+      - name: pip-audit (requirements-runtime.txt — runtime set from uv.lock)
+        run: pip-audit -r requirements-runtime.txt --no-deps --disable-pip --progress-spinner off
 
   secrets:
     runs-on: ubuntu-latest
