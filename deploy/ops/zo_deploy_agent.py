@@ -26,6 +26,11 @@ GitHub Actions НА машину Zo по SSH. У раннера нет ни ма
   * память об отказе постоянна (по SHA) — повторов нет; снятие памяти `--retry-all`;
     первый алерт об отказе уходит сразу, стоячий — раз в сутки и не раньше часа после отказа;
     плюс один напоминающий алерт в сутки, пока выкат стоит;
+  * зависимости агент НЕ ставит: если между выкаченным и целевым SHA изменился
+    `requirements-runtime.txt` или `uv.lock`, выкат блокируется ДО fast-forward
+    (отказ `deps_changed`) — новый код не поднимается в старом venv. База сравнения —
+    deployed_sha (иначе HEAD). Не удалось сравнить деревья = отказ `deps_diff_unreadable`.
+    Штатного снятия этой блокировки в агенте пока нет — блокировка ожидаемая и безопасная;
   * миграции ДО рестарта и с самопроверкой: если после `apply_migrations.py` в
     schema_migrations остались неотмеченные файлы, выкат блокируется — код не поднимается,
     прод продолжает жить на старом. Молчаливый no-op миграций (например, .env не читается
@@ -82,6 +87,12 @@ PG_DSN_DB = os.environ.get("ROMA_PG_DB", "roma")
 # поэтому сервисному DSN из .env там делать нечего. Отсутствие файла = отказ, а не no-op.
 ADMIN_DSN_FILE = os.environ.get("ROMA_ADMIN_PG_DSN_FILE", "/root/.sealed/roma-pg-dsn.txt")
 _DSN_RE = re.compile(r"(?:postgres(?:ql)?|psql)://\S+", re.IGNORECASE)
+
+# Файлы, по которым собирается venv сервиса (docs/DEPENDENCIES.md): uv.lock — канон,
+# requirements-runtime.txt — производный (из него ставится /opt/roma-venv). pyproject.toml
+# не в списке сознательно: изменение зависимостей в нём без uv.lock не проходит drift-check CI,
+# а прочие правки pyproject (ruff, setuptools) на venv не влияют.
+DEPS_FILES = ("requirements-runtime.txt", "uv.lock")
 
 INTERVAL = int(os.environ.get("ROMA_DEPLOY_INTERVAL", "60"))
 HEALTH_TIMEOUT_S = int(os.environ.get("ROMA_DEPLOY_HEALTH_TIMEOUT", "90"))
@@ -382,6 +393,19 @@ def restart_service() -> tuple[bool, str]:
     return True, detail
 
 
+def deps_changed(base: str, sha: str) -> tuple[bool | None, str]:
+    """Изменились ли файлы зависимостей venv между base и sha (по содержимому деревьев).
+
+    (True, файлы) — изменились; (False, "") — нет; (None, ошибка) — сравнить не удалось
+    (например, base нет в локальной истории после force-push) — вызывающий обязан отказать.
+    """
+    rc, out, err = run(["git", "diff", "--name-only", base, sha, "--", *DEPS_FILES], timeout=60)
+    if rc != 0:
+        return None, f"git diff {base[:8]}..{sha[:8]} rc={rc}: {err[:200]}"
+    changed = [line.strip() for line in out.splitlines() if line.strip()]
+    return bool(changed), ",".join(changed)
+
+
 def plan(sha: str, state: dict) -> dict:
     applied = applied_migrations()
     local_files = sorted(p.name for p in (REPO / "migrations").glob("*.sql"))
@@ -473,6 +497,25 @@ def do_deploy(sha: str, state: dict, *, dry_run: bool, rollback_on_unhealthy: bo
         fail(state, sha, "history_diverged", why)
         post_status(sha, "error", "история разошлась, fast-forward невозможен")
         return False
+
+    # Проверка зависимостей — ДО fast-forward: дерево, venv и сервис остаются на старом SHA,
+    # откатывать нечего. Раньше нельзя: до fetch объекта целевого коммита нет локально.
+    deps_base = previous or "HEAD"
+    changed, deps_detail = deps_changed(deps_base, sha)
+    if changed is None:
+        fail(state, sha, "deps_diff_unreadable", deps_detail)
+        post_status(sha, "error", "не удалось сравнить зависимости — выкат не начат")
+        return False
+    if changed:
+        fail(
+            state,
+            sha,
+            "deps_changed",
+            f"изменены {deps_detail} относительно {deps_base[:8]}; venv агент не пересобирает",
+        )
+        post_status(sha, "error", "изменились зависимости — нужен venv, выкат не начат")
+        return False
+    steps.append("deps:unchanged")
 
     rc, out, err = run(["git", "merge", "--ff-only", sha], timeout=60)
     if rc != 0:
