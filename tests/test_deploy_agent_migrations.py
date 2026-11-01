@@ -19,6 +19,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 SHA = "a" * 40
+PREV = "b" * 40
 DSN_LEAK = "postgresql://admin:s3cr3t-value@127.0.0.1:5432/roma"
 
 
@@ -78,7 +79,9 @@ def agent(monkeypatch, tmp_path):
 
 
 def _deploy(module) -> bool:
-    return module.do_deploy(SHA, {"deployed_sha": ""}, dry_run=False, rollback_on_unhealthy=False)
+    # deployed_sha непустой: пустой теперь отказ deps_base_unknown ещё до миграций (фаза 5.1),
+    # а здесь проверяется контракт миграций. git diff по deps на моке run() пуст — «deps не менялись».
+    return module.do_deploy(SHA, {"deployed_sha": PREV}, dry_run=False, rollback_on_unhealthy=False)
 
 
 def test_migration_runs_apply_migrations_with_admin_dsn_file(agent):

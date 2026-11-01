@@ -3,12 +3,14 @@
 Агент не ставит зависимости: если между выкаченным и целевым SHA изменился
 `requirements-runtime.txt` или `uv.lock`, выкат обязан остановиться ДО `git merge --ff-only` —
 без compileall, миграций, рестарта и `reset --hard`, с отказом `deps_changed` в памяти по SHA.
-Не удалось сравнить деревья — тот же fail-closed с причиной `deps_diff_unreadable`.
+Не удалось сравнить деревья — тот же fail-closed с причиной `deps_diff_unreadable`;
+неизвестен выкаченный SHA — `deps_base_unknown`, без git diff (HEAD базой не считается).
 PG-free: git/супервизор на моках `run()`, `deps_changed()` дополнительно — на настоящем git в tmp.
 """
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 import subprocess
 import sys
@@ -23,6 +25,8 @@ if str(REPO_ROOT) not in sys.path:
 
 PREV = "b" * 40
 SHA = "a" * 40
+OTHER = "c" * 40  # постороннее отказавшее SHA — его запись обязана остаться нетронутой
+OLD_TS = "2026-10-20T08:00:00Z"
 DIFF = ["git", "diff", "--name-only"]
 FF = ["git", "merge", "--ff-only"]
 
@@ -72,37 +76,68 @@ def agent(monkeypatch, tmp_path):
     monkeypatch.setattr(module, "post_status", lambda *a, **k: h.statuses.append(a))
     monkeypatch.setattr(module, "alert", lambda *a, **k: h.alerts.append(a))
     monkeypatch.setattr(module, "wait_healthy", lambda: (True, "ok"))
+    # Время заморожено на «сейчас»: fail() и save_state() пишут now_iso() в state, и тест
+    # сверяет точные значения, а не «что-то поменялось». Реальное «сейчас», а не дата из
+    # прошлого: cycle() считает возраст last_failed_notice по настоящим часам.
+    frozen = module.now_iso()
+    monkeypatch.setattr(module, "now_iso", lambda: frozen)
+    module._now = frozen
     module._harness = h
     return module
 
 
-def _state() -> dict:
-    return {"deployed_sha": PREV, "failed": {}, "history": []}
+def _state(deployed_sha: str = PREV) -> dict:
+    """Реалистичный state.json живого агента: bootstrap-метка, история, старые отказы."""
+    return {
+        "deployed_sha": deployed_sha,
+        "deployed_sha_source": "inferred_from_head",
+        "history": [{"sha": PREV, "at": "2026-10-30T10:00:00Z", "steps": ["fetch", "ff", "restart"], "commits": 1}],
+        "last_success": "2026-10-30T10:00:00Z",
+        "last_failed_notice": OLD_TS,
+        "notices": {"failed_memory:" + OTHER: OLD_TS},
+        "failed": {OTHER: {"reason": "ci_red", "detail": "CI по SHA завершился: failure", "ts": OLD_TS}},
+        "updated_at": "2026-10-30T10:00:00Z",
+    }
 
 
 def _deploy(module, state: dict) -> bool:
     return module.do_deploy(SHA, state, dry_run=False, rollback_on_unhealthy=False)
 
 
-def _assert_refused_untouched(module, state: dict, reason: str) -> None:
+def _expected_after_refusal(module, initial: dict) -> dict:
+    """Какие ключи вне `failed` законно меняет отказ в do_deploy — и на что именно.
+
+    * last_failed_notice: fail() безусловно ставит now_iso() — это отметка первого алерта,
+      от неё cycle() отсчитывает час до «стоячего» напоминания. Ожидается ровно now.
+    * updated_at: save_state() ставит now_iso() при каждой записи. Ожидается ровно now.
+    Всё остальное (deployed_sha, deployed_sha_source, history, last_success, notices) — как было.
+    """
+    expected = {k: v for k, v in copy.deepcopy(initial).items() if k != "failed"}
+    expected["last_failed_notice"] = module._now
+    expected["updated_at"] = module._now
+    return expected
+
+
+def _assert_refused_untouched(module, initial: dict, state: dict, reason: str, last_call: list[str]) -> None:
     h = module._harness
-    assert state["failed"][SHA]["reason"] == reason
-    assert state["failed"][SHA]["ts"]
-    assert state["deployed_sha"] == PREV, "deployed_sha не должен сдвигаться"
-    assert state["history"] == []
+    expected = _expected_after_refusal(module, initial)
+    persisted = module.load_state()
+    for label, got in (("в памяти", state), ("после перечтения state.json", persisted)):
+        assert {k: v for k, v in got.items() if k != "failed"} == expected, label
+        assert set(got["failed"]) == {OTHER, SHA}, label
+        assert got["failed"][OTHER] == initial["failed"][OTHER], f"чужой отказ изменён ({label})"
+        assert got["failed"][SHA]["reason"] == reason, label
+        assert got["failed"][SHA]["ts"] == module._now, label
+        assert got["failed"][SHA]["detail"], label
     # ни fast-forward, ни предпроверки, ни миграций, ни рестарта, ни отката дерева
     assert not [c for c in h.calls if c[:3] == FF]
     assert not h.has("compileall") and not h.has("apply_migrations.py")
     assert not h.has("supervisorctl") and not h.has("restart")
     assert not [c for c in h.calls if c[:2] == ["git", "reset"]]
-    # последняя внешняя команда — сам diff: после отказа агент ничего не запускал
-    assert h.calls[-1][:3] == DIFF
+    # последняя внешняя команда — та, на которой отказ: после него агент ничего не запускал
+    assert h.calls[-1][: len(last_call)] == last_call
     assert len(h.alerts) == 1 and reason in h.alerts[0][1]
     assert h.statuses[-1][0] == SHA and h.statuses[-1][1] == "error"
-    # память об отказе пережила рестарт агента: записана в state-файл
-    persisted = module.load_state()
-    assert persisted["failed"][SHA]["reason"] == reason
-    assert persisted["deployed_sha"] == PREV
 
 
 @pytest.mark.parametrize("changed", ["requirements-runtime.txt", "uv.lock", "requirements-runtime.txt\nuv.lock"])
@@ -110,10 +145,11 @@ def test_deps_change_blocks_before_fast_forward(agent, changed):
     h = agent._harness
     h.diff_out = changed
     state = _state()
+    initial = copy.deepcopy(state)
 
     assert _deploy(agent, state) is False
 
-    _assert_refused_untouched(agent, state, "deps_changed")
+    _assert_refused_untouched(agent, initial, state, "deps_changed", DIFF)
     for name in changed.split("\n"):
         assert name in state["failed"][SHA]["detail"]
     # порядок: fetch → diff (между выкаченным и целевым SHA, только по файлам зависимостей)
@@ -124,10 +160,11 @@ def test_deps_change_blocks_before_fast_forward(agent, changed):
 def test_unreadable_diff_fails_closed(agent):
     agent._harness.diff_rc = 128  # например, deployed_sha исчез из локальной истории после force-push
     state = _state()
+    initial = copy.deepcopy(state)
 
     assert _deploy(agent, state) is False
 
-    _assert_refused_untouched(agent, state, "deps_diff_unreadable")
+    _assert_refused_untouched(agent, initial, state, "deps_diff_unreadable", DIFF)
 
 
 def test_unrelated_changes_take_the_normal_path(agent):
@@ -144,28 +181,41 @@ def test_unrelated_changes_take_the_normal_path(agent):
     assert "deps:unchanged" in state["history"][-1]["steps"]
 
 
-def test_empty_deployed_sha_compares_against_head(agent):
-    state = {"deployed_sha": "", "failed": {}, "history": []}
+def test_empty_deployed_sha_refuses_without_diff(agent):
+    """Пустой deployed_sha: HEAD не принимается за состояние прода — отказ до git diff."""
+    h = agent._harness
+    state = _state(deployed_sha="")
+    initial = copy.deepcopy(state)
 
-    assert _deploy(agent, state) is True
-    assert [c for c in agent._harness.calls if c[:3] == DIFF][0][3] == "HEAD"
+    assert _deploy(agent, state) is False
+
+    _assert_refused_untouched(agent, initial, state, "deps_base_unknown", ["git", "fetch"])
+    assert not [c for c in h.calls if c[:3] == DIFF], "без базы git diff не вызывается"
+    assert [c[:2] for c in h.calls] == [["git", "fetch"]], "fetch — и больше ничего"
 
 
 @pytest.mark.parametrize(
-    ("diff_rc", "diff_out", "reason"), [(0, "uv.lock", "deps_changed"), (128, "", "deps_diff_unreadable")]
+    ("deployed", "diff_rc", "diff_out", "reason"),
+    [
+        (PREV, 0, "uv.lock", "deps_changed"),
+        (PREV, 128, "", "deps_diff_unreadable"),
+        ("", 0, "", "deps_base_unknown"),
+    ],
 )
-def test_refused_sha_is_not_retried(agent, monkeypatch, diff_rc, diff_out, reason):
+def test_refused_sha_is_not_retried(agent, monkeypatch, deployed, diff_rc, diff_out, reason):
     h = agent._harness
     h.diff_rc, h.diff_out = diff_rc, diff_out
     monkeypatch.setattr(agent, "remote_sha", lambda: SHA)
     ci_calls = []
     monkeypatch.setattr(agent, "ci_state", lambda sha: ci_calls.append(sha) or ("green", "ci success"))
-    state = _state()
+    state = _state(deployed_sha=deployed)
 
     state = agent.cycle(state, dry_run=False, rollback_on_unhealthy=False, heartbeat_due=False)
     assert state["failed"][SHA]["reason"] == reason
     assert ci_calls == [SHA]
     calls_after_refusal, alerts_after_refusal = len(h.calls), len(h.alerts)
+    state_after_refusal = copy.deepcopy(state)
+    file_after_refusal = agent.STATE_PATH.read_bytes()
 
     for _ in range(3):
         state = agent.cycle(state, dry_run=False, rollback_on_unhealthy=False, heartbeat_due=True)
@@ -173,7 +223,11 @@ def test_refused_sha_is_not_retried(agent, monkeypatch, diff_rc, diff_out, reaso
     assert ci_calls == [SHA], "CI-гейт для SHA из памяти не спрашивается"
     assert len(h.calls) == calls_after_refusal, "ни fetch, ни diff, ни рестарта в повторных циклах"
     assert len(h.alerts) == alerts_after_refusal, "стоячий алерт — не раньше часа после отказа"
-    assert state["deployed_sha"] == PREV
+    # повторные циклы по SHA из памяти не трогают state вовсе: ни в памяти, ни на диске
+    # (last_failed_notice свежий → стоячий алерт не положен → notice_due/save_state не зовутся)
+    assert state == state_after_refusal
+    assert agent.STATE_PATH.read_bytes() == file_after_refusal
+    assert state["deployed_sha"] == deployed
 
 
 def _git(cwd: Path, *args: str) -> str:

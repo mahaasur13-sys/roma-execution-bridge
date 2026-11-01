@@ -29,7 +29,8 @@ GitHub Actions НА машину Zo по SSH. У раннера нет ни ма
   * зависимости агент НЕ ставит: если между выкаченным и целевым SHA изменился
     `requirements-runtime.txt` или `uv.lock`, выкат блокируется ДО fast-forward
     (отказ `deps_changed`) — новый код не поднимается в старом venv. База сравнения —
-    deployed_sha (иначе HEAD). Не удалось сравнить деревья = отказ `deps_diff_unreadable`.
+    только deployed_sha: пустой = отказ `deps_base_unknown` (HEAD рабочего дерева не принимается
+    за подтверждённое состояние прода). Не удалось сравнить деревья = отказ `deps_diff_unreadable`.
     Штатного снятия этой блокировки в агенте пока нет — блокировка ожидаемая и безопасная;
   * миграции ДО рестарта и с самопроверкой: если после `apply_migrations.py` в
     schema_migrations остались неотмеченные файлы, выкат блокируется — код не поднимается,
@@ -500,7 +501,11 @@ def do_deploy(sha: str, state: dict, *, dry_run: bool, rollback_on_unhealthy: bo
 
     # Проверка зависимостей — ДО fast-forward: дерево, venv и сервис остаются на старом SHA,
     # откатывать нечего. Раньше нельзя: до fetch объекта целевого коммита нет локально.
-    deps_base = previous or "HEAD"
+    if not previous:
+        fail(state, sha, "deps_base_unknown", "deployed_sha пуст — не с чем сравнить зависимости venv")
+        post_status(sha, "error", "неизвестен выкаченный SHA — зависимости не сравнить, выкат не начат")
+        return False
+    deps_base = previous
     changed, deps_detail = deps_changed(deps_base, sha)
     if changed is None:
         fail(state, sha, "deps_diff_unreadable", deps_detail)
