@@ -172,34 +172,61 @@ class PGBillingLedger:
             )
         return ledger_id
 
-    def credit(self, tenant_id: str, amount: float, currency: str = "USD", **meta) -> str:
-        """Credit a tenant — PG-first, fail-closed.
+    def credit(
+        self, tenant_id: str, amount: float, currency: str = "USD", idempotency_key: str | None = None, **meta
+    ) -> str:
+        """Credit a tenant — PG-first, fail-closed, optionally idempotent.
 
-        Raises PGUnavailableError when PG cannot persist the credit; no silent
-        in-memory-only fallback (a top-up that survives only in RAM is a lie).
+        When ``idempotency_key`` is supplied the ``ledger_id`` is deterministic
+        (``sha256(tenant:key)[:24]``) and the insert uses ``ON CONFLICT
+        (ledger_id) DO NOTHING``, so a retry after a timed-out commit returns
+        the SAME id instead of double-crediting. Raises PGUnavailableError when
+        PG cannot persist the credit.
         """
         reject_nullable_money("ledger_entries", "amount", amount)
         reject_nullable_money("ledger_entries", "currency", currency)
-        meta_json = json.dumps(meta or {})
-        ledger_id = f"led-{int(time.time() * 1000)}-{uuid4().hex[:12]}"
-        self._pg_execute(
+        meta = dict(meta or {})
+        if idempotency_key:
+            digest = hashlib.sha256(f"{tenant_id}:{idempotency_key}".encode()).hexdigest()
+            ledger_id = f"led-{digest[:24]}"
+            meta["idempotency_key"] = idempotency_key
+        else:
+            ledger_id = f"led-{int(time.time() * 1000)}-{uuid4().hex[:12]}"
+        meta_json = json.dumps(meta)
+        rows = self._pg_execute(
             "ledger_credit",
             """INSERT INTO ledger_entries (ledger_id, tenant_id, entry_type, amount, currency, metadata)
-               VALUES (%s, %s, 'CREDIT', %s, %s, %s::jsonb)""",
+               VALUES (%s, %s, 'CREDIT', %s, %s, %s::jsonb)
+               ON CONFLICT (ledger_id) DO NOTHING
+               RETURNING ledger_id""",
             (ledger_id, tenant_id, amount, currency, meta_json),
+            fetch=True,
         )
-        self._entries.append(
-            {
-                "ledger_id": ledger_id,
-                "timestamp": time.time(),
-                "tenant_id": tenant_id,
-                "type": "CREDIT",
-                "amount": amount,
-                "currency": currency,
-                "metadata": meta or {},
-            }
-        )
-        return ledger_id
+        if rows:
+            self._entries.append(
+                {
+                    "ledger_id": ledger_id,
+                    "timestamp": time.time(),
+                    "tenant_id": tenant_id,
+                    "type": "CREDIT",
+                    "amount": amount,
+                    "currency": currency,
+                    "metadata": meta,
+                }
+            )
+            return rows[0][0]
+        # ON CONFLICT: already credited under this idempotency key → return existing id.
+        if idempotency_key:
+            existing = self._pg_execute(
+                "ledger_credit_idem_lookup",
+                "SELECT ledger_id FROM ledger_entries WHERE ledger_id = %s AND tenant_id = %s",
+                (ledger_id, tenant_id),
+                fetch=True,
+            )
+            if existing:
+                return existing[0][0]
+        # A fresh uuid4 id cannot collide; fail-closed rather than double-credit.
+        raise PGUnavailableError("ledger credit conflict")
 
     def debit(self, tenant_id: str, amount: float, currency: str = "USD", **meta) -> None:
         self.append(tenant_id, "DEBIT", amount, currency, meta)
