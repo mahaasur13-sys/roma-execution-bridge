@@ -59,3 +59,12 @@ class BaseBackend:
     async def run_command(self, ctx: JobContext, command: str, timeout: int = 600) -> dict:
         """Выполнить команду на бэкенде. Возвращает {status, output, exit_code}."""
         raise NotImplementedError
+
+    async def get_confirmed_duration(self, job_id: str) -> float | None:
+        """Confirmed billed GPU seconds from the backend contract, or None.
+
+        Backends that report an authoritative duration (e.g. Vast.ai instance
+        ``duration_seconds``) override this; others return None and the caller
+        falls back to wall-clock elapsed time.
+        """
+        return None

@@ -156,3 +156,16 @@ async def get_job_status(job_id: str, instance_id: str | None = None) -> dict:
     """Check job status on active backend."""
     backend = get_backend()
     return await backend.get_status(job_id, instance_id)
+
+
+async def get_confirmed_duration(job_id: str, backend_name: str | None = None) -> float | None:
+    """Confirmed billed GPU seconds from the job's backend, or None if unavailable.
+
+    Falls back to None (→ wall-clock) when the backend does not report an
+    authoritative duration or the lookup fails.
+    """
+    try:
+        backend = get_backend(backend_name)
+        return await backend.get_confirmed_duration(job_id)
+    except Exception:
+        return None
