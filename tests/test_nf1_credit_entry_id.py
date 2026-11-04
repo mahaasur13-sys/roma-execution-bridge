@@ -164,6 +164,7 @@ def test_pg_down_raises(monkeypatch, ledger):
         ledger.credit(tenant_id, 9.0)
 
 
+@pytest.mark.pg
 def test_credit_idempotent_same_key_returns_same_id(ledger):
     """Same idempotency_key must return the same ledger_id (no double credit)."""
     tenant_id = _uniq("idem")
@@ -174,6 +175,7 @@ def test_credit_idempotent_same_key_returns_same_id(ledger):
     assert len(_ids(ledger, tenant_id)) == 1
 
 
+@pytest.mark.pg
 def test_credit_idempotent_distinct_keys_return_distinct_ids(ledger):
     """Distinct idempotency keys must produce distinct ledger_ids."""
     tenant_id = _uniq("idem")
@@ -184,6 +186,7 @@ def test_credit_idempotent_distinct_keys_return_distinct_ids(ledger):
     assert len(_ids(ledger, tenant_id)) == 2
 
 
+@pytest.mark.pg
 def test_credit_idempotent_key_is_tenant_scoped(ledger):
     """Same idempotency_key across tenants must yield distinct ids, one entry each."""
     tenant_a = _uniq("idem-a")
@@ -196,6 +199,7 @@ def test_credit_idempotent_key_is_tenant_scoped(ledger):
     assert len(_ids(ledger, tenant_b)) == 1
 
 
+@pytest.mark.pg
 def test_top_up_idempotent_retry(monkeypatch):
     """Retry with the same Idempotency-Key must not double-credit."""
     import routers.billing as billing_router
