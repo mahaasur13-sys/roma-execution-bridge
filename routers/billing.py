@@ -21,6 +21,7 @@ import plan_source
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from audit.event_store import write_event
+from billing.pg_ledger import PGUnavailableError
 from deps import (
     _admin_only,
     billing_ledger,
@@ -53,7 +54,10 @@ async def top_up_balance(request: Request, payload: dict, admin: dict = Depends(
         raise HTTPException(status_code=400, detail="Amount must be finite")
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
-    entry_id = billing_ledger.credit(target_tenant_id, amount, note=f"Admin top-up by {admin['tenant_id']}")
+    try:
+        entry_id = billing_ledger.credit(target_tenant_id, amount, note=f"Admin top-up by {admin['tenant_id']}")
+    except PGUnavailableError as exc:
+        raise HTTPException(status_code=503, detail="Billing unavailable, retry later") from exc
     try:
         write_event(
             admin["tenant_id"],
