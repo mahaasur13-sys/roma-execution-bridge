@@ -100,9 +100,20 @@ def _row(env, job_id):
         return dict(c.execute("SELECT * FROM execution_jobs WHERE id=?", (job_id,)).fetchone())
 
 
-def test_pg_error_in_finalize_leaves_billing_pending_cost_zero(env):
+def test_pg_error_in_finalize_leaves_billing_pending_cost_zero(env, monkeypatch):
     _insert(env, "j1", "running")
     env["ledger"].pg_down = True
+
+    # Simulate a non-zero execution duration: otherwise elapsed ≈ 0 makes
+    # total_cost == 0, which short-circuits the debit before pg_down is reached.
+    mono = [100.0]
+
+    def fake_monotonic():
+        mono[0] += 100.0
+        return mono[0]
+
+    monkeypatch.setattr(ew.time, "monotonic", fake_monotonic)
+
     asyncio.run(ew._execute_and_bill_impl("j1", TENANT, {"task": "echo hi", "backend": "local"}))
     row = _row(env, "j1")
     assert row["status"] == "billing_pending"
