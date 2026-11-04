@@ -244,11 +244,14 @@ def test_top_up_idempotent_retry_after_pg_outage(monkeypatch):
 
     real_credit = fresh.credit
     calls: list[int] = []
+    first_id: dict = {}
 
     def flaky_credit(*args, **kwargs):
         calls.append(1)
         if len(calls) == 1:
-            raise PGUnavailableError("PG outage (test)")
+            # Commit succeeds, then the response is lost (timeout) → 503.
+            first_id["entry_id"] = real_credit(*args, **kwargs)
+            raise PGUnavailableError("PG outage (test) — response lost after commit")
         return real_credit(*args, **kwargs)
 
     monkeypatch.setattr(fresh, "credit", flaky_credit)
@@ -276,5 +279,5 @@ def test_top_up_idempotent_retry_after_pg_outage(monkeypatch):
 
     assert r1.status_code == 503, r1.text
     assert r2.status_code == 200, r2.text
-    assert r2.json()["entry_id"]
+    assert r2.json()["entry_id"] == first_id["entry_id"]
     assert len(_ids(fresh, target)) == 1
