@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 import db_adapter as db
 from deps import verify_api_key
-from billing.finalize import finalize_job_billing
+from billing.finalize import finalize_job_billing, resolve_billable_seconds
 from billing.pg_ledger import PGUnavailableError
 from models.app import RomaStatusResponse
 from audit.event_store import write_event
@@ -82,22 +82,15 @@ async def complete_job(job_id: str, key_info: dict = Depends(verify_api_key)):
 
     # Single source of truth: finalize_job_billing() debits exactly once
     # (idempotent). Prefer confirmed GPU seconds from the backend contract;
-    # fall back to wall-clock elapsed time.
+    # fall back to wall-clock elapsed time. Unknown duration → 409, never billed as 0.
     confirmed = await get_confirmed_duration(job_id, job.get("backend"))
-    if confirmed is not None:
-        actual_duration_s = float(confirmed)
-    else:
-        actual_duration_s = 0.0
-        started_at = job.get("started_at")
-        if started_at:
-            try:
-                started_dt = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
-                if started_dt.tzinfo is None:
-                    started_dt = started_dt.replace(tzinfo=timezone.utc)
-                actual_duration_s = (datetime.now(timezone.utc) - started_dt).total_seconds()
-            except Exception:
-                actual_duration_s = 0.0
-    gpu_sec = max(actual_duration_s, 0.0)
+    gpu_sec = resolve_billable_seconds(confirmed, job.get("started_at"))
+    if gpu_sec is None:
+        logger.error("complete.billing_duration_unknown job=%s started_at=%r", job_id, job.get("started_at"))
+        raise HTTPException(
+            status_code=409,
+            detail="billing_duration_unknown: no confirmed duration and no valid started_at",
+        )
     plan_name = (db.get_tenant(tenant_id) or {}).get("plan", "free")
     try:
         billing_status = finalize_job_billing(tenant_id, job_id, gpu_sec, plan_name, backend=job.get("backend"))

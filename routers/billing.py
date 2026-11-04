@@ -35,6 +35,15 @@ from models.app import CheckoutRequest
 router = APIRouter(prefix="/billing", tags=["billing"])
 
 
+def _balance_or_503(tenant_id: str) -> float:
+    """Balance from the durable ledger, or 503: a PG-down balance is unknown, not 0."""
+    try:
+        return billing_ledger.get_balance(tenant_id)
+    except PGUnavailableError as exc:
+        logger.error("billing.balance_unavailable tenant=%s: %s", tenant_id, exc)
+        raise HTTPException(status_code=503, detail="Billing unavailable, retry later") from exc
+
+
 @router.post("/top-up")
 @limiter.limit("10/minute")
 async def top_up_balance(request: Request, payload: dict, admin: dict = Depends(_admin_only)):
@@ -190,7 +199,7 @@ async def get_billing_ledger(
     tenant_id = key_info["tenant_id"]
     entries = billing_ledger.get_tenant_entries(tenant_id)
     entries = entries[:limit] if limit > 0 else entries
-    balance = billing_ledger.get_balance(tenant_id)
+    balance = _balance_or_503(tenant_id)
     plan_name = key_info.get("plan", "free")
     plan, refusal = _plan_or_refusal(plan_name)
     if plan is None:
@@ -239,7 +248,7 @@ async def check_spend_cap_endpoint(
             "reason": "No spend-cap (enterprise/unlimited)",
             "remaining": "unlimited",
         }
-    balance = billing_ledger.get_balance(tenant_id)
+    balance = _balance_or_503(tenant_id)
     projected = balance + estimated_cost_usd
     allowed = projected <= cap
     pct = round(balance / cap * 100, 1) if cap > 0 else 0
@@ -273,7 +282,7 @@ async def get_balance_endpoint(
     if plan is None:
         raise HTTPException(status_code=503, detail=refusal)
     cap = plan["spend_cap_usd"]
-    balance = billing_ledger.get_balance(tenant_id)
+    balance = _balance_or_503(tenant_id)
     pct = round(balance / cap * 100, 1) if cap > 0 else 0
     return {
         "tenant_id": tenant_id,

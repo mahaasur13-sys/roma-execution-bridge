@@ -1,11 +1,13 @@
 """Job billing finalize — extracted from main (A2)."""
 
 import logging
+import math
 import time
+from datetime import datetime, timezone
 
 import db_adapter as db
 from deps import billing_ledger, alert_dispatcher
-from billing.pg_ledger import PGUnavailableError  # noqa: F401
+from billing.pg_ledger import PGUnavailableError
 from billing.pg_metering import PGMeteringEngine as MeteringEngine
 from monitoring.metrics import (
     gpu_seconds_total,
@@ -141,9 +143,44 @@ def _increment_usage(
 
     roma_debit_total.labels(tenant_id=tenant_id, status="ok").inc()
     roma_debit_amount.labels(tenant_id=tenant_id).observe(total_cost)
-    roma_tenant_balance.labels(tenant_id=tenant_id).set(billing_ledger.get_tenant_balance(tenant_id))
+    # Gauge only: the debit above is already committed, so an unreadable balance
+    # must not turn a persisted debit into a 503 for the caller.
+    try:
+        roma_tenant_balance.labels(tenant_id=tenant_id).set(billing_ledger.get_tenant_balance(tenant_id))
+    except PGUnavailableError as exc:
+        logger.warning("billing.balance_gauge_unavailable tenant=%s: %s", tenant_id, exc)
 
     return total_cost, True
+
+
+def resolve_billable_seconds(confirmed, started_at, now: datetime | None = None) -> float | None:
+    """Billable seconds for a job, or None when the duration is unknown (fail-closed).
+
+    Prefers the backend-confirmed duration; falls back to wall-clock elapsed time
+    since ``started_at``. Returns None — never 0.0 — when neither source yields a
+    finite, non-negative number (missing/unparseable/future ``started_at`` and no
+    valid confirmed value): an unknown duration must not be billed as zero.
+    """
+    if confirmed is not None:
+        try:
+            value = float(confirmed)
+        except (TypeError, ValueError):
+            value = None
+        if value is not None and math.isfinite(value) and value >= 0:
+            return value
+        logger.warning("billing.confirmed_duration_invalid value=%r — fallback to wall-clock", confirmed)
+    if not started_at:
+        return None
+    try:
+        started_dt = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if started_dt.tzinfo is None:
+        started_dt = started_dt.replace(tzinfo=timezone.utc)
+    elapsed = ((now or datetime.now(timezone.utc)) - started_dt).total_seconds()
+    if not math.isfinite(elapsed) or elapsed < 0:
+        return None
+    return elapsed
 
 
 def finalize_job_billing(

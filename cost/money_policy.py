@@ -23,6 +23,8 @@ G-MONEY-FLOAT-TYPES (находка P3.7): типы money-колонок заф�
 
 from __future__ import annotations
 
+import math
+
 # Денежный ФАЙЛОВЫЙ скоуп ratchet'а (знаменатель MONEY PATH).
 # Должен байт-в-байт совпадать с `.ci/coverage-thresholds.json -> money_scope`
 # и с дефолтом `ci/coverage_gate.sh` (m_prefixes/m_contains/m_excl).
@@ -67,3 +69,21 @@ def reject_nullable_money(table: str, column: str, value: object) -> None:
         return
     if spec["reject_none"] and value is None:
         raise ValueError(f"{table}.{column}: money-колонка NOT NULL по договору — None недопустим")
+
+
+def reject_invalid_money_amount(table: str, column: str, value: object) -> None:
+    """Fail-closed: денежная сумма обязана быть конечным неотрицательным числом.
+
+    NaN/±Inf/отрицательное/нечисловое значение — ValueError с именем таблицы/колонки
+    ДО записи. None здесь не проверяется: это договор `reject_nullable_money`.
+    Отрицательные суммы запрещены: направление денег задаёт entry_type
+    (CREDIT/DEBIT), а не знак amount.
+    """
+    if value is None:
+        return
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise ValueError(f"{table}.{column}: денежная сумма должна быть числом, получено {value!r}") from None
+    if not math.isfinite(number) or number < 0:
+        raise ValueError(f"{table}.{column}: денежная сумма должна быть конечной и >= 0, получено {value!r}")
