@@ -100,19 +100,9 @@ def _row(env, job_id):
         return dict(c.execute("SELECT * FROM execution_jobs WHERE id=?", (job_id,)).fetchone())
 
 
-def test_pg_error_in_finalize_leaves_billing_pending_cost_zero(env, monkeypatch):
+def test_pg_error_in_finalize_leaves_billing_pending_cost_zero(env):
     _insert(env, "j1", "running")
-
-    # Fail the finalize step directly: _execute_and_bill_impl must catch the
-    # PGUnavailableError and mark the job billing_pending. Mocking finalize (not
-    # time.monotonic) avoids the elapsed≈0 short-circuit to "no_funds".
-    import main
-
-    def boom(*args, **kwargs):
-        raise PGUnavailableError("pg down (test)")
-
-    monkeypatch.setattr(main, "finalize_job_billing", boom)
-
+    env["ledger"].pg_down = True
     asyncio.run(ew._execute_and_bill_impl("j1", TENANT, {"task": "echo hi", "backend": "local"}))
     row = _row(env, "j1")
     assert row["status"] == "billing_pending"
