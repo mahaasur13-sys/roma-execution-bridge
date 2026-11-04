@@ -54,8 +54,14 @@ async def top_up_balance(request: Request, payload: dict, admin: dict = Depends(
         raise HTTPException(status_code=400, detail="Amount must be finite")
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
+    idempotency_key = request.headers.get("Idempotency-Key") or None
     try:
-        entry_id = billing_ledger.credit(target_tenant_id, amount, note=f"Admin top-up by {admin['tenant_id']}")
+        entry_id = billing_ledger.credit(
+            target_tenant_id,
+            amount,
+            idempotency_key=idempotency_key,
+            note=f"Admin top-up by {admin['tenant_id']}",
+        )
     except PGUnavailableError as exc:
         raise HTTPException(status_code=503, detail="Billing unavailable, retry later") from exc
     try:

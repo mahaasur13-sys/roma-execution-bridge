@@ -162,3 +162,57 @@ def test_pg_down_raises(monkeypatch, ledger):
     tenant_id = _uniq("nf1")
     with pytest.raises(PGUnavailableError):
         ledger.credit(tenant_id, 9.0)
+
+
+def test_credit_idempotent_same_key_returns_same_id(ledger):
+    """Same idempotency_key must return the same ledger_id (no double credit)."""
+    tenant_id = _uniq("idem")
+    first = ledger.credit(tenant_id, 5.0, idempotency_key="topup-1")
+    second = ledger.credit(tenant_id, 5.0, idempotency_key="topup-1")
+
+    assert first == second
+    assert len(_ids(ledger, tenant_id)) == 1
+
+
+def test_credit_idempotent_distinct_keys_return_distinct_ids(ledger):
+    """Distinct idempotency keys must produce distinct ledger_ids."""
+    tenant_id = _uniq("idem")
+    first = ledger.credit(tenant_id, 5.0, idempotency_key="topup-1")
+    second = ledger.credit(tenant_id, 5.0, idempotency_key="topup-2")
+
+    assert first != second
+    assert len(_ids(ledger, tenant_id)) == 2
+
+
+def test_top_up_idempotent_retry(monkeypatch):
+    """Retry with the same Idempotency-Key must not double-credit."""
+    import routers.billing as billing_router
+
+    fresh = PGBillingLedger()
+    monkeypatch.setattr(billing_router, "billing_ledger", fresh)
+
+    import deps
+
+    monkeypatch.setenv("ROMA_ADMIN_KEYS", "test-admin-key")
+    monkeypatch.setattr(deps, "ADMIN_IP_ALLOWLIST", "*")
+
+    import main
+
+    async def _noop():
+        return None
+
+    monkeypatch.setattr(main, "init_worker", lambda: None)
+    monkeypatch.setattr(main, "poll_and_execute", _noop)
+
+    target = _uniq("idem-target")
+    client = TestClient(main.app, raise_server_exceptions=False)
+    headers = {"X-API-Key": "test-admin-key", "Idempotency-Key": "topup-abc"}
+    body = {"tenant_id": target, "amount": 3.0}
+
+    r1 = client.post("/billing/top-up", json=body, headers=headers)
+    r2 = client.post("/billing/top-up", json=body, headers=headers)
+
+    assert r1.status_code == 200, r1.text
+    assert r2.status_code == 200, r2.text
+    assert r1.json()["entry_id"] == r2.json()["entry_id"]
+    assert len(_ids(fresh, target)) == 1
