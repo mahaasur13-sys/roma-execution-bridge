@@ -1,4 +1,4 @@
-"""ROMA Billing Ledger — PostgreSQL-backed with connection pool, retry, in-memory fallback."""
+"""ROMA Billing Ledger — PostgreSQL-backed with connection pool and retry; money writes and balance are fail-closed."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from billing.pg_connection import get_pg_manager, PGUnavailableError
 from billing.spend_caps import MONEY_POLICY
-from cost.money_policy import reject_nullable_money
+from cost.money_policy import reject_invalid_money_amount, reject_nullable_money
 
 logger = logging.getLogger("roma.billing.ledger")
 
@@ -120,25 +120,35 @@ class PGBillingLedger:
         currency: str = "USD",
         metadata: dict = None,
     ) -> str:
-        """Record an entry and return its ``ledger_id`` (NF-1).
+        """Record an entry and return its ``ledger_id`` (NF-1) — PG-first, fail-closed.
 
-        The id is generated before the in-memory mirror and the best-effort PG
-        write, so the caller always gets a non-empty id — even when PG is down
-        and only the in-memory entry survives.
+        The PG row is written first; only after a successful write is the entry
+        mirrored into the in-memory list. When PG cannot persist the entry,
+        ``PGUnavailableError`` is raised and nothing is kept in memory — a money
+        entry that exists only in one worker's memory is lost on restart and
+        invisible to other workers (same contract as ``credit()``).
         """
         # NOT NULL-договор (MONEY_WHITELIST_POLICY): amount/currency — обязательные
         # money-колонки; None отклоняется до INSERT с именем таблицы/колонки.
         reject_nullable_money("ledger_entries", "amount", amount)
         reject_nullable_money("ledger_entries", "currency", currency)
+        # NaN/Inf/отрицательная сумма — отказ до INSERT (направление задаёт entry_type).
+        reject_invalid_money_amount("ledger_entries", "amount", amount)
         entry_type = entry_type.upper()
         meta_json = json.dumps(metadata or {})
         # uuid4, not hash(): the built-in hash() is salted per process
         # (PYTHONHASHSEED), so the same entry got a different ledger_id in every
         # worker and the unique-key contract was not reproducible. One id is used
-        # for both the in-memory mirror and the PG row.
+        # for both the PG row and the in-memory mirror.
         ledger_id = f"led-{int(time.time() * 1000)}-{uuid4().hex[:12]}"
-        # Always mirror into the in-memory ledger (used as a PG-down fallback and
-        # for tests); the PG write is best-effort and never drops the entry on failure.
+        # Raises PGUnavailableError (fail-closed); _pg_execute already logs the
+        # underlying error under operation="ledger_append".
+        self._pg_execute(
+            "ledger_append",
+            """INSERT INTO ledger_entries (ledger_id, tenant_id, entry_type, amount, currency, metadata)
+               VALUES (%s, %s, %s, %s, %s, %s::jsonb)""",
+            (ledger_id, tenant_id, entry_type, amount, currency, meta_json),
+        )
         self._entries.append(
             {
                 "ledger_id": ledger_id,
@@ -150,26 +160,6 @@ class PGBillingLedger:
                 "metadata": metadata or {},
             }
         )
-        try:
-            self._pg_execute(
-                "ledger_append",
-                """INSERT INTO ledger_entries (ledger_id, tenant_id, entry_type, amount, currency, metadata)
-                   VALUES (%s, %s, %s, %s, %s, %s::jsonb)""",
-                (ledger_id, tenant_id, entry_type, amount, currency, meta_json),
-            )
-        except PGUnavailableError as exc:
-            # Never silent: the entry survives only in the in-memory mirror, so
-            # a dropped PG write must be visible. _pg_execute already logs the
-            # underlying error (including a unique-key collision, which it
-            # wraps into PGUnavailableError) under operation="ledger_append".
-            logger.warning(
-                "ledger_append: PG write failed, entry kept in memory only "
-                "ledger_id=%s tenant_id=%s currency=%s error=%s",
-                ledger_id,
-                tenant_id,
-                currency,
-                exc,
-            )
         return ledger_id
 
     def credit(
@@ -185,6 +175,7 @@ class PGBillingLedger:
         """
         reject_nullable_money("ledger_entries", "amount", amount)
         reject_nullable_money("ledger_entries", "currency", currency)
+        reject_invalid_money_amount("ledger_entries", "amount", amount)
         meta = dict(meta or {})
         if idempotency_key:
             digest = hashlib.sha256(f"{tenant_id}:{idempotency_key}".encode()).hexdigest()
@@ -229,6 +220,7 @@ class PGBillingLedger:
         raise PGUnavailableError("ledger credit conflict")
 
     def debit(self, tenant_id: str, amount: float, currency: str = "USD", **meta) -> None:
+        """Unconditional DEBIT via ``append()``: raises PGUnavailableError when PG is down."""
         self.append(tenant_id, "DEBIT", amount, currency, meta)
 
     def _txn(self, operation, statements, fetch_last=True):
@@ -266,6 +258,7 @@ class PGBillingLedger:
     def debit_if_funds(self, tenant_id, amount, currency="USD", idempotency_key=None, **meta) -> str | None:
         if amount < 0:
             raise ValueError("debit amount must be >= 0")
+        reject_invalid_money_amount("ledger_entries", "amount", amount)
         if idempotency_key:
             digest = hashlib.sha256(f"{tenant_id}:{idempotency_key}".encode()).hexdigest()
             ledger_id = f"led-{digest[:24]}"
@@ -363,22 +356,20 @@ class PGBillingLedger:
         return 0.0
 
     def get_tenant_balance(self, tenant_id: str) -> float:
-        try:
-            rows = self._pg_execute(
-                "ledger_balance",
-                """SELECT COALESCE(SUM(CASE WHEN entry_type='CREDIT' THEN amount ELSE -amount END), 0)
-                   FROM ledger_entries WHERE tenant_id = %s""",
-                (tenant_id,),
-                fetch=True,
-            )
-            return float(rows[0][0])
-        except PGUnavailableError:
-            pass
-        balance = 0.0
-        for e in self._entries:
-            if e["tenant_id"] == tenant_id:
-                balance += e["amount"] if e["type"] == "CREDIT" else -e["amount"]
-        return balance
+        """Balance from PG only — raises PGUnavailableError when PG is down (fail-closed).
+
+        The in-memory mirror is per-process and incomplete (it never sees entries
+        written by other workers), so a balance computed from it is a wrong number,
+        not a degraded one; callers must refuse (admission → deny, routes → 503).
+        """
+        rows = self._pg_execute(
+            "ledger_balance",
+            """SELECT COALESCE(SUM(CASE WHEN entry_type='CREDIT' THEN amount ELSE -amount END), 0)
+               FROM ledger_entries WHERE tenant_id = %s""",
+            (tenant_id,),
+            fetch=True,
+        )
+        return float(rows[0][0])
 
     def get_balance(self, tenant_id: str) -> float:
         return self.get_tenant_balance(tenant_id)

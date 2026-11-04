@@ -70,9 +70,22 @@ def t_billing():
 
 
 def t_ledger():
-    from billing.pg_ledger import PGBillingLedger as BillingLedger
+    from billing.pg_ledger import PGBillingLedger as BillingLedger, PGUnavailableError
 
     l = BillingLedger()
+    if not os.environ.get('PG_DSN'):
+        # Smoke-джоб без PG: ledger обязан отказать (fail-closed), а не писать в память.
+        for op in (
+            lambda: l.append(tenant_id='tp', entry_type='CREDIT', amount=1.0, metadata={}),
+            lambda: l.get_tenant_balance('tp'),
+        ):
+            try:
+                op()
+            except PGUnavailableError:
+                continue
+            raise AssertionError("ledger without PG must raise PGUnavailableError (fail-closed)")
+        assert l._entries == [], "ledger without PG must not keep in-memory entries"
+        return
     l.append(tenant_id='tp', entry_type='CREDIT', amount=1.0, metadata={})
     bal = l.get_tenant_balance('tp')
     assert bal >= 0, "ledger failed"

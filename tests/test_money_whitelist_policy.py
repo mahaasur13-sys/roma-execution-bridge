@@ -90,7 +90,8 @@ def test_ledger_append_accept_path_covers_not_null_contract() -> None:
 
     Покрытие money-скоупа: строки валидации в `billing/pg_ledger.py::append`
     (amount + currency) исполняются только через живой accept-путь; прямой вызов
-    `reject_nullable_money` их не покрывает. Без PG append пишет in-memory fallback.
+    `reject_nullable_money` их не покрывает. Append — PG-first, fail-closed (FIX2):
+    без живого PG accept-путь поднимает PGUnavailableError, поэтому тест требует PG.
     """
     ledger = PGBillingLedger()
     ledger.append("t-money-policy", "DEBIT", 5.0, "USD")

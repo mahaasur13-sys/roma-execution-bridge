@@ -10,7 +10,7 @@ import db_adapter as db
 from policy_engine import evaluate_policies
 from policy_transition import validate_transition
 from audit_events import write_audit_event
-from billing.finalize import finalize_job_billing
+from billing.finalize import finalize_job_billing, resolve_billable_seconds
 from billing.pg_ledger import PGUnavailableError
 from backends.dispatcher import get_confirmed_duration
 
@@ -37,6 +37,16 @@ def _worker_token_valid(token: str | None) -> bool:
     if not worker_token:
         return False
     return hmac.compare_digest(token or "", worker_token)
+
+
+async def _billable_seconds_or_409(job_id: str, job: dict) -> float:
+    """Billable seconds (confirmed → wall-clock) or 409: unknown duration is never billed as 0."""
+    confirmed = await get_confirmed_duration(job_id, job.get("backend"))
+    gpu_sec = resolve_billable_seconds(confirmed, job.get("started_at"))
+    if gpu_sec is None:
+        logger.error("billing.duration_unknown job=%s started_at=%r", job_id, job.get("started_at"))
+        raise HTTPException(409, "billing_duration_unknown: no confirmed duration and no valid started_at")
+    return gpu_sec
 
 
 @router.post("/{job_id}/retry")
@@ -131,21 +141,7 @@ async def complete_job(job_id: str, payload: dict = {}, x_api_key: str = Header(
         )
         raise HTTPException(409, tr["reason"])
     # Billing: debit exactly once before marking completed (fail-closed).
-    confirmed = await get_confirmed_duration(job_id, job.get("backend"))
-    if confirmed is not None:
-        actual_duration_s = float(confirmed)
-    else:
-        actual_duration_s = 0.0
-        started_at = job.get("started_at")
-        if started_at:
-            try:
-                started_dt = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
-                if started_dt.tzinfo is None:
-                    started_dt = started_dt.replace(tzinfo=timezone.utc)
-                actual_duration_s = (datetime.now(timezone.utc) - started_dt).total_seconds()
-            except Exception:
-                actual_duration_s = 0.0
-    gpu_sec = max(actual_duration_s, 0.0)
+    gpu_sec = await _billable_seconds_or_409(job_id, job)
     plan_name = (db.get_tenant(tenant_id) or {}).get("plan", "free")
     try:
         billing_status = finalize_job_billing(tenant_id, job_id, gpu_sec, plan_name, backend=job.get("backend"))
@@ -187,6 +183,10 @@ async def worker_ack(
         job = db.get_execution_job(job_id)
         if not job or job.get("tenant_id") != tenant_id:
             raise HTTPException(404, "Job not found")
+        if action == "fail":
+            # A tenant must not close its own running job without billing: running → failed
+            # skips finalize_job_billing entirely. Only the s2s worker reports failure.
+            raise HTTPException(403, "action=fail requires the worker token (X-Roma-Worker-Token)")
 
     status_map = {"start": "running", "complete": "completed", "fail": "failed"}
     new_status = status_map[action]
@@ -196,21 +196,7 @@ async def worker_ack(
 
     if action == "complete":
         # Billing: debit exactly once before marking completed (fail-closed).
-        confirmed = await get_confirmed_duration(job_id, job.get("backend"))
-        if confirmed is not None:
-            actual_duration_s = float(confirmed)
-        else:
-            actual_duration_s = 0.0
-            started_at = job.get("started_at")
-            if started_at:
-                try:
-                    started_dt = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
-                    if started_dt.tzinfo is None:
-                        started_dt = started_dt.replace(tzinfo=timezone.utc)
-                    actual_duration_s = (datetime.now(timezone.utc) - started_dt).total_seconds()
-                except Exception:
-                    actual_duration_s = 0.0
-        gpu_sec = max(actual_duration_s, 0.0)
+        gpu_sec = await _billable_seconds_or_409(job_id, job)
         plan_name = (db.get_tenant(tenant_id) or {}).get("plan", "free")
         try:
             billing_status = finalize_job_billing(tenant_id, job_id, gpu_sec, plan_name, backend=job.get("backend"))
