@@ -173,8 +173,33 @@ class PGBillingLedger:
         return ledger_id
 
     def credit(self, tenant_id: str, amount: float, currency: str = "USD", **meta) -> str:
-        """Credit a tenant and return the resulting ``ledger_id`` (never None)."""
-        return self.append(tenant_id, "CREDIT", amount, currency, meta)
+        """Credit a tenant — PG-first, fail-closed.
+
+        Raises PGUnavailableError when PG cannot persist the credit; no silent
+        in-memory-only fallback (a top-up that survives only in RAM is a lie).
+        """
+        reject_nullable_money("ledger_entries", "amount", amount)
+        reject_nullable_money("ledger_entries", "currency", currency)
+        meta_json = json.dumps(meta or {})
+        ledger_id = f"led-{int(time.time() * 1000)}-{uuid4().hex[:12]}"
+        self._pg_execute(
+            "ledger_credit",
+            """INSERT INTO ledger_entries (ledger_id, tenant_id, entry_type, amount, currency, metadata)
+               VALUES (%s, %s, 'CREDIT', %s, %s, %s::jsonb)""",
+            (ledger_id, tenant_id, amount, currency, meta_json),
+        )
+        self._entries.append(
+            {
+                "ledger_id": ledger_id,
+                "timestamp": time.time(),
+                "tenant_id": tenant_id,
+                "type": "CREDIT",
+                "amount": amount,
+                "currency": currency,
+                "metadata": meta or {},
+            }
+        )
+        return ledger_id
 
     def debit(self, tenant_id: str, amount: float, currency: str = "USD", **meta) -> None:
         self.append(tenant_id, "DEBIT", amount, currency, meta)
@@ -225,25 +250,39 @@ class PGBillingLedger:
         meta_json = json.dumps(meta)
         lock_key = zlib.crc32(tenant_id.encode()) & 0x7FFFFFFF
 
-        rows = self._txn(
-            "ledger_debit_if_funds",
-            [
-                ("SELECT pg_advisory_xact_lock(%s)", (lock_key,)),
-                (
-                    _DEBIT_IF_FUNDS_INSERT_SQL,
+        try:
+            rows = self._txn(
+                "ledger_debit_if_funds",
+                [
+                    ("SELECT pg_advisory_xact_lock(%s)", (lock_key,)),
                     (
-                        tenant_id,
-                        ledger_id,
-                        tenant_id,
-                        amount,
-                        currency,
-                        meta_json,
-                        amount,
+                        _DEBIT_IF_FUNDS_INSERT_SQL,
+                        (
+                            tenant_id,
+                            ledger_id,
+                            tenant_id,
+                            amount,
+                            currency,
+                            meta_json,
+                            amount,
+                        ),
                     ),
-                ),
-            ],
-            fetch_last=True,
-        )
+                ],
+                fetch_last=True,
+            )
+        except PGUnavailableError:
+            # Indeterminate COMMIT: the INSERT may have committed server-side.
+            # Re-check by ledger_id (idempotent) before treating it as failed.
+            if idempotency_key:
+                existing = self._pg_execute(
+                    "ledger_idem_lookup",
+                    "SELECT ledger_id FROM ledger_entries WHERE ledger_id = %s AND tenant_id = %s",
+                    (ledger_id, tenant_id),
+                    fetch=True,
+                )
+                if existing:
+                    return existing[0][0]
+            raise
 
         if rows:
             rid = rows[0][0]

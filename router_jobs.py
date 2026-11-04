@@ -1,13 +1,18 @@
 """DecisionOS — /v1/jobs router (Week 4 decomposited)."""
 
 from fastapi import APIRouter, Header, HTTPException
+import hmac
 import logging
+import os
 from datetime import datetime, timezone
 
 import db_adapter as db
 from policy_engine import evaluate_policies
 from policy_transition import validate_transition
 from audit_events import write_audit_event
+from billing.finalize import finalize_job_billing
+from billing.pg_ledger import PGUnavailableError
+from backends.dispatcher import get_confirmed_duration
 
 logger = logging.getLogger("roma.jobs")
 router = APIRouter(prefix="/v1/jobs", tags=["jobs"])
@@ -24,6 +29,14 @@ def _tenant_from_key(x_api_key: str = Header(None)) -> str:
     if not tenant:
         raise HTTPException(401, "Invalid API key")
     return tenant.get("tenant_id", "")
+
+
+def _worker_token_valid(token: str | None) -> bool:
+    """Timing-safe worker-token check for server-to-server calls (fail-closed)."""
+    worker_token = os.getenv("ROMA_GPU_WORKER_TOKEN", "")
+    if not worker_token:
+        return False
+    return hmac.compare_digest(token or "", worker_token)
 
 
 @router.post("/{job_id}/retry")
@@ -117,6 +130,32 @@ async def complete_job(job_id: str, payload: dict = {}, x_api_key: str = Header(
             {"from": current, "to": "completed"},
         )
         raise HTTPException(409, tr["reason"])
+    # Billing: debit exactly once before marking completed (fail-closed).
+    confirmed = await get_confirmed_duration(job_id, job.get("backend"))
+    if confirmed is not None:
+        actual_duration_s = float(confirmed)
+    else:
+        actual_duration_s = 0.0
+        started_at = job.get("started_at")
+        if started_at:
+            try:
+                started_dt = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
+                if started_dt.tzinfo is None:
+                    started_dt = started_dt.replace(tzinfo=timezone.utc)
+                actual_duration_s = (datetime.now(timezone.utc) - started_dt).total_seconds()
+            except Exception:
+                actual_duration_s = 0.0
+    gpu_sec = max(actual_duration_s, 0.0)
+    plan_name = (db.get_tenant(tenant_id) or {}).get("plan", "free")
+    try:
+        billing_status = finalize_job_billing(tenant_id, job_id, gpu_sec, plan_name, backend=job.get("backend"))
+    except PGUnavailableError as exc:
+        logger.error("complete.billing_pg_error job=%s: %s", job_id, exc)
+        raise HTTPException(503, "Billing unavailable, retry later")
+    if billing_status == "no_funds":
+        raise HTTPException(402, "Insufficient funds")
+    if billing_status == "skip":
+        return {"job_id": job_id, "status": job.get("status"), "billing": "skip"}
     db.update_execution_job(
         job_id,
         status="completed",
@@ -127,23 +166,61 @@ async def complete_job(job_id: str, payload: dict = {}, x_api_key: str = Header(
 
 
 @router.post("/{job_id}/worker-ack")
-async def worker_ack(job_id: str, payload: dict, x_api_key: str = Header(None)):
-    # FIXME(P0-4): if this is meant to be called BY workers (not tenants), it needs
-    # a separate worker token and an assignment check. Until then it is tenant-scoped:
-    # the caller may only acknowledge their own job.
+async def worker_ack(
+    job_id: str,
+    payload: dict,
+    x_api_key: str = Header(None),
+    x_worker_token: str = Header(None, alias="X-Roma-Worker-Token"),
+):
+    # Server-to-server (worker token) takes precedence; without it the caller
+    # is tenant-scoped and may only acknowledge their own job (legacy).
     action = payload.get("action", "start")
     if action not in ("start", "complete", "fail"):
         raise HTTPException(400, "action must be start|complete|fail")
-    tenant_id = _tenant_from_key(x_api_key)
-    job = db.get_execution_job(job_id)
-    if not job or job.get("tenant_id") != tenant_id:
-        raise HTTPException(404, "Job not found")
+    if _worker_token_valid(x_worker_token):
+        job = db.get_execution_job(job_id)
+        if not job:
+            raise HTTPException(404, "Job not found")
+        tenant_id = job.get("tenant_id")
+    else:
+        tenant_id = _tenant_from_key(x_api_key)
+        job = db.get_execution_job(job_id)
+        if not job or job.get("tenant_id") != tenant_id:
+            raise HTTPException(404, "Job not found")
 
     status_map = {"start": "running", "complete": "completed", "fail": "failed"}
     new_status = status_map[action]
     tr = validate_transition(job.get("status", ""), new_status)
     if not tr["allowed"]:
         raise HTTPException(409, tr["reason"])
+
+    if action == "complete":
+        # Billing: debit exactly once before marking completed (fail-closed).
+        confirmed = await get_confirmed_duration(job_id, job.get("backend"))
+        if confirmed is not None:
+            actual_duration_s = float(confirmed)
+        else:
+            actual_duration_s = 0.0
+            started_at = job.get("started_at")
+            if started_at:
+                try:
+                    started_dt = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
+                    if started_dt.tzinfo is None:
+                        started_dt = started_dt.replace(tzinfo=timezone.utc)
+                    actual_duration_s = (datetime.now(timezone.utc) - started_dt).total_seconds()
+                except Exception:
+                    actual_duration_s = 0.0
+        gpu_sec = max(actual_duration_s, 0.0)
+        plan_name = (db.get_tenant(tenant_id) or {}).get("plan", "free")
+        try:
+            billing_status = finalize_job_billing(tenant_id, job_id, gpu_sec, plan_name, backend=job.get("backend"))
+        except PGUnavailableError as exc:
+            logger.error("worker_ack.billing_pg_error job=%s: %s", job_id, exc)
+            raise HTTPException(503, "Billing unavailable, retry later")
+        if billing_status == "no_funds":
+            raise HTTPException(402, "Insufficient funds")
+        if billing_status == "skip":
+            return {"job_id": job_id, "status": job.get("status"), "billing": "skip"}
 
     error = payload.get("error") if action == "fail" else None
     completed_at = datetime.now(timezone.utc).isoformat() if action in ("complete", "fail") else None

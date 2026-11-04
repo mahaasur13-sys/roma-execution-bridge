@@ -527,12 +527,22 @@ class VastaiBackend(BaseBackend):
             "backend": "vastai",
         }
 
-    async def destroy_instance(self, instance_id: str) -> dict:
+    async def destroy_instance_api(self, instance_id: str) -> dict:
         success = self.destroy_instance(int(instance_id))
         return {
             "status": "destroyed" if success else "error",
             "instance_id": instance_id,
         }
+
+    async def get_confirmed_duration(self, job_id: str) -> float | None:
+        """Confirmed billed seconds from the Vast.ai instance contract."""
+        contract_id = self._job_instance_map.get(job_id)
+        if not contract_id:
+            return None
+        instances = self.get_instances(contract_id=contract_id)
+        if not instances:
+            return None
+        return float(instances[0].duration_seconds)
 
     # ── background monitor ──────────────────────────────────────────
 
