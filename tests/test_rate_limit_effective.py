@@ -145,7 +145,7 @@ def test_limit_returns_429_on_request_after_budget(monkeypatch, method, path, bo
 class _StubLedger:
     """Keeps the 429 test off the ledger: only the gate and limiter are under test."""
 
-    def credit(self, tenant_id, amount, note=""):
+    def credit(self, tenant_id, amount, note="", idempotency_key=None):
         return f"led-stub-{uuid.uuid4().hex[:8]}"
 
     def get_balance(self, tenant_id):

@@ -172,7 +172,9 @@ class PGBillingLedger:
             )
         return ledger_id
 
-    def credit(self, tenant_id: str, amount: float, currency: str = "USD", idempotency_key: str | None = None, **meta) -> str:
+    def credit(
+        self, tenant_id: str, amount: float, currency: str = "USD", idempotency_key: str | None = None, **meta
+    ) -> str:
         """Credit a tenant — PG-first, fail-closed, optionally idempotent.
 
         When ``idempotency_key`` is supplied the ``ledger_id`` is deterministic

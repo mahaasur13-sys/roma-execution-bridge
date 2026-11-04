@@ -184,6 +184,18 @@ def test_credit_idempotent_distinct_keys_return_distinct_ids(ledger):
     assert len(_ids(ledger, tenant_id)) == 2
 
 
+def test_credit_idempotent_key_is_tenant_scoped(ledger):
+    """Same idempotency_key across tenants must yield distinct ids, one entry each."""
+    tenant_a = _uniq("idem-a")
+    tenant_b = _uniq("idem-b")
+    id_a = ledger.credit(tenant_a, 5.0, idempotency_key="shared-key")
+    id_b = ledger.credit(tenant_b, 5.0, idempotency_key="shared-key")
+
+    assert id_a != id_b
+    assert len(_ids(ledger, tenant_a)) == 1
+    assert len(_ids(ledger, tenant_b)) == 1
+
+
 def test_top_up_idempotent_retry(monkeypatch):
     """Retry with the same Idempotency-Key must not double-credit."""
     import routers.billing as billing_router
