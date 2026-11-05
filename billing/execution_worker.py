@@ -363,7 +363,10 @@ async def _execute_and_bill_impl(
         status = "timeout"
         logger.warning("execute_and_bill.timeout job=%s waited=%.0fs", job_id, waited)
 
-    elapsed = time.monotonic() - start_time
+    # OT-99: фиксируем биллингуемое время ДО транзакции и храним то же самое в
+    # duration_seconds — свипер при повторе после неопределённого COMMIT обязан
+    # дать ту же сумму (иначе сверка по ledger_id разойдётся).
+    elapsed = round(time.monotonic() - start_time, 2)
     now_iso = datetime.now(timezone.utc).isoformat()
     cost_usd = round(elapsed * 0.00001, 8)
 
