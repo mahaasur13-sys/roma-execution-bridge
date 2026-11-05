@@ -25,7 +25,7 @@ def test_insufficient_funds_returns_none(ledger, monkeypatch):
     """Недостаточно средств (CTE вставил 0 строк) → None, fallback не пишем."""
     monkeypatch.setattr(ledger, "_txn", lambda *a, **k: [])
     monkeypatch.setattr(ledger, "_pg_execute", lambda *a, **k: [])
-    assert ledger.debit_if_funds("test-atomicity", 1.0, idempotency_key="job:atomicity") is None
+    assert ledger.debit_if_funds("test-atomicity", 1.0, idempotency_key="job:atomicity")[0] is None
     # fail-closed: in-memory fallback НЕ должен пополниться
     assert ledger._entries == []
 
@@ -33,7 +33,7 @@ def test_insufficient_funds_returns_none(ledger, monkeypatch):
 def test_success_micro_debit_returns_ledger_id(ledger, monkeypatch):
     """Успешный micro-debit → возвращается ledger_id."""
     monkeypatch.setattr(ledger, "_txn", lambda *a, **k: [("led-1",)])
-    assert ledger.debit_if_funds("test-atomicity", 0.0000667, idempotency_key="job:atomicity") == "led-1"
+    assert ledger.debit_if_funds("test-atomicity", 0.0000667, idempotency_key="job:atomicity")[0] == "led-1"
 
 
 def test_pg_down_fails_closed(ledger, monkeypatch):

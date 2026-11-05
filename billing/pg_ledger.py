@@ -255,7 +255,7 @@ class PGBillingLedger:
             logger.error("BillingLedger.%s PG error: %s", operation, e)
             raise PGUnavailableError(str(e)) from e
 
-    def debit_if_funds(self, tenant_id, amount, currency="USD", idempotency_key=None, **meta) -> str | None:
+    def debit_if_funds(self, tenant_id, amount, currency="USD", idempotency_key=None, **meta) -> tuple[str | None, bool]:
         if amount < 0:
             raise ValueError("debit amount must be >= 0")
         reject_invalid_money_amount("ledger_entries", "amount", amount)
@@ -296,7 +296,7 @@ class PGBillingLedger:
             if idempotency_key:
                 rid = self._ledger_idem_lookup(ledger_id, tenant_id, amount, currency, meta)
                 if rid:
-                    return rid
+                    return rid, False
             raise
 
         if rows:
@@ -312,10 +312,10 @@ class PGBillingLedger:
                     "metadata": meta,
                 }
             )
-            return rid
+            return rid, True
         if idempotency_key:
-            return self._ledger_idem_lookup(ledger_id, tenant_id, amount, currency, meta)
-        return None
+            return self._ledger_idem_lookup(ledger_id, tenant_id, amount, currency, meta), False
+        return None, False
 
     def _ledger_idem_lookup(self, ledger_id, tenant_id, expected_amount, currency, meta) -> str | None:
         """OT-98: сверка существующей записи перед возвратом успеха при конфликте.

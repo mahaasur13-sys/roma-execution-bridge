@@ -39,12 +39,12 @@ class FakeLedger:
         assert idempotency_key, "finalize обязан передавать ключ"
         lid = "led-" + hashlib.sha256(f"{tenant_id}:{idempotency_key}".encode()).hexdigest()[:24]
         if lid in self.debits:
-            return lid
+            return lid, False
         if self.balance < amount:
-            return None
+            return None, False
         self.balance -= amount
         self.debits[lid] = amount
-        return lid
+        return lid, True
 
 
 @pytest.fixture

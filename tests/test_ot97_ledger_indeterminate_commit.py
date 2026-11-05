@@ -58,12 +58,12 @@ def test_s8_indeterminate_commit_retry_finds_by_ledger_id(monkeypatch):
 
     monkeypatch.setattr(ledger, "_txn", ambiguous_commit)
 
-    rid = ledger.debit_if_funds(tenant, amount, idempotency_key=key)
+    rid, _ = ledger.debit_if_funds(tenant, amount, idempotency_key=key)
     assert rid == ledger_id, "повтор должен найти запись по ledger_id (не ложный 503)"
     assert _count(ledger, ledger_id, tenant) == 1
 
     # Повтор без вмешательства: ON CONFLICT DO NOTHING → тот же ledger_id, одна запись.
     monkeypatch.undo()
-    rid2 = ledger.debit_if_funds(tenant, amount, idempotency_key=key)
+    rid2, _ = ledger.debit_if_funds(tenant, amount, idempotency_key=key)
     assert rid2 == ledger_id
     assert _count(ledger, ledger_id, tenant) == 1, "двойное списание"

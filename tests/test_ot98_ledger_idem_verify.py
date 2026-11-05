@@ -45,7 +45,7 @@ def test_s9_idem_lookup_verifies_fields():
 
     # Несовпадение: CREDIT, другая сумма/валюта/job → fail-closed (None), не чужой id.
     _seed_row(ledger, ledger_id, tenant, "CREDIT", 999.0, "EUR", "other")
-    rid = ledger.debit_if_funds(tenant, amount, idempotency_key=key, job_id="expected")
+    rid, _ = ledger.debit_if_funds(tenant, amount, idempotency_key=key, job_id="expected")
     assert rid is None, "несовпадение полей не должно возвращать существующий ledger_id"
 
     # Совпадение: DEBIT с теми же суммой/валютой/job → возврат ledger_id.
@@ -54,5 +54,5 @@ def test_s9_idem_lookup_verifies_fields():
     ledger.credit(tenant2, 100.0)
     lid2 = "led-" + hashlib.sha256(f"{tenant2}:{key2}".encode()).hexdigest()[:24]
     _seed_row(ledger, lid2, tenant2, "DEBIT", amount, "USD", "expected")
-    rid2 = ledger.debit_if_funds(tenant2, amount, idempotency_key=key2, job_id="expected")
+    rid2, _ = ledger.debit_if_funds(tenant2, amount, idempotency_key=key2, job_id="expected")
     assert rid2 == lid2, "совпадающая запись должна вернуть ledger_id"

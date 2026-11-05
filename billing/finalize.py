@@ -62,7 +62,7 @@ def _increment_usage(
     # Один атомарный дебет на ВСЮ сумму job'а. Metadata — ПЛОСКИМИ kwargs
     # (семантика **meta): НЕ передавать вложенным metadata={...} — иначе
     # metadata->>'job_id' в БД станет NULL.
-    ledger_id = billing_ledger.debit_if_funds(
+    ledger_id, is_new = billing_ledger.debit_if_funds(
         tenant_id,
         total_cost,
         idempotency_key=(f"job:{job_id}" if job_id else None),
@@ -82,6 +82,11 @@ def _increment_usage(
             total_cost,
         )
         return total_cost, False
+
+    # OT-74: параллельный finalize той же задачи (idempotent replay) не должен
+    # второй раз инкрементить метрики — только новая строка леджера.
+    if not is_new:
+        return total_cost, True
 
     if gpu_sec > 0:
         metering_engine.record(
