@@ -42,6 +42,11 @@ BILLING_PENDING_NO_FUNDS_RETRY_S = float(os.environ.get("BILLING_PENDING_NO_FUND
 _last_billing_pending_sweep = 0.0
 _no_funds_next_try: dict[str, float] = {}
 _TERMINAL_STATUSES = ("completed", "timeout", "failed", "cancelled")
+# G5: финальная запись воркера не перезаписывает статус, выставленный другим
+# путём, пока задача исполнялась (/cancel, /complete, свипер, drain). Набор =
+# db_adapter.CANCEL_BLOCKED_STATUSES: терминальные + сырые backend-статусы +
+# billing_pending.
+_FINAL_WRITE_BLOCKED_STATUSES = _TERMINAL_STATUSES + ("error", "stopped", "destroyed", "billing_pending")
 
 
 def _track(task):
@@ -387,7 +392,11 @@ async def _execute_and_bill_impl(
     if not billed_ok and status == "completed":
         write_status = "billing_pending"
 
-    _db_adapter.update_execution_job(
+    # G5 (CAS): пока задача исполнялась, её могли отменить (/cancel) или закрыть
+    # (/complete). Слепой UPDATE перезаписал бы этот статус, а billing_pending ещё
+    # и отдал бы отменённую задачу свиперу на DEBIT. Пишем только из
+    # нетерминального статуса; 0 строк → только лог, без дебета.
+    n = _db_adapter.update_execution_job(
         job_id,
         status=write_status,
         completed_at=now_iso,
@@ -395,7 +404,17 @@ async def _execute_and_bill_impl(
         duration_seconds=round(elapsed, 2),
         error="" if billed_ok else f"billing:{billing_status}",
         tenant_id=tenant_id,
+        if_status_not_in=_FINAL_WRITE_BLOCKED_STATUSES,
     )
+    if n == 0:
+        (logger.error if billed_ok else logger.warning)(
+            "execute_and_bill.final_update_skipped job=%s tenant=%s worker_status=%s billing=%s: "
+            "статус уже изменён другим путём, финальная запись не применена",
+            job_id,
+            tenant_id,
+            write_status,
+            billing_status,
+        )
 
     # Шаг 6: Уничтожить инстанс (только для vastai)
     if backend_name == "vastai" and contract_id:
