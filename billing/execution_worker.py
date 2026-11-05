@@ -130,7 +130,10 @@ def sweep_billing_pending_once(now: float | None = None) -> dict:
         roma_billing_pending_jobs.set(_db_adapter.count_billing_pending_jobs())
     except Exception as exc:
         logger.warning("billing_pending.count_failed: %s", exc)
-    jobs = _db_adapter.get_billing_pending_jobs(limit=BILLING_PENDING_BATCH)
+    # OT-80: приостановленные no_funds-задачи отфильтровываем в SQL (до LIMIT),
+    # чтобы не занимали слоты батча.
+    paused_ids = [jid for jid, t in _no_funds_next_try.items() if t > now]
+    jobs = _db_adapter.get_billing_pending_jobs(limit=BILLING_PENDING_BATCH, exclude_ids=paused_ids)
     from main import finalize_job_billing
 
     for job in jobs:
