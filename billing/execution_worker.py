@@ -166,6 +166,10 @@ def sweep_billing_pending_once(now: float | None = None) -> dict:
         elif status not in outcomes:
             status = "error"
         outcomes[status] += 1
+        if status == "pg_error":
+            # OT-79: PG недоступен — не долбим оставшиеся задачи (каждая даёт
+            # ~3s connection timeout и блокирует event loop).
+            break
     if len(jobs) < BILLING_PENDING_BATCH:
         # Видели все pending: выкинуть бэкофф по джобам, которые ушли из очереди.
         seen = {j["id"] for j in jobs}
@@ -192,7 +196,9 @@ async def poll_and_execute():
             if time.monotonic() - _last_billing_pending_sweep >= _BILLING_PENDING_SWEEP_INTERVAL_S:
                 _last_billing_pending_sweep = time.monotonic()
                 try:
-                    sweep_billing_pending_once()
+                    # OT-79: синхронный свипер снимаем с event loop (to_thread) —
+                    # при недоступном PG каждый job давал бы ~3s блокировки.
+                    await asyncio.to_thread(sweep_billing_pending_once)
                 except Exception as e:
                     logger.warning("poll_and_execute.billing_pending_sweep_error: %s", e)
             # Атомарный claim: queued → running уже выполнен в БД, и вернулись
