@@ -321,9 +321,23 @@ class PGBillingLedger:
             if idempotency_key:
                 rid = self._ledger_idem_lookup(ledger_id, tenant_id, amount, currency, meta)
                 if rid:
-                    # R1: если запись нашлась — её закоммитил ЭТОТ вызов (INSERT прошёл,
-                    # а не был no-op по существующему ключу), значит это НОВЫЙ дебет:
-                    # usage/метрики обязаны писаться, иначе ledger расходится с usage.
+                    # R1: различаем «INSERT этого вызова» (новый дебет → usage/метрики
+                    # писать) и «уже существующая строка» (retry → usage уже писан в
+                    # прошлом вызове этого процесса). Держим процесс-локальное зеркало
+                    # _entries: списанный в этом процессе ledger_id там уже есть.
+                    if any(e.get("ledger_id") == rid for e in self._entries):
+                        return rid, False
+                    self._entries.append(
+                        {
+                            "ledger_id": rid,
+                            "timestamp": time.time(),
+                            "tenant_id": tenant_id,
+                            "type": "DEBIT",
+                            "amount": amount,
+                            "currency": currency,
+                            "metadata": meta,
+                        }
+                    )
                     return rid, True
             raise
 

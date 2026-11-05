@@ -113,6 +113,39 @@ def _tenant_plan(tenant_id: str) -> str:
         return "free"
 
 
+def _mark_refund_pending(job_id: str, tenant_id: str, cost_usd: float, exc: Exception) -> None:
+    """C10 fail-closed: refund не удался — durable-маркер + alert (не молча).
+
+    DEBIT не должен остаться без возврата бесследно: маркер error=refund_pending
+    делает ситуацию видимой и ретраибельной, alert поднимает её человеку/автоматике.
+    """
+    logger.error(
+        "execute_and_bill.refund_failed_permanently job=%s tenant=%s amount=%.8f: %s",
+        job_id,
+        tenant_id,
+        cost_usd,
+        exc,
+    )
+    try:
+        _db_adapter.update_execution_job(job_id, error="refund_pending:debit_exists", tenant_id=tenant_id)
+    except Exception as marker_exc:
+        logger.error("execute_and_bill.refund_marker_failed job=%s: %s", job_id, marker_exc)
+    try:
+        from deps import alert_dispatcher
+        from alerts import Alert, AlertLevel
+
+        alert_dispatcher.send(
+            Alert(
+                level=AlertLevel.WARNING,
+                title="💸 Refund pending (debit exists)",
+                body=f"Job `{job_id}` tenant `{tenant_id}`: DEBIT ${cost_usd:.8f} без возврата — refund упал.",
+                tags={"tenant_id": tenant_id, "job_id": job_id, "event": "refund_pending"},
+            )
+        )
+    except Exception as alert_exc:
+        logger.error("execute_and_bill.refund_alert_failed job=%s: %s", job_id, alert_exc)
+
+
 def sweep_billing_pending_once(now: float | None = None) -> dict:
     """Повторно финализировать биллинг для billing_pending-джобов.
 
@@ -455,18 +488,37 @@ async def _execute_and_bill_impl(
             # без запроса клиента), идемпотентно по refund:<job_id>.
             cur = _db_adapter.get_execution_job(job_id)
             if cur and cur.get("tenant_id") == tenant_id and cur.get("status") == "cancelled":
+                # C10 fail-closed (retry + компенсация): refund не должен молча
+                # оставлять DEBIT. Retry идемпотентен по refund:<job_id>.
                 try:
                     from main import refund_job
 
-                    refund_job(tenant_id, cost_usd, job_id=job_id, reason="cancelled_after_debit")
-                    logger.warning(
-                        "execute_and_bill.refunded_cancelled job=%s tenant=%s amount=%.8f",
-                        job_id,
-                        tenant_id,
-                        cost_usd,
-                    )
+                    last_exc = None
+                    for attempt in range(3):
+                        try:
+                            refund_job(tenant_id, cost_usd, job_id=job_id, reason="cancelled_after_debit")
+                            logger.warning(
+                                "execute_and_bill.refunded_cancelled job=%s tenant=%s amount=%.8f",
+                                job_id,
+                                tenant_id,
+                                cost_usd,
+                            )
+                            break
+                        except Exception as exc:
+                            last_exc = exc
+                            logger.warning(
+                                "execute_and_bill.refund_attempt_failed attempt=%d job=%s: %s",
+                                attempt + 1,
+                                job_id,
+                                exc,
+                            )
+                            await asyncio.sleep(0.5 * (attempt + 1))
+                    else:
+                        # C10 fail-closed: исчерпаны попытки — durable-маркер + alert.
+                        _mark_refund_pending(job_id, tenant_id, cost_usd, last_exc)
                 except Exception as exc:
-                    logger.error("execute_and_bill.refund_failed job=%s: %s", job_id, exc)
+                    # Даже import/цикл упал — не молча.
+                    _mark_refund_pending(job_id, tenant_id, cost_usd, exc)
         (logger.error if billed_ok else logger.warning)(
             "execute_and_bill.final_update_skipped job=%s tenant=%s worker_status=%s billing=%s: "
             "статус уже изменён другим путём, финальная запись не применена",

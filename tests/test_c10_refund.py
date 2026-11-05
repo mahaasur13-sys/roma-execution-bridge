@@ -113,3 +113,80 @@ def test_worker_refunds_cancelled_job(tmp_path, monkeypatch):
     assert ledger.refunds, "отменённая задача должна вернуть дебет"
     assert ledger.refunds[0][0] == "job-c10"
     assert ledger.refunds[0][2] == "cancelled_after_debit"
+
+
+def test_worker_refund_failure_marks_pending(tmp_path, monkeypatch):
+    """C10 fail-closed: refund падает → durable-маркер refund_pending, не молча."""
+    import billing.execution_worker as ew_mod
+
+    path = tmp_path / "roma.db"
+
+    def _conn():
+        c = sqlite3.connect(str(path))
+        c.row_factory = sqlite3.Row
+        return c
+
+    class FailingRefundLedger:
+        def get_tenant_balance(self, tid):
+            return 100.0
+
+        def debit_if_funds(self, tid, amount, currency="USD", idempotency_key=None, **meta):
+            lid = "led-" + hashlib.sha256(f"{tid}:{idempotency_key}".encode()).hexdigest()[:24]
+            return lid, True
+
+        def refund(self, tid, amount, currency="USD", job_id=None, reason="refund"):
+            raise RuntimeError("refund PG down (test)")
+
+    monkeypatch.setattr(db, "_pg_enabled", lambda: False)
+    monkeypatch.setattr(db, "_sqlite_conn", _conn)
+    monkeypatch.setattr(ew, "_db_adapter", db)
+    monkeypatch.setattr(fin, "billing_ledger", FailingRefundLedger())
+    monkeypatch.setattr(fin.metering_engine, "record", lambda **k: None)
+    monkeypatch.setattr(ew, "_no_funds_next_try", {}, raising=False)
+    ticks = itertools.chain([1000.0], itertools.repeat(1100.0))
+    monkeypatch.setattr(ew, "time", types.SimpleNamespace(monotonic=lambda: next(ticks)))
+
+    async def _nosleep(*a, **k):
+        return None
+
+    monkeypatch.setattr(ew_mod, "asyncio", types.SimpleNamespace(sleep=_nosleep))
+
+    async def fake_dispatch(**k):
+        return {"backend": "local", "status": "running"}
+
+    async def fake_status(job_id, backend_job_id):
+        return {"status": "completed"}
+
+    async def fake_cancel(job_id, tenant_id):
+        return None
+
+    monkeypatch.setattr(
+        ew, "_backend_manager", {"dispatch": fake_dispatch, "status": fake_status, "cancel": fake_cancel}
+    )
+
+    import main
+
+    real_finalize = fin.finalize_job_billing
+
+    def finalize_then_cancel(*a, **k):
+        res = real_finalize(*a, **k)
+        db.update_execution_job("job-c10-fail", status="cancelled", tenant_id=TENANT, if_status_not_in=db.CANCEL_BLOCKED_STATUSES)
+        return res
+
+    monkeypatch.setattr(main, "finalize_job_billing", finalize_then_cancel)
+
+    with _conn() as c:
+        db._ensure_execution_jobs_table(c)
+        c.execute(
+            "INSERT INTO execution_jobs (id, tenant_id, status, error, cost_usd, backend, started_at)"
+            " VALUES (?, ?, 'running', '', 0.0, 'local', datetime('now', '-60 seconds'))",
+            ("job-c10-fail", TENANT),
+        )
+        c.commit()
+
+    asyncio.run(ew._execute_and_bill_impl("job-c10-fail", TENANT, {"backend": "local", "task": "x"}))
+
+    with _conn() as c:
+        row = dict(c.execute("SELECT * FROM execution_jobs WHERE id=?", ("job-c10-fail",)).fetchone())
+    # fail-closed: DEBIT не оставлен молча — на строке durable-маркер.
+    assert row["error"] == "refund_pending:debit_exists", row
