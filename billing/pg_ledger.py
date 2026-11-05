@@ -259,14 +259,14 @@ class PGBillingLedger:
         if amount < 0:
             raise ValueError("debit amount must be >= 0")
         reject_invalid_money_amount("ledger_entries", "amount", amount)
-        if idempotency_key:
-            digest = hashlib.sha256(f"{tenant_id}:{idempotency_key}".encode()).hexdigest()
-            ledger_id = f"led-{digest[:24]}"
-        else:
-            ledger_id = f"led-{int(time.time() * 1000)}-{uuid4().hex[:12]}"
+        # OT-70: без идемпотентного ключа ledger_id был бы случайным — повторный
+        # вызов после неопределённого COMMIT дал бы двойное списание.
+        if not idempotency_key:
+            raise ValueError("debit_if_funds requires idempotency_key (or job_id)")
+        digest = hashlib.sha256(f"{tenant_id}:{idempotency_key}".encode()).hexdigest()
+        ledger_id = f"led-{digest[:24]}"
         meta = dict(meta or {})
-        if idempotency_key:
-            meta["idempotency_key"] = idempotency_key
+        meta["idempotency_key"] = idempotency_key
         meta_json = json.dumps(meta)
         lock_key = zlib.crc32(tenant_id.encode()) & 0x7FFFFFFF
 
