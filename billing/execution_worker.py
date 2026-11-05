@@ -261,14 +261,23 @@ def sweep_billing_pending_once(now: float | None = None) -> dict:
                 _db_adapter.update_execution_job(jid, error=no_funds_marker, tenant_id=tid)
         elif status == "mismatch":
             # R2: детерминированный конфликт ключа идемпотентности — пометить
-            # терминально и не крутить в свипере (retry не разрешит).
+            # терминально и не крутить в свипере (retry не разрешит). Сохранить exec.
             logger.error("billing_pending.mismatch job=%s tenant=%s", jid, tid)
             try:
+                exec_status = _billing_exec_status(job.get("error")) or "error"
                 _db_adapter.update_execution_job(
-                    jid, status="error", error="billing:mismatch", tenant_id=tid
+                    jid, status=exec_status, error="billing:mismatch", tenant_id=tid
                 )
             except Exception as exc:
                 logger.error("billing_pending.mismatch_update.error job=%s: %s", jid, exc)
+        elif status == "skip":
+            # job не найден / чужой tenant / уже финал / 0-cost — выйти из billing_pending.
+            exec_status = _billing_exec_status(job.get("error")) or "completed"
+            try:
+                _db_adapter.update_execution_job(jid, status=exec_status, error="", tenant_id=tid)
+                logger.info("billing_pending.skip_cleared job=%s → status=%s", jid, exec_status)
+            except Exception as exc:
+                logger.error("billing_pending.skip_update.error job=%s: %s", jid, exc)
         elif status not in outcomes:
             status = "error"
         outcomes[status] += 1
@@ -555,13 +564,20 @@ async def _execute_and_bill_impl(
     billed_ok = billing_status == "ok"
     write_status = status
     if billing_status == "mismatch":
-        # R2: детерминированный конфликт ключа идемпотентности — retry не разрешит,
-        # не отдаём свиперу на повторный дебет (иначе вечный billing_pending).
-        write_status = "error"
+        # R2: детерминированный конфликт ключа идемпотентности — retry не разрешит.
+        # Не подменяем exec-статус на "error": timeout/failed сохраняется.
+        write_status = status if status in ("timeout", "failed") else "error"
     elif billing_status in ("pg_error", "error", "no_funds") and status in ("completed", "timeout", "failed"):
         # R1 (caveat 3): usage-запись не сохранилась (pg_error/error) или средств нет
         # (no_funds) — retry через billing_pending свипер. skip (0-cost/уже финал) сюда не идёт.
         write_status = "billing_pending"
+
+    if billed_ok or billing_status == "skip":
+        _error = ""
+    elif billing_status == "mismatch":
+        _error = "billing:mismatch"
+    else:
+        _error = _billing_pending_error(billing_status, status)
 
     # G5 (CAS): пока задача исполнялась, её могли отменить (/cancel) или закрыть
     # (/complete). Слепой UPDATE перезаписал бы этот статус, а billing_pending ещё
@@ -573,7 +589,7 @@ async def _execute_and_bill_impl(
         completed_at=now_iso,
         cost_usd=cost_usd if billed_ok else 0.0,
         duration_seconds=round(elapsed, 2),
-        error="" if billed_ok else _billing_pending_error(billing_status, status),
+        error=_error,
         tenant_id=tenant_id,
         if_status_not_in=_FINAL_WRITE_BLOCKED_STATUSES,
     )

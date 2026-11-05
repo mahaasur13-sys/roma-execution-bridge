@@ -121,3 +121,53 @@ def test_sweeper_restores_timeout_status_after_billing(tmp_path, monkeypatch):
         row = dict(c.execute("SELECT status, error FROM execution_jobs WHERE id='job-restore'").fetchone())
     assert row["status"] == "timeout", f"свипер не должен ставить completed: {row['status']!r}"
     assert row["error"] == "", row
+
+
+def _seed_pending(tmp_path, monkeypatch, error):
+    path = tmp_path / "roma.db"
+
+    def _conn():
+        c = sqlite3.connect(str(path))
+        c.row_factory = sqlite3.Row
+        return c
+
+    monkeypatch.setattr(db, "_pg_enabled", lambda: False)
+    monkeypatch.setattr(db, "_sqlite_conn", _conn)
+    monkeypatch.setattr(ew, "_db_adapter", db)
+    monkeypatch.setattr(ew, "_no_funds_next_try", {}, raising=False)
+    with _conn() as c:
+        db._ensure_execution_jobs_table(c)
+        c.execute(
+            "INSERT INTO execution_jobs (id, tenant_id, status, error, duration_seconds, cost_usd, backend, completed_at)"
+            " VALUES (?, ?, 'billing_pending', ?, 100.0, 0.0, 'local', datetime('now'))",
+            ("job-br", TENANT, error),
+        )
+        c.commit()
+    return _conn
+
+
+def test_sweeper_mismatch_preserves_exec_status(tmp_path, monkeypatch):
+    import main as main_mod
+
+    _conn = _seed_pending(tmp_path, monkeypatch, "billing:pg_error:exec=timeout")
+    monkeypatch.setattr(main_mod, "finalize_job_billing", lambda *a, **k: "mismatch")
+
+    out = ew.sweep_billing_pending_once()
+    assert out["mismatch"] == 1, out
+    with _conn() as c:
+        row = dict(c.execute("SELECT status FROM execution_jobs WHERE id='job-br'").fetchone())
+    assert row["status"] == "timeout", f"mismatch не должен подменять exec-статус: {row['status']!r}"
+
+
+def test_sweeper_skip_moves_out_of_billing_pending(tmp_path, monkeypatch):
+    import main as main_mod
+
+    _conn = _seed_pending(tmp_path, monkeypatch, "billing:pg_error:exec=failed")
+    monkeypatch.setattr(main_mod, "finalize_job_billing", lambda *a, **k: "skip")
+
+    out = ew.sweep_billing_pending_once()
+    assert out["skip"] == 1, out
+    with _conn() as c:
+        row = dict(c.execute("SELECT status, error FROM execution_jobs WHERE id='job-br'").fetchone())
+    assert row["status"] == "failed", f"skip должен вывести из billing_pending в exec-статус: {row['status']!r}"
+    assert row["error"] == "", row
