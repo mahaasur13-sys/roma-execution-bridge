@@ -31,12 +31,14 @@ def test_record_attempts_both_durable_writes_and_returns_event(monkeypatch):
 
     def _ok(operation, query, params=None, fetch=False):
         calls.append(operation)
-        return None
+        # usage_insert использует fetch=True + RETURNING 1 → вставка успешна.
+        return [(1,)] if fetch else None
 
     monkeypatch.setattr(engine, "_pg_execute", _ok)
 
-    ev = engine.record("gpu_usage", tenant="t1", gpu_seconds=10.0, job_id="j1", billed=True)
+    ev, inserted = engine.record("gpu_usage", tenant="t1", gpu_seconds=10.0, job_id="j1", billed=True)
     assert ev.tenant_id == "t1"
     assert ev.value == 10.0
+    assert inserted is True
     # usage_insert must be attempted first, then the totals upsert.
     assert calls == ["usage_insert", "usage_totals_upsert"]
