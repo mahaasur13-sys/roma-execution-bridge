@@ -130,7 +130,12 @@ def _mark_refund_pending(job_id: str, tenant_id: str, cost_usd: float, exc: Exce
         exc,
     )
     try:
-        _db_adapter.update_execution_job(job_id, error="refund_pending:debit_exists", tenant_id=tenant_id)
+        # C10: сумма возврата хранится В МАРКЕРЕ (cost_usd на строке в окне g5d часто 0).
+        _db_adapter.update_execution_job(
+            job_id,
+            error=f"refund_pending:debit_exists:{cost_usd:.8f}",
+            tenant_id=tenant_id,
+        )
     except Exception as marker_exc:
         logger.error("execute_and_bill.refund_marker_failed job=%s: %s", job_id, marker_exc)
     try:
@@ -148,6 +153,17 @@ def _mark_refund_pending(job_id: str, tenant_id: str, cost_usd: float, exc: Exce
         )
     except Exception as alert_exc:
         logger.error("execute_and_bill.refund_alert_failed job=%s: %s", job_id, alert_exc)
+
+
+def _parse_refund_amount(marker: str) -> float | None:
+    """Извлечь сумму из маркера ``refund_pending:debit_exists:<сумма>`` (None если не парсится)."""
+    prefix = "refund_pending:debit_exists:"
+    if not marker or not marker.startswith(prefix):
+        return None
+    try:
+        return float(marker[len(prefix):])
+    except (TypeError, ValueError):
+        return None
 
 
 def sweep_billing_pending_once(now: float | None = None) -> dict:
@@ -250,9 +266,9 @@ def sweep_billing_pending_once(now: float | None = None) -> dict:
 def sweep_refund_pending_once() -> dict:
     """C10 (ВРЕМЕННЫЙ костыль до DDL): повторно провести refund для cancelled-джобов.
 
-    Маркер refund_pending читается из error — любая другая запись в error его
-    затрёт. До отдельного поля refund_required (DDL-раунд) это временный признак.
-    refund идемпотентен по refund:<job_id> — повтор безопасен.
+    Маркер refund_pending:debit_exists:<сумма> читается из error — любая другая
+    запись в error его затрёт. До отдельного поля refund_required (DDL-раунд) это
+    временный признак. refund идемпотентен по refund:<job_id> — повтор безопасен.
     """
     outcomes = {"ok": 0, "error": 0, "pg_error": 0}
     if _db_adapter is None:
@@ -267,7 +283,12 @@ def sweep_refund_pending_once() -> dict:
     for job in jobs:
         jid = job["id"]
         tid = job.get("tenant_id")
-        amount = float(job.get("cost_usd") or 0.0)
+        amount = _parse_refund_amount(job.get("error") or "")
+        if amount is None:
+            # Сумма не распарсилась — не возвращать 0 и не крутить вечно.
+            logger.error("refund_pending.bad_marker job=%s error=%r", jid, job.get("error"))
+            outcomes["error"] += 1
+            continue
         try:
             refund_job(tid, amount, job_id=jid, reason="cancelled_after_debit")
             # успех → снять маркер (job остаётся cancelled).
@@ -513,7 +534,9 @@ async def _execute_and_bill_impl(
         # R2: детерминированный конфликт ключа идемпотентности — retry не разрешит,
         # не отдаём свиперу на повторный дебет (иначе вечный billing_pending).
         write_status = "error"
-    elif not billed_ok and status == "completed":
+    elif not billed_ok and status in ("completed", "timeout", "failed"):
+        # R1 (caveat 3): usage-запись не сохранилась (pg_error/error) — retry через
+        # billing_pending свипер, иначе usage потеряется для timeout/failed.
         write_status = "billing_pending"
 
     # G5 (CAS): пока задача исполнялась, её могли отменить (/cancel) или закрыть

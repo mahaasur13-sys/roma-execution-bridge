@@ -188,8 +188,9 @@ def test_worker_refund_failure_marks_pending(tmp_path, monkeypatch):
 
     with _conn() as c:
         row = dict(c.execute("SELECT * FROM execution_jobs WHERE id=?", ("job-c10-fail",)).fetchone())
-    # fail-closed: DEBIT не оставлен молча — на строке durable-маркер.
-    assert row["error"] == "refund_pending:debit_exists", row
+    # fail-closed: DEBIT не оставлен молча — на строке durable-маркер с суммой.
+    assert row["error"].startswith("refund_pending:debit_exists:"), row
+    assert ew._parse_refund_amount(row["error"]) > 0.0, row
 
 
 def test_refund_sweeper_retries_pending(tmp_path, monkeypatch):
@@ -213,7 +214,7 @@ def test_refund_sweeper_retries_pending(tmp_path, monkeypatch):
         db._ensure_execution_jobs_table(c)
         c.execute(
             "INSERT INTO execution_jobs (id, tenant_id, status, error, cost_usd, backend, completed_at)"
-            " VALUES (?, ?, 'cancelled', 'refund_pending:debit_exists', 0.001, 'local', datetime('now'))",
+            " VALUES (?, ?, 'cancelled', 'refund_pending:debit_exists:0.001', 0.0, 'local', datetime('now'))",
             ("job-sweep", TENANT),
         )
         c.commit()

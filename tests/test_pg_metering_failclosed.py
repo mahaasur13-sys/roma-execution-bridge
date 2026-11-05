@@ -16,29 +16,64 @@ from billing.pg_connection import PGUnavailableError
 def test_record_fails_closed_when_pg_write_fails(monkeypatch):
     engine = PGMeteringEngine()
 
-    def _boom(*args, **kwargs):
-        raise PGUnavailableError("simulated PG down")
+    class FakeMgr:
+        enabled = True
 
-    monkeypatch.setattr(engine, "_pg_execute", _boom)
+        def get_connection(self, operation):
+            raise PGUnavailableError("simulated PG down")
+
+    monkeypatch.setattr(engine, "_pg", FakeMgr())
 
     with pytest.raises(PGUnavailableError):
         engine.record("gpu_usage", tenant="t1", gpu_seconds=10.0, job_id="j1")
 
 
-def test_record_attempts_both_durable_writes_and_returns_event(monkeypatch):
+def test_record_returns_inserted_and_orders_totals_after(monkeypatch):
     engine = PGMeteringEngine()
-    calls: list[str] = []
+    executed: list[str] = []
 
-    def _ok(operation, query, params=None, fetch=False):
-        calls.append(operation)
-        # usage_insert использует fetch=True + RETURNING 1 → вставка успешна.
-        return [(1,)] if fetch else None
+    class FakeCursor:
+        def __init__(self):
+            self._sql = ""
 
-    monkeypatch.setattr(engine, "_pg_execute", _ok)
+        def execute(self, sql, params=None):
+            self._sql = sql
+            executed.append("usage" if "usage_events" in sql else "totals")
+
+        def fetchall(self):
+            return [(1,)] if "usage_events" in self._sql else []
+
+        def close(self):
+            pass
+
+    class FakeConn:
+        def cursor(self):
+            return FakeCursor()
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+    class FakeMgr:
+        enabled = True
+
+        def get_connection(self, operation):
+            class Ctx:
+                def __enter__(self):
+                    return FakeConn()
+
+                def __exit__(self, *a):
+                    return False
+
+            return Ctx()
+
+    monkeypatch.setattr(engine, "_pg", FakeMgr())
 
     ev, inserted = engine.record("gpu_usage", tenant="t1", gpu_seconds=10.0, job_id="j1", billed=True)
     assert ev.tenant_id == "t1"
     assert ev.value == 10.0
     assert inserted is True
-    # usage_insert must be attempted first, then the totals upsert.
-    assert calls == ["usage_insert", "usage_totals_upsert"]
+    # usage INSERT — первое действие, totals — строго после него (одна транзакция).
+    assert executed == ["usage", "totals"]

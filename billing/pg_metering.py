@@ -100,44 +100,53 @@ class PGMeteringEngine:
                 "INSERT INTO usage_events (tenant_id, event_type, value, cost_usd, job_id, metadata, billed)"
                 f" VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s){conflict} RETURNING 1"
             )
-            # R1: признак «новый дебет» — из rowcount вставки в usage_events
-            # (RETURNING 1: есть строка → новый; пусто → retry/конфликт).
-            rows = self._pg_execute(
-                "usage_insert",
-                _usage_insert_sql,
-                (
-                    tenant,
-                    event_type,
-                    val,
-                    ev.cost_usd,
-                    job_id,
-                    json.dumps({}),
-                    bool(billed),
-                ),
-                fetch=True,
+            _totals_sql = (
+                "INSERT INTO tenant_usage_totals (tenant_id, gpu_seconds, cpu_seconds, gb_seconds, total_cost, jobs_completed)"
+                " VALUES (%s, %s, %s, %s, %s, 0)"
+                " ON CONFLICT (tenant_id) DO UPDATE SET"
+                "   gpu_seconds = tenant_usage_totals.gpu_seconds + EXCLUDED.gpu_seconds,"
+                "   cpu_seconds = tenant_usage_totals.cpu_seconds + EXCLUDED.cpu_seconds,"
+                "   gb_seconds  = tenant_usage_totals.gb_seconds  + EXCLUDED.gb_seconds,"
+                "   total_cost  = tenant_usage_totals.total_cost  + EXCLUDED.total_cost,"
+                "   updated_at  = NOW()"
             )
-            inserted = bool(rows)
-            if inserted:
-                # totals идут СТРОГО ПОСЛЕ успешной вставки usage_events (caveat 1):
-                # падение между ними не даст расхождения на retry.
-                self._pg_execute(
-                    "usage_totals_upsert",
-                    """INSERT INTO tenant_usage_totals (tenant_id, gpu_seconds, cpu_seconds, gb_seconds, total_cost, jobs_completed)
-                       VALUES (%s, %s, %s, %s, %s, 0)
-                       ON CONFLICT (tenant_id) DO UPDATE SET
-                         gpu_seconds = tenant_usage_totals.gpu_seconds + EXCLUDED.gpu_seconds,
-                         cpu_seconds = tenant_usage_totals.cpu_seconds + EXCLUDED.cpu_seconds,
-                         gb_seconds  = tenant_usage_totals.gb_seconds  + EXCLUDED.gb_seconds,
-                         total_cost  = tenant_usage_totals.total_cost  + EXCLUDED.total_cost,
-                         updated_at  = NOW()""",
-                    (
-                        tenant,
-                        gpu_seconds if event_type == "gpu_usage" else 0,
-                        cpu_seconds if event_type == "cpu_usage" else 0,
-                        gb_seconds if event_type == "storage_usage" else 0,
-                        ev.cost_usd,
-                    ),
-                )
+
+            if not self._pg.enabled:
+                raise PGUnavailableError("PG not configured or unavailable")
+            # R1 (caveat 2): usage_events INSERT и totals upsert — в ОДНОЙ транзакции.
+            # Падение между вставкой usage и обновлением totals невозможно: commit
+            # происходит по выходу из контекста, иначе rollback обеих.
+            inserted = False
+            with self._pg.get_connection("usage_record") as conn:
+                cur = conn.cursor()
+                try:
+                    cur.execute(
+                        _usage_insert_sql,
+                        (
+                            tenant,
+                            event_type,
+                            val,
+                            ev.cost_usd,
+                            job_id,
+                            json.dumps({}),
+                            bool(billed),
+                        ),
+                    )
+                    rows = cur.fetchall()
+                    inserted = bool(rows)
+                    if inserted:
+                        cur.execute(
+                            _totals_sql,
+                            (
+                                tenant,
+                                gpu_seconds if event_type == "gpu_usage" else 0,
+                                cpu_seconds if event_type == "cpu_usage" else 0,
+                                gb_seconds if event_type == "storage_usage" else 0,
+                                ev.cost_usd,
+                            ),
+                        )
+                finally:
+                    cur.close()
             return ev, inserted
         except PGUnavailableError as exc:
             # RaaS-01: a failed durable write must not be silently swallowed, and
@@ -152,6 +161,9 @@ class PGMeteringEngine:
                 exc,
             )
             raise
+        except Exception as e:
+            logger.error("MeteringEngine.usage_record PG error: %s", e)
+            raise PGUnavailableError(str(e)) from e
 
     def snapshot(self, tenant: str = None) -> Dict:
         try:
