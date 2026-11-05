@@ -227,6 +227,23 @@ class PGBillingLedger:
         # A fresh uuid4 id cannot collide; fail-closed rather than double-credit.
         raise PGUnavailableError("ledger credit conflict")
 
+    def refund(self, tenant_id: str, amount: float, currency: str = "USD", job_id: str | None = None, reason: str = "refund") -> str:
+        """C10: вернуть дебет (CREDIT-запись), идемпотентно по refund:<job_id>.
+
+        Возврат без запроса клиента (отменённая/недоставленная работа). Повторный
+        вызов с тем же job_id не удваивает возврат.
+        """
+        if not job_id:
+            raise ValueError("refund requires job_id (idempotency key)")
+        return self.credit(
+            tenant_id,
+            amount,
+            currency=currency,
+            idempotency_key=f"refund:{job_id}",
+            refund_for=job_id,
+            reason=reason,
+        )
+
     def debit(self, tenant_id: str, amount: float, currency: str = "USD", **meta) -> None:
         """Unconditional DEBIT via ``append()``: raises PGUnavailableError when PG is down."""
         self.append(tenant_id, "DEBIT", amount, currency, meta)

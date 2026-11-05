@@ -449,6 +449,24 @@ async def _execute_and_bill_impl(
         if_status_not_in=_FINAL_WRITE_BLOCKED_STATUSES,
     )
     if n == 0:
+        if billed_ok:
+            # C10 (g5d): деньги списаны, но финальная запись не применилась — задачу
+            # отменили между дебетом и финальным UPDATE. Вернуть деньги (возврат
+            # без запроса клиента), идемпотентно по refund:<job_id>.
+            cur = _db_adapter.get_execution_job(job_id)
+            if cur and cur.get("tenant_id") == tenant_id and cur.get("status") == "cancelled":
+                try:
+                    from main import refund_job
+
+                    refund_job(tenant_id, cost_usd, job_id=job_id, reason="cancelled_after_debit")
+                    logger.warning(
+                        "execute_and_bill.refunded_cancelled job=%s tenant=%s amount=%.8f",
+                        job_id,
+                        tenant_id,
+                        cost_usd,
+                    )
+                except Exception as exc:
+                    logger.error("execute_and_bill.refund_failed job=%s: %s", job_id, exc)
         (logger.error if billed_ok else logger.warning)(
             "execute_and_bill.final_update_skipped job=%s tenant=%s worker_status=%s billing=%s: "
             "статус уже изменён другим путём, финальная запись не применена",

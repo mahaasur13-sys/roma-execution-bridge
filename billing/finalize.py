@@ -215,3 +215,12 @@ def finalize_job_billing(
     except LedgerIdemMismatchError:
         return "mismatch"
     return "ok" if debited else "no_funds"
+
+
+def refund_job(tenant_id: str, amount: float, job_id: str, reason: str = "refund") -> str:
+    """C10: вернуть дебет задачи (CREDIT-запись, идемпотентно по refund:<job_id>).
+
+    Использует тот же billing_ledger, что и finalize_job_billing, поэтому в тестах
+    достаточно подменить billing.finalize.billing_ledger.
+    """
+    return billing_ledger.refund(tenant_id, amount, job_id=job_id, reason=reason)

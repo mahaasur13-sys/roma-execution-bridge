@@ -68,6 +68,7 @@ from alerts import Alert, AlertLevel
 from billing.finalize import (
     _increment_usage as _increment_usage,
     finalize_job_billing as finalize_job_billing,
+    refund_job as refund_job,
     metering_engine as metering_engine,
 )
 from billing.pg_ledger import PGUnavailableError as PGUnavailableError
