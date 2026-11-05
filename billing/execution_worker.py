@@ -446,6 +446,7 @@ async def execute_and_bill(job_id: str, tenant_id: str, payload: dict) -> dict:
                 completed_at=datetime.now(timezone.utc).isoformat(),
                 error="cancelled by drain_inflight",
                 tenant_id=tenant_id,
+                if_status_not_in=_FINAL_WRITE_BLOCKED_STATUSES,
             )
         except Exception:
             pass
