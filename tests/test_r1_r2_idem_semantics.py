@@ -42,7 +42,7 @@ def test_r1_indeterminate_commit_returns_is_new_true(ledger, monkeypatch):
     assert is_new is True, "R1: строка закоммитилась этим вызовом — это новый дебет"
 
 
-def test_r1_indeterminate_retry_does_not_double_usage(ledger, monkeypatch):
+def test_r1_indeterminate_retry_idempotent_debit(ledger, monkeypatch):
     tenant, key, amount, job_id = "t-r1-retry", "job:j1r", 1.0, "j1r"
     lid = _ledger_id(tenant, key)
 
@@ -55,14 +55,11 @@ def test_r1_indeterminate_retry_does_not_double_usage(ledger, monkeypatch):
     monkeypatch.setattr(ledger, "_txn", boom)
     monkeypatch.setattr(ledger, "_pg_execute", fake_lookup)
 
-    rid1, is_new1 = ledger.debit_if_funds(tenant, amount, idempotency_key=key, job_id=job_id)
-    assert rid1 == lid and is_new1 is True
-
-    # Повторный вызов с тем же ключом после неопределённого COMMIT — это retry:
-    # usage/метрики уже писаны в прошлом вызове этого процесса → is_new=False.
-    rid2, is_new2 = ledger.debit_if_funds(tenant, amount, idempotency_key=key, job_id=job_id)
-    assert rid2 == lid
-    assert is_new2 is False, "R1: retry не должен дублировать usage (is_new=False)"
+    rid1, _ = ledger.debit_if_funds(tenant, amount, idempotency_key=key, job_id=job_id)
+    rid2, _ = ledger.debit_if_funds(tenant, amount, idempotency_key=key, job_id=job_id)
+    assert rid1 == rid2 == lid, "повторный неопределённый COMMIT не должен дать двойной DEBIT"
+    # Признак «новый usage» теперь берётся из rowcount usage_events-INSERT
+    # (см. test_ot74_replay_skips_metrics / _increment_usage), а не из is_new.
 
 
 def test_r2_mismatch_raises_distinct_error(ledger, monkeypatch):

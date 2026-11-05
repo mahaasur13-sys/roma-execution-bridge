@@ -2021,6 +2021,41 @@ def count_billing_pending_jobs() -> int:
         c.close()
 
 
+def get_refund_pending_jobs(limit: int = 50) -> list[dict]:
+    """C10 (временный костыль до DDL): cancelled-джобы с error='refund_pending:debit_exists'.
+
+    Маркер хранится в error (любая другая запись в error его затрёт) — это
+    ВРЕМЕННЫЙ признак до отдельного поля refund_required (DDL-раунд).
+    """
+    if _pg_enabled():
+        conn = _pg_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT * FROM execution_jobs WHERE status='cancelled' AND error='refund_pending:debit_exists' "
+                    "ORDER BY completed_at ASC LIMIT %s",
+                    (limit,),
+                )
+                rows = cur.fetchall()
+                cols = [d[0] for d in cur.description]
+                return [dict(zip(cols, r)) for r in rows] if rows else []
+        finally:
+            _pg_return(conn)
+    c = _sqlite_conn()
+    try:
+        _ensure_execution_jobs_table(c)
+        cur = c.execute(
+            "SELECT * FROM execution_jobs WHERE status='cancelled' AND error='refund_pending:debit_exists' "
+            "ORDER BY completed_at ASC LIMIT ?",
+            (limit,),
+        )
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in rows] if rows else []
+    finally:
+        c.close()
+
+
 def list_completed_execution_jobs(limit: int = 1000) -> list[dict]:
     """Завершённые execution_jobs, свежие первыми: [{'duration_seconds': float}].
 

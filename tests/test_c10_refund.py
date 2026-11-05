@@ -69,7 +69,7 @@ def test_worker_refunds_cancelled_job(tmp_path, monkeypatch):
     monkeypatch.setattr(ew, "_db_adapter", db)
     ledger = FakeLedger()
     monkeypatch.setattr(fin, "billing_ledger", ledger)
-    monkeypatch.setattr(fin.metering_engine, "record", lambda **k: None)
+    monkeypatch.setattr(fin.metering_engine, "record", lambda **k: (None, True))
     monkeypatch.setattr(ew, "_no_funds_next_try", {}, raising=False)
     ticks = itertools.chain([1000.0], itertools.repeat(1100.0))
     monkeypatch.setattr(ew, "time", types.SimpleNamespace(monotonic=lambda: next(ticks)))
@@ -141,7 +141,7 @@ def test_worker_refund_failure_marks_pending(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "_sqlite_conn", _conn)
     monkeypatch.setattr(ew, "_db_adapter", db)
     monkeypatch.setattr(fin, "billing_ledger", FailingRefundLedger())
-    monkeypatch.setattr(fin.metering_engine, "record", lambda **k: None)
+    monkeypatch.setattr(fin.metering_engine, "record", lambda **k: (None, True))
     monkeypatch.setattr(ew, "_no_funds_next_try", {}, raising=False)
     ticks = itertools.chain([1000.0], itertools.repeat(1100.0))
     monkeypatch.setattr(ew, "time", types.SimpleNamespace(monotonic=lambda: next(ticks)))
@@ -190,3 +190,38 @@ def test_worker_refund_failure_marks_pending(tmp_path, monkeypatch):
         row = dict(c.execute("SELECT * FROM execution_jobs WHERE id=?", ("job-c10-fail",)).fetchone())
     # fail-closed: DEBIT не оставлен молча — на строке durable-маркер.
     assert row["error"] == "refund_pending:debit_exists", row
+
+
+def test_refund_sweeper_retries_pending(tmp_path, monkeypatch):
+    """C10 sweeper: cancelled-джоб с refund_pending → refund + снять маркер."""
+    import main as main_mod
+
+    path = tmp_path / "roma.db"
+
+    def _conn():
+        c = sqlite3.connect(str(path))
+        c.row_factory = sqlite3.Row
+        return c
+
+    monkeypatch.setattr(db, "_pg_enabled", lambda: False)
+    monkeypatch.setattr(db, "_sqlite_conn", _conn)
+    monkeypatch.setattr(ew, "_db_adapter", db)
+    refunded = []
+    monkeypatch.setattr(main_mod, "refund_job", lambda tid, amount, job_id=None, reason="refund": refunded.append((job_id, amount)))
+
+    with _conn() as c:
+        db._ensure_execution_jobs_table(c)
+        c.execute(
+            "INSERT INTO execution_jobs (id, tenant_id, status, error, cost_usd, backend, completed_at)"
+            " VALUES (?, ?, 'cancelled', 'refund_pending:debit_exists', 0.001, 'local', datetime('now'))",
+            ("job-sweep", TENANT),
+        )
+        c.commit()
+
+    out = ew.sweep_refund_pending_once()
+    assert out["ok"] == 1, out
+    assert refunded == [("job-sweep", 0.001)], refunded
+
+    with _conn() as c:
+        row = dict(c.execute("SELECT error FROM execution_jobs WHERE id='job-sweep'").fetchone())
+    assert row["error"] == "", "маркер refund_pending должен быть снят после успешного refund"

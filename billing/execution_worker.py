@@ -41,6 +41,9 @@ _BILLING_PENDING_SWEEP_INTERVAL_S = 60.0
 BILLING_PENDING_NO_FUNDS_RETRY_S = float(os.environ.get("BILLING_PENDING_NO_FUNDS_RETRY_S", "3600"))
 _last_billing_pending_sweep = 0.0
 _no_funds_next_try: dict[str, float] = {}
+# C10: refund_pending-свипер (временный костыль, читает error до DDL).
+_REFUND_PENDING_SWEEP_INTERVAL_S = 60.0
+_last_refund_pending_sweep = 0.0
 _TERMINAL_STATUSES = ("completed", "timeout", "failed", "cancelled")
 # G5: финальная запись воркера не перезаписывает статус, выставленный другим
 # путём, пока задача исполнялась (/cancel, /complete, свипер, drain). Набор =
@@ -136,7 +139,8 @@ def _mark_refund_pending(job_id: str, tenant_id: str, cost_usd: float, exc: Exce
 
         alert_dispatcher.send(
             Alert(
-                level=AlertLevel.WARNING,
+                # C10: деньги клиента — ERROR, не WARNING (fail-closed).
+                level=AlertLevel.ERROR,
                 title="💸 Refund pending (debit exists)",
                 body=f"Job `{job_id}` tenant `{tenant_id}`: DEBIT ${cost_usd:.8f} без возврата — refund упал.",
                 tags={"tenant_id": tenant_id, "job_id": job_id, "event": "refund_pending"},
@@ -243,9 +247,46 @@ def sweep_billing_pending_once(now: float | None = None) -> dict:
     return outcomes
 
 
+def sweep_refund_pending_once() -> dict:
+    """C10 (ВРЕМЕННЫЙ костыль до DDL): повторно провести refund для cancelled-джобов.
+
+    Маркер refund_pending читается из error — любая другая запись в error его
+    затрёт. До отдельного поля refund_required (DDL-раунд) это временный признак.
+    refund идемпотентен по refund:<job_id> — повтор безопасен.
+    """
+    outcomes = {"ok": 0, "error": 0, "pg_error": 0}
+    if _db_adapter is None:
+        return outcomes
+    try:
+        jobs = _db_adapter.get_refund_pending_jobs(limit=50)
+    except Exception as exc:
+        logger.warning("refund_pending.list_failed: %s", exc)
+        return outcomes
+    from main import refund_job
+
+    for job in jobs:
+        jid = job["id"]
+        tid = job.get("tenant_id")
+        amount = float(job.get("cost_usd") or 0.0)
+        try:
+            refund_job(tid, amount, job_id=jid, reason="cancelled_after_debit")
+            # успех → снять маркер (job остаётся cancelled).
+            _db_adapter.update_execution_job(jid, error="", tenant_id=tid)
+            outcomes["ok"] += 1
+            logger.warning("refund_pending.refunded job=%s tenant=%s amount=%.8f", jid, tid, amount)
+        except PGUnavailableError as exc:
+            outcomes["pg_error"] += 1
+            logger.warning("refund_pending.pg_error job=%s: %s", jid, exc)
+            break
+        except Exception as exc:
+            outcomes["error"] += 1
+            logger.error("refund_pending.error job=%s: %s", jid, exc)
+    return outcomes
+
+
 async def poll_and_execute():
     """Фоновый цикл: опрашивает БД на наличие queued-джобов и запускает execute_and_bill."""
-    global _last_orphan_sweep, _last_billing_pending_sweep
+    global _last_orphan_sweep, _last_billing_pending_sweep, _last_refund_pending_sweep
     logger.info("poll_and_execute started")
     while True:
         try:
@@ -263,6 +304,14 @@ async def poll_and_execute():
                     await asyncio.to_thread(sweep_billing_pending_once)
                 except Exception as e:
                     logger.warning("poll_and_execute.billing_pending_sweep_error: %s", e)
+            if time.monotonic() - _last_refund_pending_sweep >= _REFUND_PENDING_SWEEP_INTERVAL_S:
+                _last_refund_pending_sweep = time.monotonic()
+                try:
+                    # C10: refund_pending-свипер снимаем с event loop (to_thread),
+                    # как billing_pending (OT-79).
+                    await asyncio.to_thread(sweep_refund_pending_once)
+                except Exception as e:
+                    logger.warning("poll_and_execute.refund_pending_sweep_error: %s", e)
             # Атомарный claim: queued → running уже выполнен в БД, и вернулись
             # только джобы, захваченные ЭТОЙ репликой (P1: двойной захват).
             jobs = _db_adapter.claim_queued_execution_jobs(limit=5)

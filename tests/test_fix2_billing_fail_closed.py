@@ -129,7 +129,7 @@ def world(monkeypatch):
 
     ledger = FakeLedger()
     monkeypatch.setattr(fin, "billing_ledger", ledger)
-    monkeypatch.setattr(fin.metering_engine, "record", lambda **k: None)
+    monkeypatch.setattr(fin.metering_engine, "record", lambda **k: (None, True))
 
     def add_job(started_at="past", status="running"):
         jid = _uniq("job-fix2")

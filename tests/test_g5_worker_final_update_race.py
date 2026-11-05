@@ -72,7 +72,7 @@ def env(tmp_path, monkeypatch):
     ledger = FakeLedger()
     monkeypatch.setattr(fin, "billing_ledger", ledger)
     records = []
-    monkeypatch.setattr(fin.metering_engine, "record", lambda **k: records.append(k))
+    monkeypatch.setattr(fin.metering_engine, "record", lambda **k: (records.append(k), True))
     monkeypatch.setattr(ew, "_no_funds_next_try", {}, raising=False)
 
     # Фиктивные монотонные часы только для модуля воркера: start=1000, далее 1000+100.

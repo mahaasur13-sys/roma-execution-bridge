@@ -69,7 +69,7 @@ def test_worker_passes_tenant_plan_to_finalize(tmp_path, monkeypatch):
     monkeypatch.setattr(ew, "_db_adapter", db)
     monkeypatch.setattr(db, "get_tenant", lambda tid: {"plan": "pro"})
     monkeypatch.setattr(fin, "billing_ledger", FakeLedger())
-    monkeypatch.setattr(fin.metering_engine, "record", lambda **k: None)
+    monkeypatch.setattr(fin.metering_engine, "record", lambda **k: (None, True))
     monkeypatch.setattr(ew, "_no_funds_next_try", {}, raising=False)
     ticks = itertools.chain([1000.0], itertools.repeat(1100.0))
     monkeypatch.setattr(ew, "time", types.SimpleNamespace(monotonic=lambda: next(ticks)))

@@ -34,6 +34,7 @@ def mock_billing(monkeypatch):
 
     def fake_record(*args, **kwargs):
         record_calls.append({"args": args, "kwargs": kwargs})
+        return (None, True)  # inserted=True: новый usage
 
     monkeypatch.setattr(billing_ledger, "debit_if_funds", fake_debit)
     monkeypatch.setattr(metering_engine, "record", fake_record)

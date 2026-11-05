@@ -61,7 +61,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(ew, "_db_adapter", db)
     ledger = FakeLedger()
     monkeypatch.setattr(fin, "billing_ledger", ledger)
-    monkeypatch.setattr(fin.metering_engine, "record", lambda **k: None)
+    monkeypatch.setattr(fin.metering_engine, "record", lambda **k: (None, True))
     monkeypatch.setattr(ew, "_no_funds_next_try", {}, raising=False)
 
     ticks = itertools.chain([1000.0], itertools.repeat(1000.0 + ELAPSED))

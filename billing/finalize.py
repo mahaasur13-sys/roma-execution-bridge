@@ -62,7 +62,7 @@ def _increment_usage(
     # Один атомарный дебет на ВСЮ сумму job'а. Metadata — ПЛОСКИМИ kwargs
     # (семантика **meta): НЕ передавать вложенным metadata={...} — иначе
     # metadata->>'job_id' в БД станет NULL.
-    ledger_id, is_new = billing_ledger.debit_if_funds(
+    ledger_id, _is_new = billing_ledger.debit_if_funds(
         tenant_id,
         total_cost,
         idempotency_key=(f"job:{job_id}" if job_id else None),
@@ -83,13 +83,13 @@ def _increment_usage(
         )
         return total_cost, False
 
-    # OT-74: параллельный finalize той же задачи (idempotent replay) не должен
-    # второй раз инкрементить метрики — только новая строка леджера.
-    if not is_new:
-        return total_cost, True
-
+    # R1 (rowcount): признак «новый дебет» берём из БД (rowcount вставки в
+    # usage_events), а не из памяти процесса. usage_events INSERT — первое
+    # действие после дебета; totals/метрики — строго после (caveat 1).
+    # Первый event: gpu (если есть), иначе token.
+    new_usage = False
     if gpu_sec > 0:
-        metering_engine.record(
+        _ev, new_usage = metering_engine.record(
             event_type=event_type,
             tenant=tenant_id,
             gpu_seconds=gpu_sec,
@@ -97,12 +97,8 @@ def _increment_usage(
             billed=True,
             cost_usd=gpu_cost,
         )
-        gpu_seconds_total.labels(tenant_id=tenant_id, plan=plan_name).inc(gpu_sec)
-        billing_cost_total.labels(tenant_id=tenant_id, plan=plan_name, cost_type="gpu").inc(gpu_cost)
-
-    if input_tokens > 0 or output_tokens > 0:
-        # R15: фактическое число токенов как value.
-        metering_engine.record(
+    elif input_tokens > 0 or output_tokens > 0:
+        _ev, new_usage = metering_engine.record(
             event_type="token_usage",
             tenant=tenant_id,
             gpu_seconds=0,
@@ -111,6 +107,28 @@ def _increment_usage(
             cost_usd=token_cost,
             value=float(input_tokens + output_tokens),
         )
+
+    if not new_usage:
+        # retry (same-process или cross-process): usage уже писан — не дублируем
+        # totals/метрики. usage_events при этом идемпотентна (ON CONFLICT DO NOTHING).
+        return total_cost, True
+
+    if gpu_sec > 0:
+        gpu_seconds_total.labels(tenant_id=tenant_id, plan=plan_name).inc(gpu_sec)
+        billing_cost_total.labels(tenant_id=tenant_id, plan=plan_name, cost_type="gpu").inc(gpu_cost)
+
+    if input_tokens > 0 or output_tokens > 0:
+        if gpu_sec > 0:
+            # Второй event (token) — отдельная идемпотентная вставка.
+            metering_engine.record(
+                event_type="token_usage",
+                tenant=tenant_id,
+                gpu_seconds=0,
+                job_id=job_id or "auto",
+                billed=True,
+                cost_usd=token_cost,
+                value=float(input_tokens + output_tokens),
+            )
         if input_tokens > 0:
             tokens_total.labels(tenant_id=tenant_id, plan=plan_name, direction="input").inc(input_tokens)
         if output_tokens > 0:
