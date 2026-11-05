@@ -166,6 +166,25 @@ def _parse_refund_amount(marker: str) -> float | None:
         return None
 
 
+def _billing_pending_error(billing_status: str, exec_status: str | None) -> str:
+    """Маркер ``billing:<статус>`` с ``:exec=<статус>`` для timeout/failed (свипер восстановит статус)."""
+    marker = f"billing:{billing_status}"
+    if exec_status in ("timeout", "failed"):
+        marker += f":exec={exec_status}"
+    return marker
+
+
+def _billing_exec_status(error: str | None) -> str | None:
+    """Извлечь исходный статус исполнения из маркера ``billing:...:exec=<статус>``."""
+    if not error:
+        return None
+    needle = ":exec="
+    idx = error.rfind(needle)
+    if idx == -1:
+        return None
+    return error[idx + len(needle):] or None
+
+
 def sweep_billing_pending_once(now: float | None = None) -> dict:
     """Повторно финализировать биллинг для billing_pending-джобов.
 
@@ -211,9 +230,12 @@ def sweep_billing_pending_once(now: float | None = None) -> dict:
         if status == "ok":
             _no_funds_next_try.pop(jid, None)
             try:
+                # R1: восстановить исходный статус исполнения (timeout/failed), а не
+                # ставить "completed" — иначе сбой выглядит успешным в счёте клиента.
+                final_status = _billing_exec_status(job.get("error")) or "completed"
                 _db_adapter.update_execution_job(
                     jid,
-                    status="completed",
+                    status=final_status,
                     cost_usd=_job_cost_usd(job.get("duration_seconds")),
                     error="",
                     tenant_id=tid,
@@ -233,8 +255,10 @@ def sweep_billing_pending_once(now: float | None = None) -> dict:
             if jid not in _no_funds_next_try:
                 logger.warning("billing_pending.no_funds job=%s tenant=%s", jid, tid)
             _no_funds_next_try[jid] = now + BILLING_PENDING_NO_FUNDS_RETRY_S
-            if job.get("error") != "billing:no_funds":
-                _db_adapter.update_execution_job(jid, error="billing:no_funds", tenant_id=tid)
+            # R1: сохранить исходный exec-статус в маркере no_funds.
+            no_funds_marker = _billing_pending_error("no_funds", _billing_exec_status(job.get("error")))
+            if job.get("error") != no_funds_marker:
+                _db_adapter.update_execution_job(jid, error=no_funds_marker, tenant_id=tid)
         elif status == "mismatch":
             # R2: детерминированный конфликт ключа идемпотентности — пометить
             # терминально и не крутить в свипере (retry не разрешит).
@@ -534,9 +558,9 @@ async def _execute_and_bill_impl(
         # R2: детерминированный конфликт ключа идемпотентности — retry не разрешит,
         # не отдаём свиперу на повторный дебет (иначе вечный billing_pending).
         write_status = "error"
-    elif not billed_ok and status in ("completed", "timeout", "failed"):
-        # R1 (caveat 3): usage-запись не сохранилась (pg_error/error) — retry через
-        # billing_pending свипер, иначе usage потеряется для timeout/failed.
+    elif billing_status in ("pg_error", "error", "no_funds") and status in ("completed", "timeout", "failed"):
+        # R1 (caveat 3): usage-запись не сохранилась (pg_error/error) или средств нет
+        # (no_funds) — retry через billing_pending свипер. skip (0-cost/уже финал) сюда не идёт.
         write_status = "billing_pending"
 
     # G5 (CAS): пока задача исполнялась, её могли отменить (/cancel) или закрыть
@@ -549,7 +573,7 @@ async def _execute_and_bill_impl(
         completed_at=now_iso,
         cost_usd=cost_usd if billed_ok else 0.0,
         duration_seconds=round(elapsed, 2),
-        error="" if billed_ok else f"billing:{billing_status}",
+        error="" if billed_ok else _billing_pending_error(billing_status, status),
         tenant_id=tenant_id,
         if_status_not_in=_FINAL_WRITE_BLOCKED_STATUSES,
     )

@@ -220,7 +220,7 @@ def finalize_job_billing(
       "no_funds" → job найден, но средств не хватает → ничего не списано;
       "mismatch" → ключ идемпотентности уже занят другой суммой/типом/валютой/job_id
                    (R2 — это НЕ «нет средств», вызывающий код отдаёт 409/500);
-      "skip"     → job не найден / чужой tenant / уже финализирован.
+      "skip"     → job не найден / чужой tenant / уже финализирован / 0-cost (нечего списывать).
     Поднимает PGUnavailableError, если лэджер не может сохранить дебет.
     """
     job = db.get_execution_job(job_id)
@@ -232,7 +232,12 @@ def finalize_job_billing(
         _total_cost, debited = _increment_usage(tenant_id, gpu_sec, plan_name=plan_name, job_id=job_id, backend=backend)
     except LedgerIdemMismatchError:
         return "mismatch"
-    return "ok" if debited else "no_funds"
+    if debited:
+        return "ok"
+    if _total_cost <= 0:
+        # 0-cost (нечего списывать) — не «нет средств»; не тащим в billing_pending.
+        return "skip"
+    return "no_funds"
 
 
 def refund_job(tenant_id: str, amount: float, job_id: str, reason: str = "refund") -> str:
