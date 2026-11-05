@@ -15,7 +15,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from billing.pg_ledger import PGBillingLedger  # noqa: E402
+from billing.pg_ledger import PGBillingLedger, LedgerIdemMismatchError  # noqa: E402
 
 pytestmark = pytest.mark.pg  # G-CI-PG-CANON: env-skip без живого PG
 
@@ -43,10 +43,11 @@ def test_s9_idem_lookup_verifies_fields():
 
     ledger_id = "led-" + hashlib.sha256(f"{tenant}:{key}".encode()).hexdigest()[:24]
 
-    # Несовпадение: CREDIT, другая сумма/валюта/job → fail-closed (None), не чужой id.
+    # Несовпадение: CREDIT, другая сумма/валюта/job → LedgerIdemMismatchError (R2),
+    # а не None и не чужой id.
     _seed_row(ledger, ledger_id, tenant, "CREDIT", 999.0, "EUR", "other")
-    rid, _ = ledger.debit_if_funds(tenant, amount, idempotency_key=key, job_id="expected")
-    assert rid is None, "несовпадение полей не должно возвращать существующий ledger_id"
+    with pytest.raises(LedgerIdemMismatchError):
+        ledger.debit_if_funds(tenant, amount, idempotency_key=key, job_id="expected")
 
     # Совпадение: DEBIT с теми же суммой/валютой/job → возврат ledger_id.
     tenant2 = _uniq("test-s9")

@@ -122,7 +122,7 @@ def sweep_billing_pending_once(now: float | None = None) -> dict:
     """
     from monitoring.metrics import roma_billing_pending_jobs, roma_billing_pending_sweep_total
 
-    outcomes = {"ok": 0, "pg_error": 0, "error": 0, "no_funds": 0, "skip": 0, "deferred": 0}
+    outcomes = {"ok": 0, "pg_error": 0, "error": 0, "no_funds": 0, "skip": 0, "deferred": 0, "mismatch": 0}
     if _db_adapter is None:
         return outcomes
     now = time.monotonic() if now is None else now
@@ -182,6 +182,16 @@ def sweep_billing_pending_once(now: float | None = None) -> dict:
             _no_funds_next_try[jid] = now + BILLING_PENDING_NO_FUNDS_RETRY_S
             if job.get("error") != "billing:no_funds":
                 _db_adapter.update_execution_job(jid, error="billing:no_funds", tenant_id=tid)
+        elif status == "mismatch":
+            # R2: детерминированный конфликт ключа идемпотентности — пометить
+            # терминально и не крутить в свипере (retry не разрешит).
+            logger.error("billing_pending.mismatch job=%s tenant=%s", jid, tid)
+            try:
+                _db_adapter.update_execution_job(
+                    jid, status="error", error="billing:mismatch", tenant_id=tid
+                )
+            except Exception as exc:
+                logger.error("billing_pending.mismatch_update.error job=%s: %s", jid, exc)
         elif status not in outcomes:
             status = "error"
         outcomes[status] += 1
@@ -417,7 +427,11 @@ async def _execute_and_bill_impl(
 
     billed_ok = billing_status == "ok"
     write_status = status
-    if not billed_ok and status == "completed":
+    if billing_status == "mismatch":
+        # R2: детерминированный конфликт ключа идемпотентности — retry не разрешит,
+        # не отдаём свиперу на повторный дебет (иначе вечный billing_pending).
+        write_status = "error"
+    elif not billed_ok and status == "completed":
         write_status = "billing_pending"
 
     # G5 (CAS): пока задача исполнялась, её могли отменить (/cancel) или закрыть

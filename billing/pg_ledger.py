@@ -83,6 +83,14 @@ def drift_threshold_from_env() -> float:
     return value
 
 
+class LedgerIdemMismatchError(Exception):
+    """R2: по ключу идемпотентности уже есть запись, но с другими типом/суммой/валютой/job_id.
+
+    Это НЕ «нет средств» (не 402) и НЕ двойной дебет — это конфликт ключа, который
+    вызывающий код обязан отличить от no_funds и вернуть отдельную ошибку (409/500).
+    """
+
+
 class PGBillingLedger:
     """Append-only billing ledger — PG-first with automatic in-memory fallback."""
 
@@ -296,7 +304,10 @@ class PGBillingLedger:
             if idempotency_key:
                 rid = self._ledger_idem_lookup(ledger_id, tenant_id, amount, currency, meta)
                 if rid:
-                    return rid, False
+                    # R1: если запись нашлась — её закоммитил ЭТОТ вызов (INSERT прошёл,
+                    # а не был no-op по существующему ключу), значит это НОВЫЙ дебет:
+                    # usage/метрики обязаны писаться, иначе ledger расходится с usage.
+                    return rid, True
             raise
 
         if rows:
@@ -360,7 +371,11 @@ class PGBillingLedger:
             existing_currency,
             existing_meta.get("job_id"),
         )
-        return None
+        # R2: несовпадение — отдельная ошибка, НЕ «нет средств» (иначе ложный 402).
+        raise LedgerIdemMismatchError(
+            f"ledger_idem_mismatch ledger_id={ledger_id} tenant={tenant_id} "
+            f"expected_amount={expected_amount} currency={currency} job_id={expected_job_id}"
+        )
 
     def get_tenant_debit_sum(self, tenant_id: str) -> float:
         try:

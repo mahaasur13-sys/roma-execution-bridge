@@ -100,6 +100,9 @@ async def complete_job(job_id: str, key_info: dict = Depends(verify_api_key)):
         raise HTTPException(status_code=503, detail="Billing unavailable, retry later")
     if billing_status == "no_funds":
         raise HTTPException(status_code=402, detail="Insufficient funds")
+    if billing_status == "mismatch":
+        # R2: ключ идемпотентности занят другой суммой/типом/валютой/job_id.
+        raise HTTPException(status_code=409, detail="billing_idempotency_mismatch")
     if billing_status == "skip":
         return {"status": job.get("status"), "job_id": job_id, "billing": "skip"}
 

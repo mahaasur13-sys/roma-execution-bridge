@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 import db_adapter as db
 from deps import billing_ledger, alert_dispatcher
-from billing.pg_ledger import PGUnavailableError
+from billing.pg_ledger import PGUnavailableError, LedgerIdemMismatchError
 from billing.pg_metering import PGMeteringEngine as MeteringEngine
 from monitoring.metrics import (
     gpu_seconds_total,
@@ -200,6 +200,8 @@ def finalize_job_billing(
     Возвращает:
       "ok"       → дебет сохранён, usage записан;
       "no_funds" → job найден, но средств не хватает → ничего не списано;
+      "mismatch" → ключ идемпотентности уже занят другой суммой/типом/валютой/job_id
+                   (R2 — это НЕ «нет средств», вызывающий код отдаёт 409/500);
       "skip"     → job не найден / чужой tenant / уже финализирован.
     Поднимает PGUnavailableError, если лэджер не может сохранить дебет.
     """
@@ -208,5 +210,8 @@ def finalize_job_billing(
         return "skip"
     if job.get("status") in ("completed", "cancelled", "failed", "timeout"):
         return "skip"
-    _total_cost, debited = _increment_usage(tenant_id, gpu_sec, plan_name=plan_name, job_id=job_id, backend=backend)
+    try:
+        _total_cost, debited = _increment_usage(tenant_id, gpu_sec, plan_name=plan_name, job_id=job_id, backend=backend)
+    except LedgerIdemMismatchError:
+        return "mismatch"
     return "ok" if debited else "no_funds"
