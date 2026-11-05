@@ -266,7 +266,11 @@ def sweep_billing_pending_once(now: float | None = None) -> dict:
             try:
                 exec_status = _billing_exec_status(job.get("error")) or "error"
                 _db_adapter.update_execution_job(
-                    jid, status=exec_status, error="billing:mismatch", tenant_id=tid
+                    jid,
+                    status=exec_status,
+                    error="billing:mismatch",
+                    tenant_id=tid,
+                    if_status_not_in=_TERMINAL_STATUSES,
                 )
             except Exception as exc:
                 logger.error("billing_pending.mismatch_update.error job=%s: %s", jid, exc)
@@ -274,7 +278,14 @@ def sweep_billing_pending_once(now: float | None = None) -> dict:
             # job не найден / чужой tenant / уже финал / 0-cost — выйти из billing_pending.
             exec_status = _billing_exec_status(job.get("error")) or "completed"
             try:
-                _db_adapter.update_execution_job(jid, status=exec_status, error="", tenant_id=tid)
+                _db_adapter.update_execution_job(
+                    jid,
+                    status=exec_status,
+                    cost_usd=_job_cost_usd(job.get("duration_seconds")),
+                    error="",
+                    tenant_id=tid,
+                    if_status_not_in=_TERMINAL_STATUSES,
+                )
                 logger.info("billing_pending.skip_cleared job=%s → status=%s", jid, exec_status)
             except Exception as exc:
                 logger.error("billing_pending.skip_update.error job=%s: %s", jid, exc)
