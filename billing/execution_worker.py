@@ -131,17 +131,15 @@ def sweep_billing_pending_once(now: float | None = None) -> dict:
     except Exception as exc:
         logger.warning("billing_pending.count_failed: %s", exc)
     # OT-80: приостановленные no_funds-задачи отфильтровываем в SQL (до LIMIT),
-    # чтобы не занимали слоты батча.
+    # чтобы не занимали слоты батча. Счётчик deferred считаем по paused_ids.
     paused_ids = [jid for jid, t in _no_funds_next_try.items() if t > now]
+    outcomes["deferred"] = len(paused_ids)
     jobs = _db_adapter.get_billing_pending_jobs(limit=BILLING_PENDING_BATCH, exclude_ids=paused_ids)
     from main import finalize_job_billing
 
     for job in jobs:
         jid = job["id"]
         tid = job.get("tenant_id")
-        if _no_funds_next_try.get(jid, 0.0) > now:
-            outcomes["deferred"] += 1
-            continue
         try:
             status = finalize_job_billing(
                 tid,
