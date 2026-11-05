@@ -105,6 +105,14 @@ def _job_cost_usd(duration_seconds) -> float:
     return round(max(d, 0.0) * 0.00001, 8)
 
 
+def _tenant_plan(tenant_id: str) -> str:
+    """План арендатора из БД (фолбэк 'free'). OT-82: не хардкодить free."""
+    try:
+        return (_db_adapter.get_tenant(tenant_id) or {}).get("plan", "free") or "free"
+    except Exception:
+        return "free"
+
+
 def sweep_billing_pending_once(now: float | None = None) -> dict:
     """Повторно финализировать биллинг для billing_pending-джобов.
 
@@ -136,7 +144,7 @@ def sweep_billing_pending_once(now: float | None = None) -> dict:
                 tid,
                 jid,
                 gpu_sec=float(job.get("duration_seconds") or 0.0),
-                plan_name="free",
+                plan_name=_tenant_plan(tid),
                 backend=job.get("backend"),
             )
         except PGUnavailableError as exc:
@@ -378,7 +386,7 @@ async def _execute_and_bill_impl(
             tenant_id,
             job_id,
             gpu_sec=elapsed,
-            plan_name="free",
+            plan_name=_tenant_plan(tenant_id),
             backend=backend_name,
         )
         logger.info(
