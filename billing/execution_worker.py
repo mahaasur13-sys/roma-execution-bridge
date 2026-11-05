@@ -156,15 +156,25 @@ def sweep_billing_pending_once(now: float | None = None) -> dict:
 
         if status == "ok":
             _no_funds_next_try.pop(jid, None)
-            _db_adapter.update_execution_job(
-                jid,
-                status="completed",
-                cost_usd=_job_cost_usd(job.get("duration_seconds")),
-                error="",
-                tenant_id=tid,
-                if_status_not_in=_TERMINAL_STATUSES,
-            )
-            logger.info("billing_pending.billed job=%s tenant=%s", jid, tid)
+            try:
+                _db_adapter.update_execution_job(
+                    jid,
+                    status="completed",
+                    cost_usd=_job_cost_usd(job.get("duration_seconds")),
+                    error="",
+                    tenant_id=tid,
+                    if_status_not_in=_TERMINAL_STATUSES,
+                )
+            except PGUnavailableError as exc:
+                # OT-81: биллинг сохранён, но финальный статус не записан — не
+                # роняем весь свип; pg_error прерывает батч (см. ниже).
+                logger.warning("billing_pending.complete_update.pg_error job=%s: %s", jid, exc)
+                status = "pg_error"
+            except Exception as exc:
+                logger.error("billing_pending.complete_update.error job=%s: %s", jid, exc)
+                status = "error"
+            else:
+                logger.info("billing_pending.billed job=%s tenant=%s", jid, tid)
         elif status == "no_funds":
             if jid not in _no_funds_next_try:
                 logger.warning("billing_pending.no_funds job=%s tenant=%s", jid, tid)
