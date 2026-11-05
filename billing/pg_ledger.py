@@ -294,14 +294,9 @@ class PGBillingLedger:
             # Indeterminate COMMIT: the INSERT may have committed server-side.
             # Re-check by ledger_id (idempotent) before treating it as failed.
             if idempotency_key:
-                existing = self._pg_execute(
-                    "ledger_idem_lookup",
-                    "SELECT ledger_id FROM ledger_entries WHERE ledger_id = %s AND tenant_id = %s",
-                    (ledger_id, tenant_id),
-                    fetch=True,
-                )
-                if existing:
-                    return existing[0][0]
+                rid = self._ledger_idem_lookup(ledger_id, tenant_id, amount, currency, meta)
+                if rid:
+                    return rid
             raise
 
         if rows:
@@ -319,14 +314,52 @@ class PGBillingLedger:
             )
             return rid
         if idempotency_key:
-            existing = self._pg_execute(
-                "ledger_idem_lookup",
-                "SELECT ledger_id FROM ledger_entries WHERE ledger_id = %s AND tenant_id = %s",
-                (ledger_id, tenant_id),
-                fetch=True,
-            )
-            if existing:
-                return existing[0][0]
+            return self._ledger_idem_lookup(ledger_id, tenant_id, amount, currency, meta)
+        return None
+
+    def _ledger_idem_lookup(self, ledger_id, tenant_id, expected_amount, currency, meta) -> str | None:
+        """OT-98: сверка существующей записи перед возвратом успеха при конфликте.
+
+        Возвращает ledger_id только если запись по (ledger_id, tenant_id) реально
+        совпадает с ожидаемым дебетом (тип/сумма/валюта/job_id). Иначе — лог и None
+        (fail-closed: не выдаём чужую запись за свой дебет).
+        """
+        rows = self._pg_execute(
+            "ledger_idem_lookup",
+            "SELECT entry_type, amount, currency, metadata FROM ledger_entries "
+            "WHERE ledger_id = %s AND tenant_id = %s",
+            (ledger_id, tenant_id),
+            fetch=True,
+        )
+        if not rows:
+            return None
+        entry_type, existing_amount, existing_currency, existing_meta = rows[0]
+        try:
+            existing_meta = json.loads(existing_meta) if isinstance(existing_meta, str) else (existing_meta or {})
+        except Exception:
+            existing_meta = {}
+        expected_job_id = (meta or {}).get("job_id")
+        matches = (
+            entry_type == "DEBIT"
+            and round(float(existing_amount), 8) == round(float(expected_amount), 8)
+            and existing_currency == currency
+            and existing_meta.get("job_id") == expected_job_id
+        )
+        if matches:
+            return ledger_id
+        logger.warning(
+            "ledger_idem_mismatch ledger_id=%s tenant=%s "
+            "expected=(DEBIT,%s,%s,job=%s) got=(%s,%s,%s,job=%s)",
+            ledger_id,
+            tenant_id,
+            expected_amount,
+            currency,
+            expected_job_id,
+            entry_type,
+            existing_amount,
+            existing_currency,
+            existing_meta.get("job_id"),
+        )
         return None
 
     def get_tenant_debit_sum(self, tenant_id: str) -> float:
