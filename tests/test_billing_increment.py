@@ -30,7 +30,7 @@ def mock_billing(monkeypatch):
                 "meta": meta,
             }
         )
-        return "led-test"
+        return "led-test", True
 
     def fake_record(*args, **kwargs):
         record_calls.append({"args": args, "kwargs": kwargs})
@@ -128,7 +128,7 @@ def test_increment_usage_no_funds(mock_billing, monkeypatch):
     # дебет не прошёл → debited=False, usage НЕ пишется (но дебет пытались ровно раз)
     def no_funds(*a, **k):
         mock_billing["debit_calls"].append({"attempt": True})
-        return None
+        return None, False
 
     monkeypatch.setattr(billing_ledger, "debit_if_funds", no_funds)
     total_cost, debited = _increment_usage(
