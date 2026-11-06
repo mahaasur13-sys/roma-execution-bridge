@@ -6,11 +6,8 @@
 
 import itertools
 import sqlite3
-import os
-import sys
 import types
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db_adapter as db  # noqa: E402
 from billing import execution_worker as ew  # noqa: E402
