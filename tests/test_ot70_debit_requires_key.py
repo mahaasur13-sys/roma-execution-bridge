@@ -4,11 +4,12 @@
 Проверка на верхнем уровне (до PG): тест не требует живого PG.
 """
 
+import os
 import sys
 
 import pytest
 
-sys.path.insert(0, "/home/felix/astrofin-sentinel-platform/.queue-work/roma-execution-bridge")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from billing.pg_ledger import PGBillingLedger  # noqa: E402
 

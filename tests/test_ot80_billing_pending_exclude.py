@@ -1,9 +1,10 @@
 """OT-80 — get_billing_pending_jobs фильтрует paused no_funds до LIMIT."""
 
 import sqlite3
+import os
 import sys
 
-sys.path.insert(0, "/home/felix/astrofin-sentinel-platform/.queue-work/roma-execution-bridge")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db_adapter as db  # noqa: E402
 
