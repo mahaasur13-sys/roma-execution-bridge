@@ -171,7 +171,9 @@ def test_sweeper_skip_moves_out_of_billing_pending(tmp_path, monkeypatch):
         row = dict(c.execute("SELECT status, error, cost_usd FROM execution_jobs WHERE id='job-br'").fetchone())
     assert row["status"] == "failed", f"skip должен вывести из billing_pending в exec-статус: {row['status']!r}"
     assert row["error"] == "", row
-    assert row["cost_usd"] > 0, f"skip должен пересчитать cost_usd (duration_seconds>0): {row['cost_usd']!r}"
+    assert float(row["cost_usd"] or 0) == 0.0, (
+        f"skip не должен писать пересчитанный cost_usd без DEBIT: {row['cost_usd']!r}"
+    )
 
 
 def test_skip_does_not_overwrite_cancelled(tmp_path, monkeypatch):
@@ -193,3 +195,24 @@ def test_skip_does_not_overwrite_cancelled(tmp_path, monkeypatch):
     with _conn() as c:
         row = dict(c.execute("SELECT status FROM execution_jobs WHERE id='job-br'").fetchone())
     assert row["status"] == "cancelled", f"skip не должен затереть cancelled: {row['status']!r}"
+
+
+def test_mismatch_does_not_overwrite_cancelled(tmp_path, monkeypatch):
+    """R1: mismatch-ветка с CAS не затирает cancelled, выставленный гонкой /cancel."""
+    import main as main_mod
+
+    _conn = _seed_pending(tmp_path, monkeypatch, "billing:pg_error:exec=timeout")
+
+    def finalize_races_to_cancelled(*a, **k):
+        # гонка: между чтением свипером и финальным UPDATE /cancel ставит cancelled.
+        with _conn() as c:
+            c.execute("UPDATE execution_jobs SET status='cancelled' WHERE id='job-br'")
+            c.commit()
+        return "mismatch"
+
+    monkeypatch.setattr(main_mod, "finalize_job_billing", finalize_races_to_cancelled)
+
+    ew.sweep_billing_pending_once()
+    with _conn() as c:
+        row = dict(c.execute("SELECT status FROM execution_jobs WHERE id='job-br'").fetchone())
+    assert row["status"] == "cancelled", f"mismatch не должен затереть cancelled: {row['status']!r}"

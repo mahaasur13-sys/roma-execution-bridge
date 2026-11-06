@@ -281,7 +281,6 @@ def sweep_billing_pending_once(now: float | None = None) -> dict:
                 _db_adapter.update_execution_job(
                     jid,
                     status=exec_status,
-                    cost_usd=_job_cost_usd(job.get("duration_seconds")),
                     error="",
                     tenant_id=tid,
                     if_status_not_in=_TERMINAL_STATUSES,
