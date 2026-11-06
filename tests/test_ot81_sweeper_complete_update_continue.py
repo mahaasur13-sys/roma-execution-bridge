@@ -32,11 +32,14 @@ def test_sweep_continues_after_complete_update_error(tmp_path, monkeypatch):
 
     with _conn() as c:
         db._ensure_execution_jobs_table(c)
-        for jid in ("j-a", "j-b"):
+        # Явный completed_at: j-a раньше j-b → ORDER BY completed_at ASC
+        # детерминированно выбирает j-a первой (одинаковый datetime('now')
+        # не гарантирует порядок — тест «продолжения батча» был бы вакуумным).
+        for jid, completed in (("j-a", "2024-01-01 00:00:00"), ("j-b", "2024-01-01 00:00:01")):
             c.execute(
                 "INSERT INTO execution_jobs (id, tenant_id, status, error, cost_usd, backend, completed_at)"
-                " VALUES (?, ?, 'billing_pending', '', 0.0, 'local', datetime('now'))",
-                (jid, TENANT),
+                " VALUES (?, ?, 'billing_pending', '', 0.0, 'local', ?)",
+                (jid, TENANT, completed),
             )
         c.commit()
 
@@ -44,7 +47,10 @@ def test_sweep_continues_after_complete_update_error(tmp_path, monkeypatch):
 
     monkeypatch.setattr(main, "finalize_job_billing", lambda *a, **k: "ok")
 
+    update_order = []
+
     def fake_update(jid, **kwargs):
+        update_order.append(jid)
         if jid == "j-a":
             raise RuntimeError("update failed (test)")
         return 1
@@ -52,5 +58,6 @@ def test_sweep_continues_after_complete_update_error(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "update_execution_job", fake_update)
 
     out = ew.sweep_billing_pending_once(now=10_000.0)
+    assert update_order == ["j-a", "j-b"], update_order  # j-a упала до j-b: батч продолжился
     assert out.get("ok") == 1, out  # j-b обработана
     assert out.get("error") == 1, out  # j-a помечена error, не уронила батч
