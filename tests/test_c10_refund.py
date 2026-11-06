@@ -211,7 +211,7 @@ def test_refund_sweeper_retries_pending(tmp_path, monkeypatch):
     monkeypatch.setattr(ew, "_db_adapter", db)
     refunded = []
     monkeypatch.setattr(
-        main_mod, "refund_job", lambda tid, amount, job_id=None, reason="refund": refunded.append((job_id, amount))
+        main_mod, "refund_job", lambda tid, amount, job_id=None, reason="refund": refunded.append((tid, job_id, amount))
     )
 
     with _conn() as c:
@@ -225,7 +225,7 @@ def test_refund_sweeper_retries_pending(tmp_path, monkeypatch):
 
     out = ew.sweep_refund_pending_once()
     assert out["ok"] == 1, out
-    assert refunded == [("job-sweep", 0.001)], refunded
+    assert refunded == [(TENANT, "job-sweep", 0.001)], refunded  # refund именно арендатору TENANT
 
     with _conn() as c:
         row = dict(c.execute("SELECT error FROM execution_jobs WHERE id='job-sweep'").fetchone())
