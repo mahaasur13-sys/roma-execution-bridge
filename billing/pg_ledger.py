@@ -227,7 +227,9 @@ class PGBillingLedger:
         # A fresh uuid4 id cannot collide; fail-closed rather than double-credit.
         raise PGUnavailableError("ledger credit conflict")
 
-    def refund(self, tenant_id: str, amount: float, currency: str = "USD", job_id: str | None = None, reason: str = "refund") -> str:
+    def refund(
+        self, tenant_id: str, amount: float, currency: str = "USD", job_id: str | None = None, reason: str = "refund"
+    ) -> str:
         """C10: вернуть дебет (CREDIT-запись), идемпотентно по refund:<job_id>.
 
         Возврат без запроса клиента (отменённая/недоставленная работа). Повторный
@@ -280,7 +282,9 @@ class PGBillingLedger:
             logger.error("BillingLedger.%s PG error: %s", operation, e)
             raise PGUnavailableError(str(e)) from e
 
-    def debit_if_funds(self, tenant_id, amount, currency="USD", idempotency_key=None, **meta) -> tuple[str | None, bool]:
+    def debit_if_funds(
+        self, tenant_id, amount, currency="USD", idempotency_key=None, **meta
+    ) -> tuple[str | None, bool]:
         if amount < 0:
             raise ValueError("debit amount must be >= 0")
         reject_invalid_money_amount("ledger_entries", "amount", amount)
@@ -355,8 +359,7 @@ class PGBillingLedger:
         """
         rows = self._pg_execute(
             "ledger_idem_lookup",
-            "SELECT entry_type, amount, currency, metadata FROM ledger_entries "
-            "WHERE ledger_id = %s AND tenant_id = %s",
+            "SELECT entry_type, amount, currency, metadata FROM ledger_entries WHERE ledger_id = %s AND tenant_id = %s",
             (ledger_id, tenant_id),
             fetch=True,
         )
@@ -377,8 +380,7 @@ class PGBillingLedger:
         if matches:
             return ledger_id
         logger.warning(
-            "ledger_idem_mismatch ledger_id=%s tenant=%s "
-            "expected=(DEBIT,%s,%s,job=%s) got=(%s,%s,%s,job=%s)",
+            "ledger_idem_mismatch ledger_id=%s tenant=%s expected=(DEBIT,%s,%s,job=%s) got=(%s,%s,%s,job=%s)",
             ledger_id,
             tenant_id,
             expected_amount,

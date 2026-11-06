@@ -91,7 +91,9 @@ def test_worker_refunds_cancelled_job(tmp_path, monkeypatch):
 
     def finalize_then_cancel(*a, **k):
         res = real_finalize(*a, **k)
-        db.update_execution_job("job-c10", status="cancelled", tenant_id=TENANT, if_status_not_in=db.CANCEL_BLOCKED_STATUSES)
+        db.update_execution_job(
+            "job-c10", status="cancelled", tenant_id=TENANT, if_status_not_in=db.CANCEL_BLOCKED_STATUSES
+        )
         return res
 
     monkeypatch.setattr(main, "finalize_job_billing", finalize_then_cancel)
@@ -168,7 +170,9 @@ def test_worker_refund_failure_marks_pending(tmp_path, monkeypatch):
 
     def finalize_then_cancel(*a, **k):
         res = real_finalize(*a, **k)
-        db.update_execution_job("job-c10-fail", status="cancelled", tenant_id=TENANT, if_status_not_in=db.CANCEL_BLOCKED_STATUSES)
+        db.update_execution_job(
+            "job-c10-fail", status="cancelled", tenant_id=TENANT, if_status_not_in=db.CANCEL_BLOCKED_STATUSES
+        )
         return res
 
     monkeypatch.setattr(main, "finalize_job_billing", finalize_then_cancel)
@@ -206,7 +210,9 @@ def test_refund_sweeper_retries_pending(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "_sqlite_conn", _conn)
     monkeypatch.setattr(ew, "_db_adapter", db)
     refunded = []
-    monkeypatch.setattr(main_mod, "refund_job", lambda tid, amount, job_id=None, reason="refund": refunded.append((job_id, amount)))
+    monkeypatch.setattr(
+        main_mod, "refund_job", lambda tid, amount, job_id=None, reason="refund": refunded.append((job_id, amount))
+    )
 
     with _conn() as c:
         db._ensure_execution_jobs_table(c)

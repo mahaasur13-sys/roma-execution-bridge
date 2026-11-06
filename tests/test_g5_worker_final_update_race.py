@@ -219,7 +219,9 @@ def test_g5d_cancel_between_finalize_and_final_update_residual(env, monkeypatch)
     def finalize_then_cancel(*a, **k):
         res = real(*a, **k)
         # атомарная часть /cancel (тот же UPDATE, что в public_jobs.cancel_job)
-        db.update_execution_job("g5d", status="cancelled", tenant_id=TENANT, if_status_not_in=db.CANCEL_BLOCKED_STATUSES)
+        db.update_execution_job(
+            "g5d", status="cancelled", tenant_id=TENANT, if_status_not_in=db.CANCEL_BLOCKED_STATUSES
+        )
         return res
 
     monkeypatch.setattr(main, "finalize_job_billing", finalize_then_cancel)

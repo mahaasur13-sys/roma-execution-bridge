@@ -73,9 +73,7 @@ def env(tmp_path, monkeypatch):
     async def fake_status(job_id, backend_job_id):
         return {"status": "completed"}
 
-    monkeypatch.setattr(
-        ew, "_backend_manager", {"dispatch": fake_dispatch, "status": fake_status, "cancel": None}
-    )
+    monkeypatch.setattr(ew, "_backend_manager", {"dispatch": fake_dispatch, "status": fake_status, "cancel": None})
     with _conn() as c:
         db._ensure_execution_jobs_table(c)
     return {"conn": _conn, "ledger": ledger}

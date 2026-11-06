@@ -52,7 +52,9 @@ def _run_worker_timeout(tmp_path, monkeypatch, exec_status):
     async def _nosleep(*a, **k):
         return None
 
-    monkeypatch.setattr(ew, "_backend_manager", {"dispatch": fake_dispatch, "status": fake_status, "cancel": fake_cancel})
+    monkeypatch.setattr(
+        ew, "_backend_manager", {"dispatch": fake_dispatch, "status": fake_status, "cancel": fake_cancel}
+    )
     monkeypatch.setattr(ew, "asyncio", types.SimpleNamespace(sleep=_nosleep))
 
     import main

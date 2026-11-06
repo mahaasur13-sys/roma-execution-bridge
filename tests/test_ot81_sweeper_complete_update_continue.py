@@ -52,5 +52,5 @@ def test_sweep_continues_after_complete_update_error(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "update_execution_job", fake_update)
 
     out = ew.sweep_billing_pending_once(now=10_000.0)
-    assert out.get("ok") == 1, out       # j-b обработана
-    assert out.get("error") == 1, out    # j-a помечена error, не уронила батч
+    assert out.get("ok") == 1, out  # j-b обработана
+    assert out.get("error") == 1, out  # j-a помечена error, не уронила батч

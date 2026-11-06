@@ -161,7 +161,7 @@ def _parse_refund_amount(marker: str) -> float | None:
     if not marker or not marker.startswith(prefix):
         return None
     try:
-        return float(marker[len(prefix):])
+        return float(marker[len(prefix) :])
     except (TypeError, ValueError):
         return None
 
@@ -182,7 +182,7 @@ def _billing_exec_status(error: str | None) -> str | None:
     idx = error.rfind(needle)
     if idx == -1:
         return None
-    return error[idx + len(needle):] or None
+    return error[idx + len(needle) :] or None
 
 
 def sweep_billing_pending_once(now: float | None = None) -> dict:

@@ -188,6 +188,4 @@ def test_increment_usage_token_recorded_after_gpu_conflict(mock_billing, monkeyp
     )
     assert debited is True
     event_types = [c["event_type"] for c in record_calls]
-    assert "token_usage" in event_types, (
-        f"token-запись должна быть сделана независимо от GPU-конфликта: {event_types}"
-    )
+    assert "token_usage" in event_types, f"token-запись должна быть сделана независимо от GPU-конфликта: {event_types}"
