@@ -40,12 +40,12 @@ class FakeLedger:
         assert idempotency_key, "finalize обязан передавать ключ"
         lid = "led-" + hashlib.sha256(f"{tenant_id}:{idempotency_key}".encode()).hexdigest()[:24]
         if lid in self.debits:
-            return lid
+            return lid, False
         if self.balance < amount:
-            return None
+            return None, False
         self.balance -= amount
         self.debits[lid] = amount
-        return lid
+        return lid, True
 
 
 @pytest.fixture
@@ -62,7 +62,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(ew, "_db_adapter", db)
     ledger = FakeLedger()
     monkeypatch.setattr(fin, "billing_ledger", ledger)
-    monkeypatch.setattr(fin.metering_engine, "record", lambda **k: None)
+    monkeypatch.setattr(fin.metering_engine, "record", lambda **k: (None, True))
     monkeypatch.setattr(ew, "_no_funds_next_try", {}, raising=False)
 
     dispatched = []

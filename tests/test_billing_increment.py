@@ -30,10 +30,11 @@ def mock_billing(monkeypatch):
                 "meta": meta,
             }
         )
-        return "led-test"
+        return "led-test", True
 
     def fake_record(*args, **kwargs):
         record_calls.append({"args": args, "kwargs": kwargs})
+        return (None, True)  # inserted=True: новый usage
 
     monkeypatch.setattr(billing_ledger, "debit_if_funds", fake_debit)
     monkeypatch.setattr(metering_engine, "record", fake_record)
@@ -128,7 +129,7 @@ def test_increment_usage_no_funds(mock_billing, monkeypatch):
     # дебет не прошёл → debited=False, usage НЕ пишется (но дебет пытались ровно раз)
     def no_funds(*a, **k):
         mock_billing["debit_calls"].append({"attempt": True})
-        return None
+        return None, False
 
     monkeypatch.setattr(billing_ledger, "debit_if_funds", no_funds)
     total_cost, debited = _increment_usage(
@@ -164,3 +165,27 @@ def test_increment_usage_vastai_gpu_execution(mock_billing):
     assert debited is True
     assert len(mock_billing["record_calls"]) == 1
     assert mock_billing["record_calls"][0]["kwargs"]["event_type"] == "gpu_execution"
+
+
+def test_increment_usage_token_recorded_after_gpu_conflict(mock_billing, monkeypatch):
+    """CodeRabbit PR #210: token-запись не должна теряться при retry, где GPU уже записан."""
+    record_calls = []
+
+    def fake_record(*args, **kwargs):
+        record_calls.append(kwargs)
+        if kwargs.get("event_type") == "token_usage":
+            return (None, True)  # token — новый
+        return (None, False)  # gpu — конфликт (retry)
+
+    monkeypatch.setattr(metering_engine, "record", fake_record)
+
+    total_cost, debited = _increment_usage(
+        tenant_id="tenant_test_1",
+        gpu_sec=100.0,
+        input_tokens=10,
+        plan_name="PRO",
+        job_id="job-123",
+    )
+    assert debited is True
+    event_types = [c["event_type"] for c in record_calls]
+    assert "token_usage" in event_types, f"token-запись должна быть сделана независимо от GPU-конфликта: {event_types}"

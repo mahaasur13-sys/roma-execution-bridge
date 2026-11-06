@@ -116,6 +116,7 @@ def test_cli_gate_gets_the_same_tenant_as_price(monkeypatch, capsys):
     assert seen["payload"]["task"] == "train yolov8 on gpu"
 
 
+@pytest.mark.pg  # гейт читает usage_events (PG-таблица) — без PG env-skip
 def test_cli_gate_denial_stops_before_submit(monkeypatch, capsys):
     """Отказ гейта — терминален: задача не отправляется."""
     record = _record("free", "t-cli-deny")

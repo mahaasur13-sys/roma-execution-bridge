@@ -62,12 +62,12 @@ class FakeLedger:
         self.calls += 1
         lid = "led-" + hashlib.sha256(f"{tenant_id}:{idempotency_key}".encode()).hexdigest()[:24]
         if lid in self.debits:
-            return lid
+            return lid, False
         if self.balance < amount:
-            return None
+            return None, False
         self.balance -= amount
         self.debits[lid] = amount
-        return lid
+        return lid, True
 
 
 @pytest.fixture(autouse=True)
@@ -129,7 +129,7 @@ def world(monkeypatch):
 
     ledger = FakeLedger()
     monkeypatch.setattr(fin, "billing_ledger", ledger)
-    monkeypatch.setattr(fin.metering_engine, "record", lambda **k: None)
+    monkeypatch.setattr(fin.metering_engine, "record", lambda **k: (None, True))
 
     def add_job(started_at="past", status="running"):
         jid = _uniq("job-fix2")

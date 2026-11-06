@@ -78,7 +78,7 @@ class PGMeteringEngine:
         billed=False,
         cost_usd=None,
         value=None,
-    ) -> UsageEvent:
+    ) -> tuple[UsageEvent, bool]:
         val = value if value is not None else (gpu_seconds or cpu_seconds or gb_seconds or float(plugin_count))
         ev = UsageEvent(tenant_id=tenant, event_type=event_type, value=val, job_id=job_id)
         # F1: пишем авторитетную (уже округлённую) цену, чтобы usage_events.cost_usd
@@ -86,49 +86,68 @@ class PGMeteringEngine:
         ev.cost_usd = round(float(cost_usd), 8) if cost_usd is not None else round(ev.cost_usd, 8)
 
         try:
-            _usage_insert_sql = """INSERT INTO usage_events (tenant_id, event_type, value, cost_usd, job_id, metadata, billed)
-                   VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s)"""
+            conflict = ""
             if job_id and job_id not in ("manual", "auto"):
                 # RaaS-01 / migration 016: idempotent write for a REAL job_id.
                 # A repeated write is a no-op — it does NOT update cost_usd or
                 # billed of the already-lying row.
-                _usage_insert_sql += (
+                conflict = (
                     " ON CONFLICT (tenant_id, job_id, event_type)"
                     " WHERE job_id IS NOT NULL AND job_id NOT IN ('manual', 'auto', '')"
                     " DO NOTHING"
                 )
-            self._pg_execute(
-                "usage_insert",
-                _usage_insert_sql,
-                (
-                    tenant,
-                    event_type,
-                    val,
-                    ev.cost_usd,
-                    job_id,
-                    json.dumps({}),
-                    bool(billed),
-                ),
+            _usage_insert_sql = (
+                "INSERT INTO usage_events (tenant_id, event_type, value, cost_usd, job_id, metadata, billed)"
+                f" VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s){conflict} RETURNING 1"  # nosec B608
             )
-            self._pg_execute(
-                "usage_totals_upsert",
-                """INSERT INTO tenant_usage_totals (tenant_id, gpu_seconds, cpu_seconds, gb_seconds, total_cost, jobs_completed)
-                   VALUES (%s, %s, %s, %s, %s, 0)
-                   ON CONFLICT (tenant_id) DO UPDATE SET
-                     gpu_seconds = tenant_usage_totals.gpu_seconds + EXCLUDED.gpu_seconds,
-                     cpu_seconds = tenant_usage_totals.cpu_seconds + EXCLUDED.cpu_seconds,
-                     gb_seconds  = tenant_usage_totals.gb_seconds  + EXCLUDED.gb_seconds,
-                     total_cost  = tenant_usage_totals.total_cost  + EXCLUDED.total_cost,
-                     updated_at  = NOW()""",
-                (
-                    tenant,
-                    gpu_seconds if event_type == "gpu_usage" else 0,
-                    cpu_seconds if event_type == "cpu_usage" else 0,
-                    gb_seconds if event_type == "storage_usage" else 0,
-                    ev.cost_usd,
-                ),
+            _totals_sql = (
+                "INSERT INTO tenant_usage_totals (tenant_id, gpu_seconds, cpu_seconds, gb_seconds, total_cost, jobs_completed)"
+                " VALUES (%s, %s, %s, %s, %s, 0)"
+                " ON CONFLICT (tenant_id) DO UPDATE SET"
+                "   gpu_seconds = tenant_usage_totals.gpu_seconds + EXCLUDED.gpu_seconds,"
+                "   cpu_seconds = tenant_usage_totals.cpu_seconds + EXCLUDED.cpu_seconds,"
+                "   gb_seconds  = tenant_usage_totals.gb_seconds  + EXCLUDED.gb_seconds,"
+                "   total_cost  = tenant_usage_totals.total_cost  + EXCLUDED.total_cost,"
+                "   updated_at  = NOW()"
             )
-            return ev
+
+            if not self._pg.enabled:
+                raise PGUnavailableError("PG not configured or unavailable")
+            # R1 (caveat 2): usage_events INSERT и totals upsert — в ОДНОЙ транзакции.
+            # Падение между вставкой usage и обновлением totals невозможно: commit
+            # происходит по выходу из контекста, иначе rollback обеих.
+            inserted = False
+            with self._pg.get_connection("usage_record") as conn:
+                cur = conn.cursor()
+                try:
+                    cur.execute(
+                        _usage_insert_sql,
+                        (
+                            tenant,
+                            event_type,
+                            val,
+                            ev.cost_usd,
+                            job_id,
+                            json.dumps({}),
+                            bool(billed),
+                        ),
+                    )
+                    rows = cur.fetchall()
+                    inserted = bool(rows)
+                    if inserted:
+                        cur.execute(
+                            _totals_sql,
+                            (
+                                tenant,
+                                gpu_seconds if event_type == "gpu_usage" else 0,
+                                cpu_seconds if event_type == "cpu_usage" else 0,
+                                gb_seconds if event_type == "storage_usage" else 0,
+                                ev.cost_usd,
+                            ),
+                        )
+                finally:
+                    cur.close()
+            return ev, inserted
         except PGUnavailableError as exc:
             # RaaS-01: a failed durable write must not be silently swallowed, and
             # the in-memory fallback must not report false success for paid work.
@@ -142,6 +161,9 @@ class PGMeteringEngine:
                 exc,
             )
             raise
+        except Exception as e:
+            logger.error("MeteringEngine.usage_record PG error: %s", e)
+            raise PGUnavailableError(str(e)) from e
 
     def snapshot(self, tenant: str = None) -> Dict:
         try:

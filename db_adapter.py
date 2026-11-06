@@ -1964,16 +1964,25 @@ CANCEL_BLOCKED_STATUSES = (
 )
 
 
-def get_billing_pending_jobs(limit: int = 50) -> list[dict]:
-    """Выполненные джобы, дебет которых не сохранился (status='billing_pending'), старые первыми."""
+def get_billing_pending_jobs(limit: int = 50, exclude_ids: list[str] | None = None) -> list[dict]:
+    """Выполненные джобы, дебет которых не сохранился (status='billing_pending'), старые первыми.
+
+    ``exclude_ids`` отфильтровывается в SQL (до LIMIT), чтобы приостановленные
+    no_funds-задачи не занимали слоты батча (OT-80).
+    """
+    exclude_ids = exclude_ids or []
     if _pg_enabled():
         conn = _pg_conn()
         try:
             with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT * FROM execution_jobs WHERE status='billing_pending' ORDER BY completed_at ASC LIMIT %s",
-                    (limit,),
-                )
+                q = "SELECT * FROM execution_jobs WHERE status='billing_pending'"
+                params: list = []
+                if exclude_ids:
+                    q += " AND id NOT IN (" + ",".join(["%s"] * len(exclude_ids)) + ")"
+                    params.extend(exclude_ids)
+                q += " ORDER BY completed_at ASC LIMIT %s"
+                params.append(limit)
+                cur.execute(q, params)
                 rows = cur.fetchall()
                 cols = [d[0] for d in cur.description]
                 return [dict(zip(cols, r)) for r in rows] if rows else []
@@ -1982,10 +1991,14 @@ def get_billing_pending_jobs(limit: int = 50) -> list[dict]:
     c = _sqlite_conn()
     try:
         _ensure_execution_jobs_table(c)
-        rows = c.execute(
-            "SELECT * FROM execution_jobs WHERE status='billing_pending' ORDER BY completed_at ASC LIMIT ?",
-            (limit,),
-        ).fetchall()
+        q = "SELECT * FROM execution_jobs WHERE status='billing_pending'"
+        params = []
+        if exclude_ids:
+            q += " AND id NOT IN (" + ",".join(["?"] * len(exclude_ids)) + ")"
+            params.extend(exclude_ids)
+        q += " ORDER BY completed_at ASC LIMIT ?"
+        params.append(limit)
+        rows = c.execute(q, params).fetchall()
         return [dict(r) for r in rows] if rows else []
     finally:
         c.close()
@@ -2004,6 +2017,41 @@ def count_billing_pending_jobs() -> int:
     try:
         _ensure_execution_jobs_table(c)
         return int(c.execute("SELECT COUNT(*) FROM execution_jobs WHERE status='billing_pending'").fetchone()[0])
+    finally:
+        c.close()
+
+
+def get_refund_pending_jobs(limit: int = 50) -> list[dict]:
+    """C10 (временный костыль до DDL): cancelled-джобы с error='refund_pending:debit_exists'.
+
+    Маркер хранится в error (любая другая запись в error его затрёт) — это
+    ВРЕМЕННЫЙ признак до отдельного поля refund_required (DDL-раунд).
+    """
+    if _pg_enabled():
+        conn = _pg_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT * FROM execution_jobs WHERE status='cancelled' AND error LIKE 'refund_pending:debit_exists:%' "
+                    "ORDER BY completed_at ASC LIMIT %s",
+                    (limit,),
+                )
+                rows = cur.fetchall()
+                cols = [d[0] for d in cur.description]
+                return [dict(zip(cols, r)) for r in rows] if rows else []
+        finally:
+            _pg_return(conn)
+    c = _sqlite_conn()
+    try:
+        _ensure_execution_jobs_table(c)
+        cur = c.execute(
+            "SELECT * FROM execution_jobs WHERE status='cancelled' AND error LIKE 'refund_pending:debit_exists:%' "
+            "ORDER BY completed_at ASC LIMIT ?",
+            (limit,),
+        )
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in rows] if rows else []
     finally:
         c.close()
 

@@ -150,6 +150,9 @@ async def complete_job(job_id: str, payload: dict = {}, x_api_key: str = Header(
         raise HTTPException(503, "Billing unavailable, retry later")
     if billing_status == "no_funds":
         raise HTTPException(402, "Insufficient funds")
+    if billing_status == "mismatch":
+        # R2: ключ идемпотентности занят другой суммой/типом/валютой/job_id.
+        raise HTTPException(409, "billing_idempotency_mismatch")
     if billing_status == "skip":
         return {"job_id": job_id, "status": job.get("status"), "billing": "skip"}
     db.update_execution_job(
@@ -205,6 +208,9 @@ async def worker_ack(
             raise HTTPException(503, "Billing unavailable, retry later")
         if billing_status == "no_funds":
             raise HTTPException(402, "Insufficient funds")
+        if billing_status == "mismatch":
+            # R2: ключ идемпотентности занят другой суммой/типом/валютой/job_id.
+            raise HTTPException(409, "billing_idempotency_mismatch")
         if billing_status == "skip":
             return {"job_id": job_id, "status": job.get("status"), "billing": "skip"}
 

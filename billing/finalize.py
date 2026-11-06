@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 import db_adapter as db
 from deps import billing_ledger, alert_dispatcher
-from billing.pg_ledger import PGUnavailableError
+from billing.pg_ledger import PGUnavailableError, LedgerIdemMismatchError
 from billing.pg_metering import PGMeteringEngine as MeteringEngine
 from monitoring.metrics import (
     gpu_seconds_total,
@@ -62,7 +62,7 @@ def _increment_usage(
     # Один атомарный дебет на ВСЮ сумму job'а. Metadata — ПЛОСКИМИ kwargs
     # (семантика **meta): НЕ передавать вложенным metadata={...} — иначе
     # metadata->>'job_id' в БД станет NULL.
-    ledger_id = billing_ledger.debit_if_funds(
+    ledger_id, _is_new = billing_ledger.debit_if_funds(
         tenant_id,
         total_cost,
         idempotency_key=(f"job:{job_id}" if job_id else None),
@@ -83,8 +83,16 @@ def _increment_usage(
         )
         return total_cost, False
 
+    # R1 (rowcount): признак «новый дебет» берём из БД (rowcount вставки в
+    # usage_events), а не из памяти процесса. usage_events INSERT — первое
+    # действие после дебета; totals/метрики — строго после (caveat 1).
+    # CodeRabbit (PR #210): GPU и token — ДВА независимых идемпотентных события.
+    # Запись токенов не должна зависеть от события GPU: если GPU уже записан
+    # (retry), а процесс упал до token-записи, token usage терялся.
+    gpu_new = None
+    token_new = None
     if gpu_sec > 0:
-        metering_engine.record(
+        _ev, gpu_new = metering_engine.record(
             event_type=event_type,
             tenant=tenant_id,
             gpu_seconds=gpu_sec,
@@ -92,12 +100,8 @@ def _increment_usage(
             billed=True,
             cost_usd=gpu_cost,
         )
-        gpu_seconds_total.labels(tenant_id=tenant_id, plan=plan_name).inc(gpu_sec)
-        billing_cost_total.labels(tenant_id=tenant_id, plan=plan_name, cost_type="gpu").inc(gpu_cost)
-
     if input_tokens > 0 or output_tokens > 0:
-        # R15: фактическое число токенов как value.
-        metering_engine.record(
+        _ev, token_new = metering_engine.record(
             event_type="token_usage",
             tenant=tenant_id,
             gpu_seconds=0,
@@ -106,6 +110,17 @@ def _increment_usage(
             cost_usd=token_cost,
             value=float(input_tokens + output_tokens),
         )
+
+    if not (gpu_new is True or token_new is True):
+        # retry (same-process или cross-process): ВСЕ записанные события уже
+        # лежат в usage_events (конфликт) — не дублируем totals/метрики.
+        return total_cost, True
+
+    if gpu_sec > 0 and gpu_new:
+        gpu_seconds_total.labels(tenant_id=tenant_id, plan=plan_name).inc(gpu_sec)
+        billing_cost_total.labels(tenant_id=tenant_id, plan=plan_name, cost_type="gpu").inc(gpu_cost)
+
+    if (input_tokens > 0 or output_tokens > 0) and token_new:
         if input_tokens > 0:
             tokens_total.labels(tenant_id=tenant_id, plan=plan_name, direction="input").inc(input_tokens)
         if output_tokens > 0:
@@ -195,7 +210,9 @@ def finalize_job_billing(
     Возвращает:
       "ok"       → дебет сохранён, usage записан;
       "no_funds" → job найден, но средств не хватает → ничего не списано;
-      "skip"     → job не найден / чужой tenant / уже финализирован.
+      "mismatch" → ключ идемпотентности уже занят другой суммой/типом/валютой/job_id
+                   (R2 — это НЕ «нет средств», вызывающий код отдаёт 409/500);
+      "skip"     → job не найден / чужой tenant / уже финализирован / 0-cost (нечего списывать).
     Поднимает PGUnavailableError, если лэджер не может сохранить дебет.
     """
     job = db.get_execution_job(job_id)
@@ -203,5 +220,22 @@ def finalize_job_billing(
         return "skip"
     if job.get("status") in ("completed", "cancelled", "failed", "timeout"):
         return "skip"
-    _total_cost, debited = _increment_usage(tenant_id, gpu_sec, plan_name=plan_name, job_id=job_id, backend=backend)
-    return "ok" if debited else "no_funds"
+    try:
+        _total_cost, debited = _increment_usage(tenant_id, gpu_sec, plan_name=plan_name, job_id=job_id, backend=backend)
+    except LedgerIdemMismatchError:
+        return "mismatch"
+    if debited:
+        return "ok"
+    if _total_cost <= 0:
+        # 0-cost (нечего списывать) — не «нет средств»; не тащим в billing_pending.
+        return "skip"
+    return "no_funds"
+
+
+def refund_job(tenant_id: str, amount: float, job_id: str, reason: str = "refund") -> str:
+    """C10: вернуть дебет задачи (CREDIT-запись, идемпотентно по refund:<job_id>).
+
+    Использует тот же billing_ledger, что и finalize_job_billing, поэтому в тестах
+    достаточно подменить billing.finalize.billing_ledger.
+    """
+    return billing_ledger.refund(tenant_id, amount, job_id=job_id, reason=reason)

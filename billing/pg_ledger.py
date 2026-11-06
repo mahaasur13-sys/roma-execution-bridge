@@ -83,6 +83,14 @@ def drift_threshold_from_env() -> float:
     return value
 
 
+class LedgerIdemMismatchError(Exception):
+    """R2: по ключу идемпотентности уже есть запись, но с другими типом/суммой/валютой/job_id.
+
+    Это НЕ «нет средств» (не 402) и НЕ двойной дебет — это конфликт ключа, который
+    вызывающий код обязан отличить от no_funds и вернуть отдельную ошибку (409/500).
+    """
+
+
 class PGBillingLedger:
     """Append-only billing ledger — PG-first with automatic in-memory fallback."""
 
@@ -219,6 +227,25 @@ class PGBillingLedger:
         # A fresh uuid4 id cannot collide; fail-closed rather than double-credit.
         raise PGUnavailableError("ledger credit conflict")
 
+    def refund(
+        self, tenant_id: str, amount: float, currency: str = "USD", job_id: str | None = None, reason: str = "refund"
+    ) -> str:
+        """C10: вернуть дебет (CREDIT-запись), идемпотентно по refund:<job_id>.
+
+        Возврат без запроса клиента (отменённая/недоставленная работа). Повторный
+        вызов с тем же job_id не удваивает возврат.
+        """
+        if not job_id:
+            raise ValueError("refund requires job_id (idempotency key)")
+        return self.credit(
+            tenant_id,
+            amount,
+            currency=currency,
+            idempotency_key=f"refund:{job_id}",
+            refund_for=job_id,
+            reason=reason,
+        )
+
     def debit(self, tenant_id: str, amount: float, currency: str = "USD", **meta) -> None:
         """Unconditional DEBIT via ``append()``: raises PGUnavailableError when PG is down."""
         self.append(tenant_id, "DEBIT", amount, currency, meta)
@@ -255,18 +282,20 @@ class PGBillingLedger:
             logger.error("BillingLedger.%s PG error: %s", operation, e)
             raise PGUnavailableError(str(e)) from e
 
-    def debit_if_funds(self, tenant_id, amount, currency="USD", idempotency_key=None, **meta) -> str | None:
+    def debit_if_funds(
+        self, tenant_id, amount, currency="USD", idempotency_key=None, **meta
+    ) -> tuple[str | None, bool]:
         if amount < 0:
             raise ValueError("debit amount must be >= 0")
         reject_invalid_money_amount("ledger_entries", "amount", amount)
-        if idempotency_key:
-            digest = hashlib.sha256(f"{tenant_id}:{idempotency_key}".encode()).hexdigest()
-            ledger_id = f"led-{digest[:24]}"
-        else:
-            ledger_id = f"led-{int(time.time() * 1000)}-{uuid4().hex[:12]}"
+        # OT-70: без идемпотентного ключа ledger_id был бы случайным — повторный
+        # вызов после неопределённого COMMIT дал бы двойное списание.
+        if not idempotency_key:
+            raise ValueError("debit_if_funds requires idempotency_key (or job_id)")
+        digest = hashlib.sha256(f"{tenant_id}:{idempotency_key}".encode()).hexdigest()
+        ledger_id = f"led-{digest[:24]}"
         meta = dict(meta or {})
-        if idempotency_key:
-            meta["idempotency_key"] = idempotency_key
+        meta["idempotency_key"] = idempotency_key
         meta_json = json.dumps(meta)
         lock_key = zlib.crc32(tenant_id.encode()) & 0x7FFFFFFF
 
@@ -294,14 +323,13 @@ class PGBillingLedger:
             # Indeterminate COMMIT: the INSERT may have committed server-side.
             # Re-check by ledger_id (idempotent) before treating it as failed.
             if idempotency_key:
-                existing = self._pg_execute(
-                    "ledger_idem_lookup",
-                    "SELECT ledger_id FROM ledger_entries WHERE ledger_id = %s AND tenant_id = %s",
-                    (ledger_id, tenant_id),
-                    fetch=True,
-                )
-                if existing:
-                    return existing[0][0]
+                rid = self._ledger_idem_lookup(ledger_id, tenant_id, amount, currency, meta)
+                if rid:
+                    # Запись нашлась — дебет дюрабелен. is_new здесь больше НЕ
+                    # используется для gate usage: признак «новый дебет» берётся
+                    # из rowcount вставки в usage_events (finalize._increment_usage),
+                    # а не из памяти процесса.
+                    return rid, True
             raise
 
         if rows:
@@ -317,17 +345,57 @@ class PGBillingLedger:
                     "metadata": meta,
                 }
             )
-            return rid
+            return rid, True
         if idempotency_key:
-            existing = self._pg_execute(
-                "ledger_idem_lookup",
-                "SELECT ledger_id FROM ledger_entries WHERE ledger_id = %s AND tenant_id = %s",
-                (ledger_id, tenant_id),
-                fetch=True,
-            )
-            if existing:
-                return existing[0][0]
-        return None
+            return self._ledger_idem_lookup(ledger_id, tenant_id, amount, currency, meta), False
+        return None, False
+
+    def _ledger_idem_lookup(self, ledger_id, tenant_id, expected_amount, currency, meta) -> str | None:
+        """OT-98: сверка существующей записи перед возвратом успеха при конфликте.
+
+        Возвращает ledger_id только если запись по (ledger_id, tenant_id) реально
+        совпадает с ожидаемым дебетом (тип/сумма/валюта/job_id). Иначе — лог и None
+        (fail-closed: не выдаём чужую запись за свой дебет).
+        """
+        rows = self._pg_execute(
+            "ledger_idem_lookup",
+            "SELECT entry_type, amount, currency, metadata FROM ledger_entries WHERE ledger_id = %s AND tenant_id = %s",
+            (ledger_id, tenant_id),
+            fetch=True,
+        )
+        if not rows:
+            return None
+        entry_type, existing_amount, existing_currency, existing_meta = rows[0]
+        try:
+            existing_meta = json.loads(existing_meta) if isinstance(existing_meta, str) else (existing_meta or {})
+        except Exception:
+            existing_meta = {}
+        expected_job_id = (meta or {}).get("job_id")
+        matches = (
+            entry_type == "DEBIT"
+            and round(float(existing_amount), 8) == round(float(expected_amount), 8)
+            and existing_currency == currency
+            and existing_meta.get("job_id") == expected_job_id
+        )
+        if matches:
+            return ledger_id
+        logger.warning(
+            "ledger_idem_mismatch ledger_id=%s tenant=%s expected=(DEBIT,%s,%s,job=%s) got=(%s,%s,%s,job=%s)",
+            ledger_id,
+            tenant_id,
+            expected_amount,
+            currency,
+            expected_job_id,
+            entry_type,
+            existing_amount,
+            existing_currency,
+            existing_meta.get("job_id"),
+        )
+        # R2: несовпадение — отдельная ошибка, НЕ «нет средств» (иначе ложный 402).
+        raise LedgerIdemMismatchError(
+            f"ledger_idem_mismatch ledger_id={ledger_id} tenant={tenant_id} "
+            f"expected_amount={expected_amount} currency={currency} job_id={expected_job_id}"
+        )
 
     def get_tenant_debit_sum(self, tenant_id: str) -> float:
         try:
