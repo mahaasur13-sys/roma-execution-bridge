@@ -313,14 +313,17 @@ def sweep_refund_pending_once() -> dict:
     запись в error его затрёт. До отдельного поля refund_required (DDL-раунд) это
     временный признак. refund идемпотентен по refund:<job_id> — повтор безопасен.
     """
+    from monitoring.metrics import roma_refund_pending_jobs, roma_refund_pending_sweep_total
+
     outcomes = {"ok": 0, "error": 0, "pg_error": 0}
     if _db_adapter is None:
         return outcomes
     try:
         jobs = _db_adapter.get_refund_pending_jobs(limit=50)
     except Exception as exc:
-        logger.warning("refund_pending.list_failed: %s", exc)
+        logger.error("refund_pending.list_failed: %s", exc)
         return outcomes
+    roma_refund_pending_jobs.set(len(jobs))
     from main import refund_job
 
     for job in jobs:
@@ -345,6 +348,9 @@ def sweep_refund_pending_once() -> dict:
         except Exception as exc:
             outcomes["error"] += 1
             logger.error("refund_pending.error job=%s: %s", jid, exc)
+    for k, v in outcomes.items():
+        if v:
+            roma_refund_pending_sweep_total.labels(outcome=k).inc(v)
     return outcomes
 
 

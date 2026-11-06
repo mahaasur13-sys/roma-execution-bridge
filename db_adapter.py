@@ -2032,7 +2032,7 @@ def get_refund_pending_jobs(limit: int = 50) -> list[dict]:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT * FROM execution_jobs WHERE status='cancelled' AND error LIKE 'refund_pending:debit_exists:%' "
+                    "SELECT * FROM execution_jobs WHERE status='cancelled' AND error LIKE 'refund_pending:debit_exists:%%' "
                     "ORDER BY completed_at ASC LIMIT %s",
                     (limit,),
                 )

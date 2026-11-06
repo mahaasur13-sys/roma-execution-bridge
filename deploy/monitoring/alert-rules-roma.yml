@@ -81,6 +81,14 @@ groups:
           summary: "{{ $value }} completed job(s) not billed (billing_pending) for 30m"
           description: "Job ran but its DEBIT was not saved (PG error / no funds). The billing_pending sweeper retries finalize idempotently (key job:<id>); outcomes in roma_billing_pending_sweep_total{outcome}. Persisting value = unpaid work."
 
+      - alert: ROMARefundPendingJobs
+        expr: roma_refund_pending_jobs > 0
+        for: 30m
+        labels: {severity: warning, category: billing}
+        annotations:
+          summary: "{{ $value }} cancelled job(s) awaiting refund (refund_pending) for 30m"
+          description: "Job was debited but cancelled before the final update. The refund_pending sweeper retries the refund idempotently (key refund:<job_id>); outcomes in roma_refund_pending_sweep_total{outcome}. Persisting value = refund owed to the tenant."
+
       - alert: ROMASpendCapMetricsAbsent
         expr: absent(roma_spend_cap_exceeded_tenants)
         for: 15m
