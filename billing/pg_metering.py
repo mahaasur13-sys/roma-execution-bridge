@@ -98,7 +98,7 @@ class PGMeteringEngine:
                 )
             _usage_insert_sql = (
                 "INSERT INTO usage_events (tenant_id, event_type, value, cost_usd, job_id, metadata, billed)"
-                f" VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s){conflict} RETURNING 1"  # nosec B608 — conflict из статичного белого списка
+                f" VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s){conflict} RETURNING 1"  # nosec B608
             )
             _totals_sql = (
                 "INSERT INTO tenant_usage_totals (tenant_id, gpu_seconds, cpu_seconds, gb_seconds, total_cost, jobs_completed)"

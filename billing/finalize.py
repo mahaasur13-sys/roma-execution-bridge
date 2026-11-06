@@ -86,10 +86,13 @@ def _increment_usage(
     # R1 (rowcount): признак «новый дебет» берём из БД (rowcount вставки в
     # usage_events), а не из памяти процесса. usage_events INSERT — первое
     # действие после дебета; totals/метрики — строго после (caveat 1).
-    # Первый event: gpu (если есть), иначе token.
-    new_usage = False
+    # CodeRabbit (PR #210): GPU и token — ДВА независимых идемпотентных события.
+    # Запись токенов не должна зависеть от события GPU: если GPU уже записан
+    # (retry), а процесс упал до token-записи, token usage терялся.
+    gpu_new = None
+    token_new = None
     if gpu_sec > 0:
-        _ev, new_usage = metering_engine.record(
+        _ev, gpu_new = metering_engine.record(
             event_type=event_type,
             tenant=tenant_id,
             gpu_seconds=gpu_sec,
@@ -97,8 +100,8 @@ def _increment_usage(
             billed=True,
             cost_usd=gpu_cost,
         )
-    elif input_tokens > 0 or output_tokens > 0:
-        _ev, new_usage = metering_engine.record(
+    if input_tokens > 0 or output_tokens > 0:
+        _ev, token_new = metering_engine.record(
             event_type="token_usage",
             tenant=tenant_id,
             gpu_seconds=0,
@@ -108,27 +111,16 @@ def _increment_usage(
             value=float(input_tokens + output_tokens),
         )
 
-    if not new_usage:
-        # retry (same-process или cross-process): usage уже писан — не дублируем
-        # totals/метрики. usage_events при этом идемпотентна (ON CONFLICT DO NOTHING).
+    if not (gpu_new is True or token_new is True):
+        # retry (same-process или cross-process): ВСЕ записанные события уже
+        # лежат в usage_events (конфликт) — не дублируем totals/метрики.
         return total_cost, True
 
-    if gpu_sec > 0:
+    if gpu_sec > 0 and gpu_new:
         gpu_seconds_total.labels(tenant_id=tenant_id, plan=plan_name).inc(gpu_sec)
         billing_cost_total.labels(tenant_id=tenant_id, plan=plan_name, cost_type="gpu").inc(gpu_cost)
 
-    if input_tokens > 0 or output_tokens > 0:
-        if gpu_sec > 0:
-            # Второй event (token) — отдельная идемпотентная вставка.
-            metering_engine.record(
-                event_type="token_usage",
-                tenant=tenant_id,
-                gpu_seconds=0,
-                job_id=job_id or "auto",
-                billed=True,
-                cost_usd=token_cost,
-                value=float(input_tokens + output_tokens),
-            )
+    if (input_tokens > 0 or output_tokens > 0) and token_new:
         if input_tokens > 0:
             tokens_total.labels(tenant_id=tenant_id, plan=plan_name, direction="input").inc(input_tokens)
         if output_tokens > 0:
