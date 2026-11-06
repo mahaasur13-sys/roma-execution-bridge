@@ -113,7 +113,7 @@ narwhals==2.27.1
     # via plotly
 nest-asyncio==1.6.0
     # via dash
-oauthlib==4.0.0
+oauthlib==4.0.1
     # via
     #   kubernetes
     #   requests-oauthlib
