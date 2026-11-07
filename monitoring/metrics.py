@@ -173,6 +173,16 @@ roma_billing_pending_sweep_total = Counter(
     "Исходы свипера billing_pending",
     ["outcome"],
 )
+roma_refund_pending_jobs = Gauge(
+    "roma_refund_pending_jobs",
+    "Отменённые задания, ожидающие возврата (error=refund_pending:debit_exists)",
+    [],
+)
+roma_refund_pending_sweep_total = Counter(
+    "roma_refund_pending_sweep_total",
+    "Исходы свипера refund_pending",
+    ["outcome"],
+)
 
 # алиасы для нового префикса (совместимость)
 roma_spend_cap_balance_usd = spend_cap_balance
