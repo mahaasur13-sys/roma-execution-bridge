@@ -90,7 +90,7 @@ groups:
           description: "Job was debited but cancelled before the final update. The refund_pending sweeper retries the refund idempotently (key refund:<job_id>); outcomes in roma_refund_pending_sweep_total{outcome}. Persisting value = refund owed to the tenant."
 
       - alert: ROMARefundPendingListError
-        expr: increase(roma_refund_pending_sweep_total{outcome="list_error"}[30m]) > 0
+        expr: increase(roma_refund_pending_sweep_total{outcome="list_error"}[5m]) > 0
         for: 10m
         labels: {severity: warning, category: billing}
         annotations:
