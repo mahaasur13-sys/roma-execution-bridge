@@ -315,13 +315,16 @@ def sweep_refund_pending_once() -> dict:
     """
     from monitoring.metrics import roma_refund_pending_jobs, roma_refund_pending_sweep_total
 
-    outcomes = {"ok": 0, "error": 0, "pg_error": 0}
+    outcomes = {"ok": 0, "error": 0, "pg_error": 0, "list_error": 0}
     if _db_adapter is None:
         return outcomes
     try:
         jobs = _db_adapter.get_refund_pending_jobs(limit=50)
     except Exception as exc:
         logger.error("refund_pending.list_failed: %s", exc)
+        # Не пишем gauge нулём: неизвестное число pending ≠ ноль. Отдельный outcome
+        # даёт сигнал для алерта при длительной недоступности БД.
+        roma_refund_pending_sweep_total.labels(outcome="list_error").inc()
         return outcomes
     roma_refund_pending_jobs.set(len(jobs))
     from main import refund_job
