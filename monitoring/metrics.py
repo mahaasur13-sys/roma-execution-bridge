@@ -205,9 +205,7 @@ roma_refund_pending_errors_window_complete = Gauge(
     "F02-A/O4: 1 — окно 900s целиком покрыто временем жизни процесса; 0 — история неполная (после старта)",
     [],
 )
-roma_refund_pending_errors_window_complete.set_function(
-    lambda: 1.0 if _refund_list_error_window.complete() else 0.0
-)
+roma_refund_pending_errors_window_complete.set_function(lambda: 1.0 if _refund_list_error_window.complete() else 0.0)
 roma_refund_pending_window_start_timestamp_seconds = Gauge(
     "roma_refund_pending_window_start_timestamp_seconds",
     "F02-A/O4: epoch seconds старта процесса/окна list_error (рестарт = новая отметка)",
