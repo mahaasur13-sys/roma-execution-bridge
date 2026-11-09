@@ -183,6 +183,41 @@ roma_refund_pending_sweep_total = Counter(
     "Исходы свипера refund_pending",
     ["outcome"],
 )
+# F02-C: zero-init — серии известных outcome существуют с 0 с момента старта
+# процесса, иначе increase()/rate() не видят первое событие новой серии.
+REFUND_PENDING_SWEEP_OUTCOMES = ("ok", "error", "pg_error", "list_error")
+for _outcome in REFUND_PENDING_SWEEP_OUTCOMES:
+    roma_refund_pending_sweep_total.labels(outcome=_outcome)
+
+# F02-A (O3): окно list_error считает приложение; значение вычисляется в момент
+# scrape (set_function), поэтому не «застывает» между циклами свипера.
+from monitoring.refund_error_window import refund_list_error_window as _refund_list_error_window  # noqa: E402
+
+roma_refund_pending_errors_15m = Gauge(
+    "roma_refund_pending_errors_15m",
+    "F02-A: число list_error refund_pending-свипера в окне (now-900s, now] этого процесса. "
+    "Сумма по процессам — в правиле (O2). При window_complete=0 — нижняя граница, не 'ноль ошибок' (O4)",
+    [],
+)
+roma_refund_pending_errors_15m.set_function(lambda: float(_refund_list_error_window.count()))
+roma_refund_pending_errors_window_complete = Gauge(
+    "roma_refund_pending_errors_window_complete",
+    "F02-A/O4: 1 — окно 900s целиком покрыто временем жизни процесса; 0 — история неполная (после старта)",
+    [],
+)
+roma_refund_pending_errors_window_complete.set_function(lambda: 1.0 if _refund_list_error_window.complete() else 0.0)
+roma_refund_pending_window_start_timestamp_seconds = Gauge(
+    "roma_refund_pending_window_start_timestamp_seconds",
+    "F02-A/O4: epoch seconds старта процесса/окна list_error (рестарт = новая отметка)",
+    [],
+)
+roma_refund_pending_window_start_timestamp_seconds.set(_refund_list_error_window.started_at)
+roma_refund_pending_sweep_last_attempt_timestamp_seconds = Gauge(
+    "roma_refund_pending_sweep_last_attempt_timestamp_seconds",
+    "O8: epoch seconds последней завершённой попытки refund_pending-свипера при ЛЮБОМ исходе "
+    "(включая ошибку). Не счётчик событий и не признак здоровья источника. 0 = попыток ещё не было",
+    [],
+)
 
 # алиасы для нового префикса (совместимость)
 roma_spend_cap_balance_usd = spend_cap_balance

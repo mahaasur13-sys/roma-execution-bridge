@@ -89,13 +89,53 @@ groups:
           summary: "{{ $value }} cancelled job(s) awaiting refund (refund_pending) for 30m"
           description: "Job was debited but cancelled before the final update. The refund_pending sweeper retries the refund idempotently (key refund:<job_id>); outcomes in roma_refund_pending_sweep_total{outcome}. Persisting value = refund owed to the tenant."
 
+      # F02-A (O3): окно 15m считает приложение (gauge roma_refund_pending_errors_15m,
+      # окно (now-900s, now], O1). Требование F02: >= 3 list_error за 15m, условие
+      # непрерывно 5m. O2: сумма по всем процессам (без instance). O6: F02-D
+      # (x - x offset) не используется. O4: при window_complete=0 значение — нижняя
+      # граница, отсутствие алерта в этот период НЕ доказывает «порог не достигнут».
       - alert: ROMARefundPendingListError
-        expr: increase(roma_refund_pending_sweep_total{outcome="list_error"}[5m]) > 0
-        for: 10m
+        expr: sum(roma_refund_pending_errors_15m) >= 3
+        for: 5m
         labels: {severity: warning, category: billing}
         annotations:
-          summary: "refund_pending sweeper fails to load the pending list"
-          description: "get_refund_pending_jobs keeps failing (DB unavailable). The gauge roma_refund_pending_jobs is not zeroed on failure, so it may under-report; refunds owed to tenants may be delayed. Check PG connectivity."
+          summary: "refund_pending sweeper: {{ $value }} list_error in the last 15m (all ROMA processes)"
+          description: "get_refund_pending_jobs keeps failing (DB unavailable). The gauge roma_refund_pending_jobs is not zeroed on failure, so it may under-report; refunds owed to tenants may be delayed. Check PG connectivity. Window is computed in-app (roma_refund_pending_errors_15m); after a restart roma_refund_pending_errors_window_complete=0 and the count is a lower bound."
+
+      # O7: потеря наблюдения. Отсутствующий/устаревший gauge НЕ означает «0 ошибок»
+      # и не является доказательством здоровья.
+      # OPEN: числовой порог свежести НЕ утверждён владельцем. 'for: 10m' ниже —
+      # ПЛЕЙСХОЛДЕР для синтаксиса promtool, не утверждённое значение.
+      # OPEN (O2/O7): absent() ловит пропажу ВСЕХ серий; пропажа части процессов
+      # (сумма занижена) этим правилом не ловится.
+      - alert: ROMARefundPendingErrorsObservationLost
+        expr: absent(roma_refund_pending_errors_15m)
+        for: 10m  # PLACEHOLDER — OPEN, порог свежести не утверждён (O7)
+        labels: {severity: warning, category: billing}
+        annotations:
+          summary: "roma_refund_pending_errors_15m missing — list_error window not observed"
+          description: "F02-A gauge is absent (exporter down, scrape failing or registry not initialised). Missing gauge is NOT evidence of zero errors or health (O7)."
+
+      # O8 (условно): свежесть последней ЗАВЕРШЁННОЙ попытки refund_pending-свипера
+      # (обновляется при любом исходе). Ловит «мёртвый свипер», при котором
+      # экспортёр жив, errors_15m=0 и ListError молчит.
+      # OPEN (O8): порог 600s и for: 5m — ПЛЕЙСХОЛДЕРЫ для синтаксиса promtool и
+      # теста, НЕ утверждены; порог — после измерения реального цикла (60s в коде).
+      # OPEN (O8): метка 0 = «попыток не было» (в т.ч. _db_adapter is None). Сейчас
+      # 0 считается старой меткой: time()-0 огромно, условие истинно сразу после
+      # старта; firing только если за for не завершилась ни одна попытка (первый
+      # цикл идёт сразу после старта poll_and_execute). Альтернатива — исключать 0
+      # (`... > 0`), тогда «свипер ни разу не отработал» не ловится. Решает владелец.
+      # OPEN (O2/O8): max() по процессам скрывает мёртвый свипер в одном из
+      # нескольких процессов, пока жив хотя бы один. absent() метки не ловится
+      # (покрывает ROMARefundPendingErrorsObservationLost по соседнему gauge).
+      - alert: ROMARefundPendingSweepStale
+        expr: time() - max(roma_refund_pending_sweep_last_attempt_timestamp_seconds) > 600  # PLACEHOLDER — OPEN (O8), порог не утверждён
+        for: 5m  # PLACEHOLDER — OPEN (O8), не утверждён
+        labels: {severity: warning, category: billing}
+        annotations:
+          summary: "refund_pending sweeper: no completed attempt within the freshness threshold (O8 placeholder)"
+          description: "roma_refund_pending_sweep_last_attempt_timestamp_seconds is stale (0 = no attempt since process start, incl. worker without DB adapter). While this fires, absence of ROMARefundPendingListError is NOT evidence of health: the list_error window is not being fed. The sweeper runs inline in poll_and_execute (await asyncio.to_thread), so a hung attempt (e.g. DB black-hole without RST/exception) also stalls job dispatch, not only refunds; this may be the only signal. Threshold and for are OPEN placeholders (O8)."
 
       - alert: ROMASpendCapMetricsAbsent
         expr: absent(roma_spend_cap_exceeded_tenants)
