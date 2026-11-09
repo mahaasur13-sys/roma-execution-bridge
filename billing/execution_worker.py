@@ -313,18 +313,36 @@ def sweep_refund_pending_once() -> dict:
     запись в error его затрёт. До отдельного поля refund_required (DDL-раунд) это
     временный признак. refund идемпотентен по refund:<job_id> — повтор безопасен.
     """
-    from monitoring.metrics import roma_refund_pending_jobs, roma_refund_pending_sweep_total
+    from monitoring.metrics import (
+        roma_refund_pending_sweep_last_attempt_timestamp_seconds,
+    )
 
     outcomes = {"ok": 0, "error": 0, "pg_error": 0, "list_error": 0}
     if _db_adapter is None:
         return outcomes
+    try:
+        return _sweep_refund_pending_attempt(outcomes)
+    finally:
+        # O8: время последней ЗАВЕРШЁННОЙ попытки — при любом исходе, включая
+        # list_error и непредвиденное исключение. Не подменяет счётчик событий
+        # и не означает здоровья источника. Порог свежести — OPEN (не утверждён).
+        roma_refund_pending_sweep_last_attempt_timestamp_seconds.set(time.time())
+
+
+def _sweep_refund_pending_attempt(outcomes: dict) -> dict:
+    from monitoring.metrics import roma_refund_pending_jobs, roma_refund_pending_sweep_total
+    from monitoring.refund_error_window import refund_list_error_window
+
     try:
         jobs = _db_adapter.get_refund_pending_jobs(limit=50)
     except Exception as exc:
         logger.error("refund_pending.list_failed: %s", exc)
         # Не пишем gauge нулём: неизвестное число pending ≠ ноль. Отдельный outcome
         # даёт сигнал для алерта при длительной недоступности БД.
+        outcomes["list_error"] += 1
         roma_refund_pending_sweep_total.labels(outcome="list_error").inc()
+        # F02-A (O1/O3): событие list_error в окно приложения, event_time = сейчас.
+        refund_list_error_window.record()
         return outcomes
     roma_refund_pending_jobs.set(len(jobs))
     from main import refund_job

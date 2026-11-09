@@ -1,0 +1,204 @@
+# F02-A (OWNER DECISION 2026-11-09, O1-O8): ROMARefundPendingListError по
+# gauge окна приложения roma_refund_pending_errors_15m.
+# Требование: >= 3 list_error в окне 15m, условие непрерывно 5m (for: 5m).
+# Граница окна (now-900s, now] (O1) проверяется на стороне приложения (pytest,
+# tests/test_refund_f02a_window.py), здесь — только оценка правила.
+rule_files:
+  - ../alert-rules-roma.yml
+evaluation_interval: 30s
+tests:
+  # A: сумма по двум процессам (O2) достигает 3 в t=3m и держится -> firing
+  # ровно после 5m удержания (t=8m), но не раньше (t=7m30s).
+  - name: f02a_sum_across_processes_fires_after_5m
+    interval: 1m
+    input_series:
+      - series: 'roma_refund_pending_errors_15m{instance="roma-a:8000", job="roma"}'
+        values: '0 1 2 2 2 2 2 2 2 2 2 2'
+      - series: 'roma_refund_pending_errors_15m{instance="roma-b:8000", job="roma"}'
+        values: '0 0 0 1 1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ROMARefundPendingListError
+        exp_alerts: []
+      - eval_time: 7m30s
+        alertname: ROMARefundPendingListError
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: ROMARefundPendingListError
+        exp_alerts:
+          - exp_labels: {severity: warning, category: billing}
+            exp_annotations:
+              summary: "refund_pending sweeper: 3 list_error in the last 15m (all ROMA processes)"
+              description: "get_refund_pending_jobs keeps failing (DB unavailable). The gauge roma_refund_pending_jobs is not zeroed on failure, so it may under-report; refunds owed to tenants may be delayed. Check PG connectivity. Window is computed in-app (roma_refund_pending_errors_15m); after a restart roma_refund_pending_errors_window_complete=0 and the count is a lower bound."
+      - eval_time: 8m
+        alertname: ROMARefundPendingErrorsObservationLost
+        exp_alerts: []
+
+  # B: порог: 2 ошибки в окне постоянно -> не срабатывает никогда.
+  - name: f02a_two_errors_never_fire
+    interval: 1m
+    input_series:
+      - series: 'roma_refund_pending_errors_15m{instance="roma-a:8000", job="roma"}'
+        values: '2x20'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ROMARefundPendingListError
+        exp_alerts: []
+
+  # C: непрерывность: 3 держится 4m (t=2m..5m), затем 2 -> не срабатывает.
+  - name: f02a_condition_not_held_5m_no_fire
+    interval: 1m
+    input_series:
+      - series: 'roma_refund_pending_errors_15m{instance="roma-a:8000", job="roma"}'
+        values: '0 0 3 3 3 3 2 2 2 2 2 2 2 2'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: ROMARefundPendingListError
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: ROMARefundPendingListError
+        exp_alerts: []
+
+  # D: неполное окно после рестарта (O4): window_complete=0, но 3 ошибки уже
+  # учтены -> алерт срабатывает (счёт — нижняя граница, а не ноль).
+  - name: f02a_incomplete_window_lower_bound_still_fires
+    interval: 1m
+    input_series:
+      - series: 'roma_refund_pending_errors_15m{instance="roma-a:8000", job="roma"}'
+        values: '3x10'
+      - series: 'roma_refund_pending_errors_window_complete{instance="roma-a:8000", job="roma"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ROMARefundPendingListError
+        exp_alerts:
+          - exp_labels: {severity: warning, category: billing}
+            exp_annotations:
+              summary: "refund_pending sweeper: 3 list_error in the last 15m (all ROMA processes)"
+              description: "get_refund_pending_jobs keeps failing (DB unavailable). The gauge roma_refund_pending_jobs is not zeroed on failure, so it may under-report; refunds owed to tenants may be delayed. Check PG connectivity. Window is computed in-app (roma_refund_pending_errors_15m); after a restart roma_refund_pending_errors_window_complete=0 and the count is a lower bound."
+
+  # E: потеря наблюдения (O7): gauge нет -> основной алерт молчит (нет данных),
+  # отдельный warning срабатывает. for: 10m — ПЛЕЙСХОЛДЕР (OPEN).
+  - name: f02a_gauge_absent_observation_lost
+    interval: 1m
+    input_series:
+      - series: 'roma_requests_total{status="200"}'
+        values: '0+1x20'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: ROMARefundPendingErrorsObservationLost
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: ROMARefundPendingErrorsObservationLost
+        exp_alerts:
+          - exp_labels: {severity: warning, category: billing}
+            exp_annotations:
+              summary: "roma_refund_pending_errors_15m missing — list_error window not observed"
+              description: "F02-A gauge is absent (exporter down, scrape failing or registry not initialised). Missing gauge is NOT evidence of zero errors or health (O7)."
+      - eval_time: 15m
+        alertname: ROMARefundPendingListError
+        exp_alerts: []
+
+  # ---------------------------------------------------------------------------
+  # O8 (GO-LOCAL-F02A-O8-1): ROMARefundPendingSweepStale.
+  # ПОРОГ 600s и for: 5m в правиле — ПЛЕЙСХОЛДЕРЫ (OPEN, O8), не утверждены.
+  # В promtool time() отсчитывается от 0 (epoch 0), поэтому метки last_attempt
+  # здесь — секунды тестового времени.
+
+  # (a) «мёртвый свипер»: экспортёр жив, errors_15m=0, window_complete=1,
+  # last_attempt замёрз на 300 (t=5m). time()-300 > 600 впервые на t=15m30s,
+  # + for 5m -> firing на 20m30s, не раньше. ListError и ObservationLost молчат:
+  # отсутствие ListError здесь НЕ свидетельство здоровья.
+  - name: o8_dead_sweeper_fires_stale_only
+    interval: 1m
+    input_series:
+      - series: 'roma_refund_pending_errors_15m{instance="roma-a:8000", job="roma"}'
+        values: '0x40'
+      - series: 'roma_refund_pending_errors_window_complete{instance="roma-a:8000", job="roma"}'
+        values: '1x40'
+      - series: 'roma_refund_pending_sweep_last_attempt_timestamp_seconds{instance="roma-a:8000", job="roma"}'
+        values: '0+60x5 300x35'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ROMARefundPendingSweepStale
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: ROMARefundPendingSweepStale
+        exp_alerts: []
+      - eval_time: 20m30s
+        alertname: ROMARefundPendingSweepStale
+        exp_alerts:
+          - exp_labels: {severity: warning, category: billing}
+            exp_annotations:
+              summary: "refund_pending sweeper: no completed attempt within the freshness threshold (O8 placeholder)"
+              description: "roma_refund_pending_sweep_last_attempt_timestamp_seconds is stale (0 = no attempt since process start, incl. worker without DB adapter). While this fires, absence of ROMARefundPendingListError is NOT evidence of health: the list_error window is not being fed. The sweeper runs inline in poll_and_execute (await asyncio.to_thread), so a hung attempt (e.g. DB black-hole without RST/exception) also stalls job dispatch, not only refunds; this may be the only signal. Threshold and for are OPEN placeholders (O8)."
+      - eval_time: 30m
+        alertname: ROMARefundPendingListError
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: ROMARefundPendingErrorsObservationLost
+        exp_alerts: []
+
+  # (b) живой свипер: last_attempt растёт каждую минуту -> не firing.
+  - name: o8_live_sweeper_no_fire
+    interval: 1m
+    input_series:
+      - series: 'roma_refund_pending_errors_15m{instance="roma-a:8000", job="roma"}'
+        values: '0x40'
+      - series: 'roma_refund_pending_sweep_last_attempt_timestamp_seconds{instance="roma-a:8000", job="roma"}'
+        values: '0+60x40'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: ROMARefundPendingSweepStale
+        exp_alerts: []
+
+  # (c) граница: отставание ровно 600s (= порогу, сравнение строгое '>') ->
+  # не firing; отставание 601s -> firing после for 5m (t=5m).
+  - name: o8_lag_equal_threshold_no_fire
+    interval: 1m
+    input_series:
+      - series: 'roma_refund_pending_sweep_last_attempt_timestamp_seconds{instance="roma-a:8000", job="roma"}'
+        values: '-600+60x40'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: ROMARefundPendingSweepStale
+        exp_alerts: []
+  - name: o8_lag_just_above_threshold_fires
+    interval: 1m
+    input_series:
+      - series: 'roma_refund_pending_sweep_last_attempt_timestamp_seconds{instance="roma-a:8000", job="roma"}'
+        values: '-601+60x40'
+    alert_rule_test:
+      - eval_time: 4m30s
+        alertname: ROMARefundPendingSweepStale
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: ROMARefundPendingSweepStale
+        exp_alerts:
+          - exp_labels: {severity: warning, category: billing}
+            exp_annotations:
+              summary: "refund_pending sweeper: no completed attempt within the freshness threshold (O8 placeholder)"
+              description: "roma_refund_pending_sweep_last_attempt_timestamp_seconds is stale (0 = no attempt since process start, incl. worker without DB adapter). While this fires, absence of ROMARefundPendingListError is NOT evidence of health: the list_error window is not being fed. The sweeper runs inline in poll_and_execute (await asyncio.to_thread), so a hung attempt (e.g. DB black-hole without RST/exception) also stalls job dispatch, not only refunds; this may be the only signal. Threshold and for are OPEN placeholders (O8)."
+
+  # (d) метка 0 («попыток не было»): фиксирует ФАКТИЧЕСКОЕ поведение правила —
+  # 0 считается старой меткой. В promtool time() стартует с 0, поэтому условие
+  # time()-0 > 600 впервые истинно на t=10m30s, firing на 15m30s. В production
+  # time() ~ 1.8e9, условие истинно сразу, firing через for (5m) после старта,
+  # если за это время не завершилась ни одна попытка. OPEN (O8): считать 0
+  # старым (как сейчас) или исключать.
+  - name: o8_zero_label_treated_as_stale
+    interval: 1m
+    input_series:
+      - series: 'roma_refund_pending_sweep_last_attempt_timestamp_seconds{instance="roma-a:8000", job="roma"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ROMARefundPendingSweepStale
+        exp_alerts: []
+      - eval_time: 15m30s
+        alertname: ROMARefundPendingSweepStale
+        exp_alerts:
+          - exp_labels: {severity: warning, category: billing}
+            exp_annotations:
+              summary: "refund_pending sweeper: no completed attempt within the freshness threshold (O8 placeholder)"
+              description: "roma_refund_pending_sweep_last_attempt_timestamp_seconds is stale (0 = no attempt since process start, incl. worker without DB adapter). While this fires, absence of ROMARefundPendingListError is NOT evidence of health: the list_error window is not being fed. The sweeper runs inline in poll_and_execute (await asyncio.to_thread), so a hung attempt (e.g. DB black-hole without RST/exception) also stalls job dispatch, not only refunds; this may be the only signal. Threshold and for are OPEN placeholders (O8)."
