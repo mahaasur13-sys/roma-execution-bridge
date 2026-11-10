@@ -69,6 +69,13 @@ def test_worker_refunds_cancelled_job(tmp_path, monkeypatch):
     monkeypatch.setattr(fin, "billing_ledger", ledger)
     monkeypatch.setattr(fin.metering_engine, "record", lambda **k: (None, True))
     monkeypatch.setattr(ew, "_no_funds_next_try", {}, raising=False)
+
+    # Подтверждённая бэкендом длительность (100 с по фиктивным часам): без неё
+    # воркер fail-closed не списывает, а C10 проверяет возврат уже сделанного дебета.
+    async def fake_confirmed_duration(job_id, backend_name=None):
+        return 100.0
+
+    monkeypatch.setattr(ew, "_confirmed_duration", fake_confirmed_duration)
     ticks = itertools.chain([1000.0], itertools.repeat(1100.0))
     monkeypatch.setattr(ew, "time", types.SimpleNamespace(monotonic=lambda: next(ticks)))
 
@@ -143,6 +150,13 @@ def test_worker_refund_failure_marks_pending(tmp_path, monkeypatch):
     monkeypatch.setattr(fin, "billing_ledger", FailingRefundLedger())
     monkeypatch.setattr(fin.metering_engine, "record", lambda **k: (None, True))
     monkeypatch.setattr(ew, "_no_funds_next_try", {}, raising=False)
+
+    # Подтверждённая бэкендом длительность (100 с по фиктивным часам): без неё
+    # воркер fail-closed не списывает, а C10 проверяет возврат уже сделанного дебета.
+    async def fake_confirmed_duration(job_id, backend_name=None):
+        return 100.0
+
+    monkeypatch.setattr(ew, "_confirmed_duration", fake_confirmed_duration)
     ticks = itertools.chain([1000.0], itertools.repeat(1100.0))
     monkeypatch.setattr(ew, "time", types.SimpleNamespace(monotonic=lambda: next(ticks)))
 

@@ -64,6 +64,14 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(fin.metering_engine, "record", lambda **k: (None, True))
     monkeypatch.setattr(ew, "_no_funds_next_try", {}, raising=False)
 
+    # OT-99 остаётся про «дебет == duration_seconds»: подтверждённая длительность
+    # та же, что раньше давал таймер воркера. Патчим ИСТОЧНИК (dispatcher), а не
+    # обёртку воркера — тогда проверяются и валидация, и округление до 2 знаков.
+    async def corroborated(job_id, backend_name=None):
+        return ELAPSED
+
+    monkeypatch.setattr("backends.dispatcher.get_confirmed_duration", corroborated)
+
     ticks = itertools.chain([1000.0], itertools.repeat(1000.0 + ELAPSED))
     monkeypatch.setattr(ew, "time", types.SimpleNamespace(monotonic=lambda: next(ticks)))
 

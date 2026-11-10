@@ -75,6 +75,13 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(fin.metering_engine, "record", lambda **k: (records.append(k), True))
     monkeypatch.setattr(ew, "_no_funds_next_try", {}, raising=False)
 
+    # Подтверждённая бэкендом длительность: без неё воркер (fail-closed) не
+    # списывает вовсе — таймер воркера больше не источник дебета.
+    async def fake_worker_confirmed_duration(job_id, backend_name):
+        return WORKER_SECONDS
+
+    monkeypatch.setattr(ew, "_confirmed_duration", fake_worker_confirmed_duration)
+
     # Фиктивные монотонные часы только для модуля воркера: start=1000, далее 1000+100.
     ticks = itertools.chain([1000.0], itertools.repeat(1000.0 + WORKER_SECONDS))
     monkeypatch.setattr(ew, "time", types.SimpleNamespace(monotonic=lambda: next(ticks)))

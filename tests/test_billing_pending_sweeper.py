@@ -65,6 +65,13 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(fin.metering_engine, "record", lambda **k: (None, True))
     monkeypatch.setattr(ew, "_no_funds_next_try", {}, raising=False)
 
+    # Подтверждённая бэкендом длительность: без неё воркер (fail-closed) не
+    # списывает вовсе — таймер воркера больше не источник дебета.
+    async def fake_confirmed_duration(job_id, backend_name):
+        return 100.0
+
+    monkeypatch.setattr(ew, "_confirmed_duration", fake_confirmed_duration)
+
     dispatched = []
 
     async def fake_dispatch(**k):
