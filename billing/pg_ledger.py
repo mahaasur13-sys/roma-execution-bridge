@@ -92,14 +92,21 @@ class LedgerIdemMismatchError(Exception):
 
 
 class PGBillingLedger:
-    """Append-only billing ledger — PG-first with automatic in-memory fallback."""
+    """Append-only billing ledger — PG is the only source of truth (fail-closed).
+
+    Every read goes to PG and raises ``PGUnavailableError`` when PG is down: a
+    number computed from the per-process in-memory mirror is a wrong number, not a
+    degraded one (the mirror never sees entries written by other workers, so it
+    under-reports debits and over-reports balance). The mirror exists only as a
+    write-side record of rows PG already accepted.
+    """
 
     def __init__(self):
         self._pg = get_pg_manager()
-        self._entries: list[dict] = []  # in-memory fallback
+        self._entries: list[dict] = []  # write-side mirror only — never a read fallback
 
     def _pg_execute(self, operation: str, query: str, params: tuple = None, fetch: bool = False) -> list | None:
-        """Execute a PG query with automatic retry + fallback."""
+        """Execute a PG query; PG unavailability raises ``PGUnavailableError`` (no fallback)."""
         if not self._pg._ensure_pool():
             raise PGUnavailableError("PG not configured or unavailable")
         try:
@@ -398,30 +405,22 @@ class PGBillingLedger:
         )
 
     def get_tenant_debit_sum(self, tenant_id: str) -> float:
-        try:
-            rows = self._pg_execute(
-                "ledger_debit_sum",
-                "SELECT COALESCE(SUM(amount), 0) FROM ledger_entries WHERE tenant_id = %s AND entry_type = 'DEBIT'",
-                (tenant_id,),
-                fetch=True,
-            )
-            return float(rows[0][0])
-        except PGUnavailableError:
-            pass
-        return sum(e["amount"] for e in self._entries if e["tenant_id"] == tenant_id and e["type"] == "DEBIT")
+        rows = self._pg_execute(
+            "ledger_debit_sum",
+            "SELECT COALESCE(SUM(amount), 0) FROM ledger_entries WHERE tenant_id = %s AND entry_type = 'DEBIT'",
+            (tenant_id,),
+            fetch=True,
+        )
+        return float(rows[0][0])
 
     def get_tenant_usage_cost(self, tenant_id: str) -> float:
-        try:
-            rows = self._pg_execute(
-                "usage_cost_sum",
-                "SELECT COALESCE(SUM(cost_usd), 0) FROM usage_events WHERE tenant_id = %s",
-                (tenant_id,),
-                fetch=True,
-            )
-            return float(rows[0][0])
-        except PGUnavailableError:
-            pass
-        return 0.0
+        rows = self._pg_execute(
+            "usage_cost_sum",
+            "SELECT COALESCE(SUM(cost_usd), 0) FROM usage_events WHERE tenant_id = %s",
+            (tenant_id,),
+            fetch=True,
+        )
+        return float(rows[0][0])
 
     def get_tenant_balance(self, tenant_id: str) -> float:
         """Balance from PG only — raises PGUnavailableError when PG is down (fail-closed).
@@ -443,63 +442,42 @@ class PGBillingLedger:
         return self.get_tenant_balance(tenant_id)
 
     def get_tenant_entries(self, tenant_id: str, limit: int = 100) -> list[dict]:
-        try:
-            rows = self._pg_execute(
-                "ledger_entries",
-                """SELECT ledger_id, tenant_id, entry_type, amount, currency, metadata, created_at
-                   FROM ledger_entries WHERE tenant_id = %s
-                   ORDER BY created_at DESC LIMIT %s""",
-                (tenant_id, limit),
-                fetch=True,
-            )
-            return [
-                {
-                    "ledger_id": r[0],
-                    "tenant_id": r[1],
-                    "type": r[2],
-                    "amount": r[3],
-                    "currency": r[4],
-                    "metadata": r[5] or {},
-                    "timestamp": r[6].timestamp(),
-                }
-                for r in rows
-            ]
-        except PGUnavailableError:
-            pass
-        return [e for e in self._entries if e["tenant_id"] == tenant_id][-limit:]
+        rows = self._pg_execute(
+            "ledger_entries",
+            """SELECT ledger_id, tenant_id, entry_type, amount, currency, metadata, created_at
+               FROM ledger_entries WHERE tenant_id = %s
+               ORDER BY created_at DESC LIMIT %s""",
+            (tenant_id, limit),
+            fetch=True,
+        )
+        return [
+            {
+                "ledger_id": r[0],
+                "tenant_id": r[1],
+                "type": r[2],
+                "amount": r[3],
+                "currency": r[4],
+                "metadata": r[5] or {},
+                "timestamp": r[6].timestamp(),
+            }
+            for r in rows
+        ]
 
     def ledger_summary(self) -> dict:
-        try:
-            rows = self._pg_execute(
-                "ledger_summary",
-                """SELECT tenant_id, entry_type, SUM(amount), COUNT(*)
-                   FROM ledger_entries GROUP BY tenant_id, entry_type""",
-                fetch=True,
-            )
-            by_tenant = {}
-            for tenant_id, etype, total, cnt in rows:
-                t = by_tenant.setdefault(tenant_id, {"credits": 0.0, "debits": 0.0, "net": 0.0, "entries": 0})
-                t["entries"] += cnt
-                if etype == "CREDIT":
-                    t["credits"] += total
-                else:
-                    t["debits"] += total
-            for t in by_tenant:
-                by_tenant[t]["net"] = by_tenant[t]["credits"] - by_tenant[t]["debits"]
-            return by_tenant
-        except PGUnavailableError:
-            pass
+        rows = self._pg_execute(
+            "ledger_summary",
+            """SELECT tenant_id, entry_type, SUM(amount), COUNT(*)
+               FROM ledger_entries GROUP BY tenant_id, entry_type""",
+            fetch=True,
+        )
         by_tenant = {}
-        for e in self._entries:
-            t = by_tenant.setdefault(
-                e["tenant_id"],
-                {"credits": 0.0, "debits": 0.0, "net": 0.0, "entries": 0},
-            )
-            t["entries"] += 1
-            if e["type"] == "CREDIT":
-                t["credits"] += e["amount"]
+        for tenant_id, etype, total, cnt in rows:
+            t = by_tenant.setdefault(tenant_id, {"credits": 0.0, "debits": 0.0, "net": 0.0, "entries": 0})
+            t["entries"] += cnt
+            if etype == "CREDIT":
+                t["credits"] += total
             else:
-                t["debits"] += e["amount"]
+                t["debits"] += total
         for t in by_tenant:
             by_tenant[t]["net"] = by_tenant[t]["credits"] - by_tenant[t]["debits"]
         return by_tenant
@@ -509,17 +487,13 @@ class PGBillingLedger:
         return self._pg._create_pool() if self._pg._pool is None else self._pg.is_connected
 
     def get_tenant_entry_count(self, tenant_id: str) -> int:
-        try:
-            rows = self._pg_execute(
-                "ledger_count",
-                "SELECT COUNT(*) FROM ledger_entries WHERE tenant_id = %s",
-                (tenant_id,),
-                fetch=True,
-            )
-            return int(rows[0][0])
-        except PGUnavailableError:
-            pass
-        return len([e for e in self._entries if e["tenant_id"] == tenant_id])
+        rows = self._pg_execute(
+            "ledger_count",
+            "SELECT COUNT(*) FROM ledger_entries WHERE tenant_id = %s",
+            (tenant_id,),
+            fetch=True,
+        )
+        return int(rows[0][0])
 
     def reconciliation_summary(self, threshold_usd: float | None = None) -> dict:
         """Сверка ledger↔usage по ВСЕМ тенантам одним запросом: агрегаты, без метки на тенанта.

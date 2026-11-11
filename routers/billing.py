@@ -197,7 +197,12 @@ async def get_billing_ledger(
 ):
     """История списаний (дебет/кредит) для текущего tenant."""
     tenant_id = key_info["tenant_id"]
-    entries = billing_ledger.get_tenant_entries(tenant_id)
+    try:
+        entries = billing_ledger.get_tenant_entries(tenant_id)
+        total_entries = billing_ledger.get_tenant_entry_count(tenant_id)
+    except PGUnavailableError as exc:
+        logger.error("billing.ledger_unavailable tenant=%s: %s", tenant_id, exc)
+        raise HTTPException(status_code=503, detail="Billing unavailable, retry later") from exc
     entries = entries[:limit] if limit > 0 else entries
     balance = _balance_or_503(tenant_id)
     plan_name = key_info.get("plan", "free")
@@ -219,7 +224,7 @@ async def get_billing_ledger(
             }
             for e in entries
         ],
-        "total_entries": billing_ledger.get_tenant_entry_count(tenant_id),
+        "total_entries": total_entries,
     }
 
 
