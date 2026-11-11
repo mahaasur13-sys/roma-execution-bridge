@@ -13,9 +13,7 @@ DEAD_PATHS = ("/worker/job/", "/worker/heartbeat")
 
 
 def test_dead_worker_client_removed():
-    assert not (ROOT / "gpu_worker" / "heartbeat.py").exists(), (
-        "gpu_worker/heartbeat.py вернулся в дерево"
-    )
+    assert not (ROOT / "gpu_worker" / "heartbeat.py").exists(), "gpu_worker/heartbeat.py вернулся в дерево"
 
     offenders = []
     for path in ROOT.rglob("*.py"):
