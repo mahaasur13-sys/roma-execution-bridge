@@ -7,6 +7,7 @@ import os
 from datetime import datetime, timezone
 
 import db_adapter as db
+import job_lease
 from policy_engine import evaluate_policies
 from policy_transition import validate_transition
 from audit_events import write_audit_event
@@ -47,6 +48,23 @@ async def _billable_seconds_or_409(job_id: str, job: dict) -> float:
         logger.error("billing.duration_unknown job=%s started_at=%r", job_id, job.get("started_at"))
         raise HTTPException(409, "billing_duration_unknown: no confirmed duration and no valid started_at")
     return gpu_sec
+
+
+def _lease_guard(job_id: str, job: dict, tenant_id: str, payload: dict) -> None:
+    """Identity + lease до finalize (021b). Unbound — молча пропускаем."""
+    ok, reason = job_lease.verdict(
+        job,
+        worker_id=payload.get("worker_id"),
+        lease_token=payload.get("lease_token"),
+        epoch=payload.get("lease_epoch"),
+    )
+    if ok:
+        return
+    data = job_lease.audit_data(job, reason)
+    if job_lease.enforce_enabled():
+        write_audit_event(tenant_id, "job.lease.denied", "job", job_id, data)
+        raise HTTPException(409, f"lease_denied: {reason}")
+    write_audit_event(tenant_id, "job.lease.shadow_mismatch", "job", job_id, data)
 
 
 @router.post("/{job_id}/retry")
@@ -153,6 +171,7 @@ async def complete_job(job_id: str, payload: dict = {}, x_api_key: str = Header(
             {"from": current, "to": "completed"},
         )
         raise HTTPException(409, tr["reason"])
+    _lease_guard(job_id, job, tenant_id, payload)
     # Billing: debit exactly once before marking completed (fail-closed).
     gpu_sec = await _billable_seconds_or_409(job_id, job)
     plan_name = (db.get_tenant(tenant_id) or {}).get("plan", "free")
@@ -224,6 +243,8 @@ async def worker_ack(
     tr = validate_transition(job.get("status", ""), new_status)
     if not tr["allowed"]:
         raise HTTPException(409, tr["reason"])
+
+    _lease_guard(job_id, job, tenant_id, payload)
 
     if action == "complete":
         # Billing: debit exactly once before marking completed (fail-closed).
