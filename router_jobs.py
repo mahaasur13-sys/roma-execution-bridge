@@ -168,12 +168,26 @@ async def complete_job(job_id: str, payload: dict = {}, x_api_key: str = Header(
         raise HTTPException(409, "billing_idempotency_mismatch")
     if billing_status == "skip":
         return {"job_id": job_id, "status": job.get("status"), "billing": "skip"}
-    db.update_execution_job(
+    # CAS: завершаем только если статус с момента чтения не стал терминальным
+    # (cancel/свипер выиграли гонку). Дебет уже прошёл — только сигнал, без возврата.
+    n = db.update_execution_job(
         job_id,
         status="completed",
         completed_at=datetime.now(timezone.utc).isoformat(),
         tenant_id=tenant_id,
+        if_status_not_in=db.CANCEL_BLOCKED_STATUSES,
     )
+    if not n:
+        latest = (db.get_execution_job(job_id) or job).get("status")
+        logger.warning("complete.cas_lost job=%s tenant=%s status=%s", job_id, tenant_id, latest)
+        write_audit_event(
+            tenant_id,
+            "job.complete.cas_lost",
+            "job",
+            job_id,
+            {"status": latest, "debited": True},
+        )
+        raise HTTPException(409, f"transition_denied: {latest} → completed invalid")
     return {"job_id": job_id, "status": "completed"}
 
 
@@ -199,10 +213,11 @@ async def worker_ack(
         job = db.get_execution_job(job_id)
         if not job or job.get("tenant_id") != tenant_id:
             raise HTTPException(404, "Job not found")
-        if action == "fail":
-            # A tenant must not close its own running job without billing: running → failed
-            # skips finalize_job_billing entirely. Only the s2s worker reports failure.
-            raise HTTPException(403, "action=fail requires the worker token (X-Roma-Worker-Token)")
+        if action in ("start", "fail"):
+            # A tenant must not drive the worker lifecycle: running → failed skips
+            # finalize_job_billing, running → running steals a lease it never held.
+            # Only the s2s worker reports start/fail.
+            raise HTTPException(403, f"action={action} requires the worker token (X-Roma-Worker-Token)")
 
     status_map = {"start": "running", "complete": "completed", "fail": "failed"}
     new_status = status_map[action]
@@ -229,13 +244,33 @@ async def worker_ack(
 
     error = payload.get("error") if action == "fail" else None
     completed_at = datetime.now(timezone.utc).isoformat() if action in ("complete", "fail") else None
-    db.update_execution_job(
+    # CAS: финальный UPDATE не перезаписывает терминальный статус, поставленный
+    # параллельным cancel/свипером. Дебет (для complete) уже прошёл — только сигнал.
+    n = db.update_execution_job(
         job_id,
         status=new_status,
         completed_at=completed_at,
         error=error,
         tenant_id=tenant_id,
+        if_status_not_in=db.CANCEL_BLOCKED_STATUSES,
     )
+    if not n:
+        latest = (db.get_execution_job(job_id) or job).get("status")
+        logger.warning(
+            "worker_ack.cas_lost action=%s job=%s tenant=%s status=%s",
+            action,
+            job_id,
+            tenant_id,
+            latest,
+        )
+        write_audit_event(
+            tenant_id,
+            f"job.{action}.cas_lost",
+            "job",
+            job_id,
+            {"status": latest, "debited": action == "complete", "worker_id": payload.get("worker_id")},
+        )
+        raise HTTPException(409, f"transition_denied: {latest} → {new_status} invalid")
 
     write_audit_event(
         tenant_id,
