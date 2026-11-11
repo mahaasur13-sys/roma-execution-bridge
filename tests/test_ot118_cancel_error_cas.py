@@ -43,6 +43,13 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "_sqlite_conn", _conn)
     monkeypatch.setattr(ew, "_db_adapter", db)
     monkeypatch.setattr(ew, "_no_funds_next_try", {}, raising=False)
+
+    # Подтверждённая бэкендом длительность: без неё воркер (fail-closed) не
+    # списывает вовсе — таймер воркера больше не источник дебета.
+    async def fake_confirmed_duration(job_id, backend_name):
+        return 100.0
+
+    monkeypatch.setattr(ew, "_confirmed_duration", fake_confirmed_duration)
     # Фиктивные монотонные часы: start=1000, elapsed=100.
     ticks = itertools.chain([1000.0], itertools.repeat(1100.0))
     monkeypatch.setattr(ew, "time", types.SimpleNamespace(monotonic=lambda: next(ticks)))

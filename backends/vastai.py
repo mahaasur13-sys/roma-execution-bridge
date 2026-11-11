@@ -122,6 +122,9 @@ class VastaiBackend(BaseBackend):
 
         self._running_instances: dict[str, VastaiInstance] = {}
         self._job_instance_map: dict[str, int] = {}  # job_id → contract_id
+        # duration, снятая из контракта ДО pop: биллинг должен прочитать
+        # подтверждённые секунды, даже если monitor_loop уже закрыл инстанс.
+        self._job_duration_cache: dict[str, float] = {}
 
         self._gpu_tier = self._resolve_gpu_tier()
 
@@ -498,6 +501,8 @@ class VastaiBackend(BaseBackend):
     async def cancel_job(self, ctx: JobContext) -> dict:
         """Cancel job and destroy the Vast.ai instance."""
         contract_id = self._job_instance_map.pop(ctx.job_id, None)
+        # Биллинг уже прочитал duration (он идёт до cleanup) — кеш больше не нужен.
+        self._job_duration_cache.pop(ctx.job_id, None)
 
         if not contract_id:
             logger.warning("vastai.cancel.no_contract job=%s", ctx.job_id)
@@ -535,13 +540,17 @@ class VastaiBackend(BaseBackend):
         }
 
     async def get_confirmed_duration(self, job_id: str) -> float | None:
-        """Confirmed billed seconds from the Vast.ai instance contract."""
+        """Confirmed billed seconds from the Vast.ai instance contract.
+
+        None — только если контракта нет и длительность не была снята до pop
+        (персиста карты нет: без contract_id списывать нечего).
+        """
         contract_id = self._job_instance_map.get(job_id)
         if not contract_id:
-            return None
-        instances = self.get_instances(contract_id=contract_id)
+            return self._job_duration_cache.get(job_id)
+        instances = await asyncio.to_thread(self.get_instances, contract_id=contract_id)
         if not instances:
-            return None
+            return self._job_duration_cache.get(job_id)
         return float(instances[0].duration_seconds)
 
     # ── background monitor ──────────────────────────────────────────
@@ -603,6 +612,7 @@ class VastaiBackend(BaseBackend):
                                     e,
                                 )
 
+                        self._job_duration_cache[job_id] = duration_sec
                         self._job_instance_map.pop(job_id, None)
 
                     # Check for "running" → ssh host newly available

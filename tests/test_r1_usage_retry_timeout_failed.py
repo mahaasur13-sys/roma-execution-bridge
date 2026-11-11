@@ -37,6 +37,13 @@ def _run_worker_timeout(tmp_path, monkeypatch, exec_status):
     monkeypatch.setattr(fin, "billing_ledger", FakeLedger())
     monkeypatch.setattr(fin.metering_engine, "record", lambda **k: (None, True))
     monkeypatch.setattr(ew, "_no_funds_next_try", {}, raising=False)
+
+    # Подтверждённая бэкендом длительность: без неё воркер (fail-closed) не
+    # списывает вовсе — таймер воркера больше не источник дебета.
+    async def fake_confirmed_duration(job_id, backend_name):
+        return 100.0
+
+    monkeypatch.setattr(ew, "_confirmed_duration", fake_confirmed_duration)
     ticks = itertools.chain([1000.0], itertools.repeat(1100.0))
     monkeypatch.setattr(ew, "time", types.SimpleNamespace(monotonic=lambda: next(ticks)))
 

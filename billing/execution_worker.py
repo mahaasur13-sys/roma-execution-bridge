@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import time
 from datetime import datetime, timezone
@@ -153,6 +154,81 @@ def _mark_refund_pending(job_id: str, tenant_id: str, cost_usd: float, exc: Exce
         )
     except Exception as alert_exc:
         logger.error("execute_and_bill.refund_alert_failed job=%s: %s", job_id, alert_exc)
+
+
+async def _confirmed_duration(job_id: str, backend_name: str | None) -> float | None:
+    """Подтверждённые бэкендом секунды, либо None — доказательств нет.
+
+    Таймер воркера сюда не попадает ни при каких условиях: подтверждение — это
+    duration контракта (Vast) или иной отчёт бэкенда. Всё, что не число, не
+    конечно или отрицательно, считается отсутствием подтверждения.
+    """
+    try:
+        from backends.dispatcher import get_confirmed_duration
+
+        value = await get_confirmed_duration(job_id, backend_name)
+    except Exception as exc:
+        logger.warning("execute_and_bill.confirmed_duration_failed job=%s: %s", job_id, exc)
+        return None
+    if value is None:
+        return None
+    try:
+        sec = float(value)
+    except (TypeError, ValueError):
+        logger.warning("execute_and_bill.confirmed_duration_not_numeric job=%s: %r", job_id, value)
+        return None
+    if not math.isfinite(sec) or sec < 0:
+        logger.warning("execute_and_bill.confirmed_duration_invalid job=%s: %r", job_id, value)
+        return None
+    return round(sec, 2)
+
+
+async def _refund_if_overbilled(
+    job_id: str,
+    tenant_id: str,
+    charged_sec: float,
+    confirmed_sec: float | None,
+) -> float:
+    """C10-P: вернуть разницу между списанным и подтверждённым (без заявки клиента).
+
+    Возвращает сумму возврата; 0.0 — возврат не нужен (списано ≤ подтверждённого).
+    Ретраи и маркер refund_pending — те же, что у C10 (второй механизм не вводится).
+    """
+    confirmed = 0.0 if confirmed_sec is None else confirmed_sec
+    over = round(max(float(charged_sec or 0.0) - float(confirmed), 0.0), 2)
+    amount = _job_cost_usd(over)
+    if amount <= 0:
+        return 0.0
+    last_exc = None
+    try:
+        from main import refund_job
+
+        for attempt in range(3):
+            try:
+                refund_job(tenant_id, amount, job_id=job_id, reason="unconfirmed_duration")
+                logger.warning(
+                    "execute_and_bill.refunded_overbilled job=%s tenant=%s charged=%.2fs confirmed=%r over=%.2fs amount=%.8f",
+                    job_id,
+                    tenant_id,
+                    charged_sec,
+                    confirmed_sec,
+                    over,
+                    amount,
+                )
+                return amount
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "execute_and_bill.refund_overbill_attempt_failed attempt=%d job=%s: %s",
+                    attempt + 1,
+                    job_id,
+                    exc,
+                )
+                await asyncio.sleep(0.5 * (attempt + 1))
+    except Exception as exc:
+        last_exc = exc
+    _mark_refund_pending(job_id, tenant_id, amount, last_exc)
+    return amount
 
 
 def _parse_refund_amount(marker: str) -> float | None:
@@ -565,40 +641,60 @@ async def _execute_and_bill_impl(
         status = "timeout"
         logger.warning("execute_and_bill.timeout job=%s waited=%.0fs", job_id, waited)
 
-    # OT-99: фиксируем биллингуемое время ДО транзакции и храним то же самое в
+    # OT-99: биллингуемое время читаем ДО транзакции и храним то же самое в
     # duration_seconds — свипер при повторе после неопределённого COMMIT обязан
     # дать ту же сумму (иначе сверка по ledger_id разойдётся).
+    # Источник — только подтверждённая бэкендом длительность: таймер воркера
+    # (time.monotonic) списывать нельзя, потеря доказательств — риск ROMA.
     elapsed = round(time.monotonic() - start_time, 2)
     now_iso = datetime.now(timezone.utc).isoformat()
-    cost_usd = round(elapsed * 0.00001, 8)
+    confirmed = await _confirmed_duration(job_id, backend_name)
+    billed_seconds = confirmed if confirmed is not None else 0.0
+    cost_usd = _job_cost_usd(billed_seconds)
 
     billing_status = "skip"
-    try:
-        from main import finalize_job_billing
-
-        billing_status = finalize_job_billing(
-            tenant_id,
+    if confirmed is None:
+        # Нет подтверждения → нет дебета и нет billing_pending: свипер не должен
+        # досписать таймер воркера. Exec-статус сохраняется как есть.
+        billing_status = "unconfirmed"
+        logger.warning(
+            "execute_and_bill.no_confirmed_duration job=%s tenant=%s backend=%s wall_clock=%.1fs — дебет не выполняется",
             job_id,
-            gpu_sec=elapsed,
-            plan_name=_tenant_plan(tenant_id),
-            backend=backend_name,
-        )
-        logger.info(
-            "execute_and_bill.finalized tenant=%s job=%s gpu_sec=%.1f status=%s",
             tenant_id,
-            job_id,
+            backend_name,
             elapsed,
-            billing_status,
         )
-    except PGUnavailableError as exc:
-        # fail-closed: деньги НЕ сохранились — не помечаем billed, не зануляем молча.
-        logger.error("execute_and_bill.billing_pg_error job=%s: %s", job_id, exc)
-        billing_status = "pg_error"
-    except Exception as exc:
-        logger.error("execute_and_bill.billing_error job=%s: %s", job_id, exc)
-        billing_status = "error"
+    else:
+        try:
+            from main import finalize_job_billing
+
+            billing_status = finalize_job_billing(
+                tenant_id,
+                job_id,
+                gpu_sec=confirmed,
+                plan_name=_tenant_plan(tenant_id),
+                backend=backend_name,
+            )
+            logger.info(
+                "execute_and_bill.finalized tenant=%s job=%s gpu_sec=%.2f status=%s",
+                tenant_id,
+                job_id,
+                confirmed,
+                billing_status,
+            )
+        except PGUnavailableError as exc:
+            # fail-closed: деньги НЕ сохранились — не помечаем billed, не зануляем молча.
+            logger.error("execute_and_bill.billing_pg_error job=%s: %s", job_id, exc)
+            billing_status = "pg_error"
+        except Exception as exc:
+            logger.error("execute_and_bill.billing_error job=%s: %s", job_id, exc)
+            billing_status = "error"
 
     billed_ok = billing_status == "ok"
+    if billed_ok:
+        # C10-P: если дебет прошёл, а подтверждённых секунд нет или списано больше
+        # подтверждённого — вернуть разницу тем же refund_job (без заявки клиента).
+        await _refund_if_overbilled(job_id, tenant_id, billed_seconds, confirmed)
     write_status = status
     if billing_status == "mismatch":
         # R2: детерминированный конфликт ключа идемпотентности — retry не разрешит.
@@ -625,7 +721,7 @@ async def _execute_and_bill_impl(
         status=write_status,
         completed_at=now_iso,
         cost_usd=cost_usd if billed_ok else 0.0,
-        duration_seconds=round(elapsed, 2),
+        duration_seconds=round(billed_seconds, 2),
         error=_error,
         tenant_id=tenant_id,
         if_status_not_in=_FINAL_WRITE_BLOCKED_STATUSES,
@@ -689,7 +785,7 @@ async def _execute_and_bill_impl(
         "job_id": job_id,
         "tenant_id": tenant_id,
         "cost_usd": cost_usd,
-        "duration_seconds": round(elapsed, 2),
+        "duration_seconds": round(billed_seconds, 2),
         "backend": backend_name,
     }
 
