@@ -12,7 +12,7 @@ from policy_transition import validate_transition
 from audit_events import write_audit_event
 from billing.finalize import finalize_job_billing, resolve_billable_seconds
 from billing.pg_ledger import PGUnavailableError
-from backends.dispatcher import get_confirmed_duration
+from backends.dispatcher import backend_cancel_job, get_confirmed_duration
 
 logger = logging.getLogger("roma.jobs")
 router = APIRouter(prefix="/v1/jobs", tags=["jobs"])
@@ -120,6 +120,19 @@ async def cancel_job(job_id: str, x_api_key: str = Header(None)):
         latest = (db.get_execution_job(job_id) or job).get("status")
         raise HTTPException(409, f"transition_denied: {latest} → cancelled invalid")
     write_audit_event(tenant_id, "job.cancel", "job", job_id, {"previous_status": current})
+    # Гасим backend-инстанс (Vast.ai destroy и т.п.) — как /cancel/{id}.
+    try:
+        await backend_cancel_job(tenant_id=tenant_id, job_id=job_id)
+    except Exception as exc:
+        # Отмена уже состоялась; ответ клиенту не меняем, но сбой не глотаем.
+        logger.warning("cancel.backend_cleanup_failed tenant=%s job=%s: %s", tenant_id, job_id, exc)
+        write_audit_event(
+            tenant_id,
+            "job.cancel.backend_cleanup_failed",
+            "job",
+            job_id,
+            {"error": str(exc)},
+        )
     return {"job_id": job_id, "status": "cancelled"}
 
 
