@@ -16,8 +16,8 @@ mkdir -p "$OUT"
 cd "$ROOT"
 
 # CI: рантайм + трассировка (tracing extra) + pytest-инструменты (группа dev) +
-# dashboard/scripts-инструменты (группа ci). Без хешей: CI ставит `pip install -r`.
-CI_CMD=(uv export --frozen --no-hashes --no-emit-project --extra tracing --group dev --group ci)
+# dashboard/scripts-инструменты (группа ci). С хешами: CI ставит `pip install --require-hashes -r`.
+CI_CMD=(uv export --frozen --no-emit-project --extra tracing --group dev --group ci)
 # Рантайм прода: без dev/ci-групп, с трассировкой (на Zo OTel стоит сегодня), с хешами
 # для `pip install --require-hashes -r requirements-runtime.txt`.
 RT_CMD=(uv export --frozen --no-emit-project --no-dev --extra tracing)
