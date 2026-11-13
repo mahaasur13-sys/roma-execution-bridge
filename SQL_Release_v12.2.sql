@@ -1171,7 +1171,7 @@ REVOKE ALL ON FUNCTION public.d2_cancel_reconciliation(TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.d2_request_reconciliation(TEXT,TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.d2_reconcile_creation(TEXT,TEXT,TEXT,JSONB) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.d2_mark_creation_investigation(TEXT,TEXT) FROM PUBLIC;
--- TODO: Substitute actual runtime role name (e.g., roma_app) before deployment
+-- Runtime role: roma_app (docs/ops/migrations.md).
 REVOKE ALL ON
  public.d2_reconciliation_cancel_audit,
  public.d2_recon_pending_insert_permit,
@@ -1187,9 +1187,9 @@ REVOKE ALL ON
  public.d2_job_identity,
  public.d2_financial_authority_gate,
  public.d2_settlement_grant
- FROM "[runtime_role]";
+ FROM roma_app;
 REVOKE ALL ON FUNCTION public.d2_request_reconciliation(TEXT,TEXT,TEXT),
  public.d2_reconcile_creation(TEXT,TEXT,TEXT,JSONB),
  public.d2_mark_creation_investigation(TEXT,TEXT),
- public.d2_cancel_reconciliation(TEXT,TEXT) FROM "[runtime_role]";
+ public.d2_cancel_reconciliation(TEXT,TEXT) FROM roma_app;
 COMMIT;
