@@ -31,8 +31,8 @@ jobs:
           version: "0.13.6"
       - name: Install runtime + e2e dependencies
         run: |
-          # F-3: requirements-ci.txt has no hashes; BLOCKED for --require-hashes.
-          pip install -r requirements-ci.txt
+          # requirements-ci.txt is pre-generated and committed; install strictly with hashes
+          pip install --require-hashes -r requirements-ci.txt
           uv export --locked --only-group e2e --no-emit-project -o requirements-e2e.txt
           pip install --require-hashes -r requirements-e2e.txt
       - name: Install Playwright browser
