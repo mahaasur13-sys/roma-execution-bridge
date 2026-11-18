@@ -54,9 +54,10 @@ BUDGET_ALERT_PERIOD_S = 3600  # pg_down_budget_exceeded — не чаще раз
 #   * порядок: недоставленный resolved прошлого эпизода уходит ДО firing нового эпизода;
 #   * resolved шлётся только если firing этого эпизода был доставлен.
 RELAY_URL = os.environ.get("ROMA_ALERT_RELAY_URL", "http://127.0.0.1:8099/notify")
-# Синхронный POST внутри основного цикла: худший случай — цикл ждёт RELAY_TIMEOUT_S (relay локальный,
-# обычно миллисекунды). Осознанно без потока: в эпизоде бюджета цикл и так INTERVAL × BUDGET_SLOWDOWN.
-RELAY_TIMEOUT_S = 5
+# Relay replies only after its synchronous Telegram call (15 s socket timeout).
+# Allow 5 s of local relay overhead instead of timing out before delivery completes.
+# urllib timeouts bound individual blocking operations, not total wall-clock time.
+RELAY_TIMEOUT_S = 20
 NOTIFY_RETRY_S = 300
 BUDGET_ALERTNAME = "PgWatchdogBudgetExceeded"
 # R3: state и журнал — на persistent-пути (/dev/shm теряется при перезапуске
@@ -200,8 +201,8 @@ def notify(summary: str, status: str = "firing") -> bool:
         ],
     }
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(RELAY_URL, data=data, method="POST", headers={"Content-Type": "application/json"})
     try:
+        req = urllib.request.Request(RELAY_URL, data=data, method="POST", headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=RELAY_TIMEOUT_S) as resp:
             emit(event="notify_sent", alertname=BUDGET_ALERTNAME, status=status, http=resp.status)
             return True
@@ -445,6 +446,11 @@ def main() -> int:
                     state["last_restart_at"] = now_iso()
                     state["last_recovery_s"] = recovery
                     state["budget_exceeded"] = False
+                    state["budget_alerted_at"] = None
+                    if state.get("budget_notified"):
+                        state["budget_notified"] = False
+                        state["resolve_pending"] = True
+                        state["notify_attempt_at"] = None
                     emit(
                         event="pg_restart_ok",
                         pg_up=1,

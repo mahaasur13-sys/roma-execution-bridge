@@ -55,6 +55,7 @@ def relay():
         def do_POST(self) -> None:  # noqa: N802
             body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
             received.append({"path": self.path, "payload": json.loads(body or b"{}")})
+            threading.Event().wait(cfg.get("delay", 0))
             self.send_response(cfg["code"])
             self.send_header("Content-Length", "0")
             self.end_headers()
@@ -79,7 +80,7 @@ def _closed_port_url() -> str:
     return f"http://127.0.0.1:{port}/notify"
 
 
-def _run(wd, tmp_path, monkeypatch, *, url, ready, cycles, state=None):
+def _run(wd, tmp_path, monkeypatch, *, url, ready, cycles, state=None, recovery=None):
     """Прогон main() без PG: N циклов, затем SystemExit из подменённого sleep."""
     state_path = tmp_path / "state.json"
     if state is None:
@@ -92,7 +93,7 @@ def _run(wd, tmp_path, monkeypatch, *, url, ready, cycles, state=None):
     ready_iter = iter(ready)
     monkeypatch.setattr(wd, "pg_is_ready", lambda: next(ready_iter, False))
     monkeypatch.setattr(wd, "start_cluster", lambda: True)
-    monkeypatch.setattr(wd, "wait_ready", lambda _t: None)
+    monkeypatch.setattr(wd, "wait_ready", lambda _t: recovery)
     monkeypatch.setattr(wd, "ledger_rows", lambda: None)
     monkeypatch.setattr(wd, "clear_stale_lock", lambda **_kw: (False, "no_lock", None))
     slept: list[float] = []
@@ -148,11 +149,11 @@ def test_one_notify_per_episode_even_after_hourly_error_repeat(relay, tmp_path, 
     assert len(relay["received"]) == 1, relay["received"]
 
 
-@pytest.mark.parametrize("unreachable", [True, False], ids=["closed_port", "relay_http_502"])
-def test_relay_failure_does_not_stop_watchdog_and_is_logged(relay, tmp_path, monkeypatch, unreachable) -> None:
+@pytest.mark.parametrize("failure", ["closed_port", "relay_http_502", "empty_url"])
+def test_relay_failure_does_not_stop_watchdog_and_is_logged(relay, tmp_path, monkeypatch, failure) -> None:
     wd = _load_watchdog()
     relay["cfg"]["code"] = 502
-    url = _closed_port_url() if unreachable else relay["url"]
+    url = {"closed_port": _closed_port_url(), "relay_http_502": relay["url"], "empty_url": ""}[failure]
     events, slept, state = _run(wd, tmp_path, monkeypatch, url=url, ready=[False] * 4, cycles=4)
 
     assert len(slept) == 4, "сторож обязан продолжать циклы при недоступном relay"
@@ -260,3 +261,57 @@ def test_ordinary_restart_does_not_page(relay, tmp_path, monkeypatch) -> None:
     )
     assert len(_of(events, "pg_down")) == 1
     assert relay["received"] == []
+
+
+@pytest.mark.parametrize("resolved_code", [200, 502])
+def test_restart_recovery_closes_episode_before_next_failure(relay, tmp_path, monkeypatch, resolved_code):
+    # A delivered firing survives until an old restart expires and a restart succeeds.
+    state = {
+        "restarts": [_iso(m) for m in FULL_BUDGET[:-1]],
+        "restarts_total": 5,
+        "ledger_baseline": 1,
+        "was_down": True,
+        "budget_exceeded": True,
+        "budget_notified": True,
+        "budget_alerted_at": _iso(1),
+    }
+    relay["cfg"]["code"] = resolved_code
+    events, _, state = _run(
+        _load_watchdog(),
+        tmp_path,
+        monkeypatch,
+        url=relay["url"],
+        ready=[False],
+        cycles=1,
+        state=state,
+        recovery=0.1,
+    )
+    assert _of(events, "pg_restart_ok")
+    assert state["budget_exceeded"] is False
+    assert state["budget_notified"] is False
+    assert state["budget_alerted_at"] is None
+    assert state["resolve_pending"] is (resolved_code != 200)
+    assert [r["payload"]["status"] for r in relay["received"]] == ["resolved"]
+
+    # PG fails again before an outer readiness probe ever sees it up.
+    relay["cfg"]["code"] = 200
+    _run(_load_watchdog(), tmp_path, monkeypatch, url=relay["url"], ready=[False, False], cycles=2, state=state)
+    statuses = [r["payload"]["status"] for r in relay["received"]]
+    assert statuses == (["resolved", "firing"] if resolved_code == 200 else ["resolved", "resolved", "firing"])
+
+
+def test_slow_relay_acknowledgement_does_not_duplicate_firing(relay, tmp_path, monkeypatch):
+    # A synchronous Telegram delivery can exceed the former five-second timeout.
+    relay["cfg"]["delay"] = 6
+    events, _, state = _run(
+        _load_watchdog(),
+        tmp_path,
+        monkeypatch,
+        url=relay["url"],
+        ready=[False, False],
+        cycles=2,
+    )
+    assert state["budget_notified"] is True
+    assert len(relay["received"]) == 1
+    assert len(_of(events, "notify_sent")) == 1
+    assert not _of(events, "notify_failed")
