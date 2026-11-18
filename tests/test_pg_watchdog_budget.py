@@ -19,6 +19,7 @@ import datetime
 import importlib.util
 import io
 import json
+import socket
 
 import pathlib
 
@@ -35,6 +36,13 @@ def _load_watchdog():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def _closed_port_url() -> str:
+    """URL на заведомо закрытый локальный порт: bind на 0, взять номер, закрыть сокет."""
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return f"http://127.0.0.1:{sock.getsockname()[1]}/notify"
 
 
 def _run_cycles(wd, tmp_path, monkeypatch, *, recent_minutes: tuple[int, ...]) -> dict:
@@ -60,6 +68,8 @@ def _run_cycles(wd, tmp_path, monkeypatch, *, recent_minutes: tuple[int, ...]) -
     wd.STATE_DIR = str(tmp_path)
     wd.STATE_PATH = str(state_path)
     wd.LOG_PATH = str(tmp_path / "watchdog.log")
+    # Живой alert-relay (127.0.0.1:8099 на Zo) из теста не дёргаем: закрытый порт → notify_failed.
+    monkeypatch.setattr(wd, "RELAY_URL", _closed_port_url(), raising=False)
     wd.pg_is_ready = lambda: False
 
     def fake_start_cluster() -> bool:
