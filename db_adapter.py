@@ -14,6 +14,8 @@ import concurrent.futures
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
+import job_lease
+
 try:
     import psycopg2
     import psycopg2.pool
@@ -737,7 +739,8 @@ def _ensure_execution_jobs_table(c) -> None:
     """Create execution_jobs in SQLite if absent and backfill the execution-billing
     columns (backend, backend_job_id, ...) on tables created before migration 005.
 
-    Mirrors migrations/002_billing_pg.sql + migrations/007_execution_billing.sql.
+    Mirrors migrations/002_billing_pg.sql + migrations/007_execution_billing.sql +
+    migrations/021_execution_jobs_lease.sql.
     backend is intentionally nullable (no silent 'local' default on an empty chain).
     """
     c.execute("""
@@ -755,7 +758,11 @@ def _ensure_execution_jobs_table(c) -> None:
             duration_seconds REAL DEFAULT 0.0,
             started_at      TEXT,
             completed_at    TEXT,
-            error           TEXT
+            error           TEXT,
+            worker_id       TEXT,
+            lease_token_hash TEXT,
+            lease_epoch     INTEGER NOT NULL DEFAULT 0,
+            lease_expires_at TEXT
         )
     """)
     existing = {row[1] for row in c.execute("PRAGMA table_info(execution_jobs)").fetchall()}
@@ -767,6 +774,10 @@ def _ensure_execution_jobs_table(c) -> None:
         ("started_at", "TEXT"),
         ("completed_at", "TEXT"),
         ("error", "TEXT"),
+        ("worker_id", "TEXT"),
+        ("lease_token_hash", "TEXT"),
+        ("lease_epoch", "INTEGER NOT NULL DEFAULT 0"),
+        ("lease_expires_at", "TEXT"),
     ):
         if column not in existing:
             c.execute(f"ALTER TABLE execution_jobs ADD COLUMN {column} {ddl}")
@@ -1873,6 +1884,85 @@ def get_queued_execution_jobs(limit: int = 10) -> list[dict]:
         c.close()
 
 
+def bind_worker_lease(job_id: str, worker_id: str, token_hash: str, ttl_seconds: int) -> dict | None:
+    """Привязать running-задачу к воркеру (021b): один CAS-UPDATE.
+
+    Условие ``worker_id IS NULL AND status='running'``: задачу нельзя
+    перепривязать к другому воркеру, а проигранная гонка (cancel/свипер уже
+    закрыли строку) даёт None и оставляет её unbound. Возвращает
+    worker_id/lease_epoch/lease_expires_at из той же строки.
+    """
+    if _pg_enabled():
+        conn = None
+        failed = False
+        try:
+            conn = _pg_conn()
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE execution_jobs SET worker_id=%s, lease_token_hash=%s, "
+                    "lease_epoch=lease_epoch+1, lease_expires_at=now() + make_interval(secs => %s), "
+                    "updated_at=now() WHERE id=%s AND status='running' AND worker_id IS NULL "
+                    "RETURNING worker_id, lease_epoch, lease_expires_at",
+                    (worker_id, token_hash, int(ttl_seconds), job_id),
+                )
+                row = cur.fetchone()
+                cols = [d[0] for d in cur.description]
+            conn.commit()
+            return dict(zip(cols, row)) if row else None
+        except Exception as e:
+            failed = True
+            logger.warning("bind_worker_lease.pg_error job=%s: %s", job_id, e)
+            try:
+                if conn is not None:
+                    conn.rollback()
+            except Exception:
+                pass
+            return None
+        finally:
+            _pg_return(conn, close_on_error=failed)
+    c = _sqlite_conn()
+    try:
+        _ensure_execution_jobs_table(c)
+        cur = c.execute(
+            "UPDATE execution_jobs SET worker_id=?, lease_token_hash=?, "
+            "lease_epoch=lease_epoch+1, lease_expires_at=datetime('now', ?), "
+            "updated_at=datetime('now') WHERE id=? AND status='running' AND worker_id IS NULL "
+            "RETURNING worker_id, lease_epoch, lease_expires_at",
+            (worker_id, token_hash, f"+{int(ttl_seconds)} seconds", job_id),
+        )
+        row = cur.fetchone()
+        c.commit()
+        return dict(row) if row else None
+    except Exception as e:
+        c.rollback()
+        logger.warning("bind_worker_lease.sqlite_error job=%s: %s", job_id, e)
+        return None
+    finally:
+        c.close()
+
+
+def _bind_local_lease(row: dict) -> dict:
+    """Выдать аренду только local-задаче; остальные backend'и остаются unbound."""
+    payload = row.get("payload")
+    if isinstance(payload, str):
+        payload = _json_col(payload, {})
+    if (payload or {}).get("backend") != "local":
+        return row
+    token = job_lease.new_lease_token()
+    bound = bind_worker_lease(
+        row["id"],
+        job_lease.local_worker_id(),
+        job_lease.hash_lease_token(token),
+        job_lease.LEASE_TTL_SECONDS,
+    )
+    if not bound:
+        return row
+    row.update(bound)
+    row.pop("lease_token_hash", None)
+    row["lease_token"] = token
+    return row
+
+
 def claim_queued_execution_jobs(limit: int = 10) -> list[dict]:
     """Атомарно захватить до `limit` queued-джоб: queued → running, started_at=now.
 
@@ -1906,7 +1996,7 @@ def claim_queued_execution_jobs(limit: int = 10) -> list[dict]:
             conn.commit()
             out = [dict(zip(cols, r)) for r in rows]
             out.sort(key=lambda d: (d.get("created_at") is None, d.get("created_at")))
-            return out
+            return [_bind_local_lease(dict(r)) for r in out]
         except Exception as e:
             failed = True
             logger.warning("claim_queued_execution_jobs.pg_error: %s", e)
@@ -1943,7 +2033,7 @@ def claim_queued_execution_jobs(limit: int = 10) -> list[dict]:
             raise
         for d in claimed:
             d["payload"] = _json_col(d.get("payload"), {})
-        return claimed
+        return [_bind_local_lease(d) for d in claimed]
     finally:
         c.close()
 
