@@ -24,6 +24,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.request
 
 PORT = 5432
 CLUSTER = "15"
@@ -45,6 +46,20 @@ QUARANTINE_MARKER = ".pg-watchdog-quarantine"
 # F2: исчерпанный бюджет не должен превращать сторожа в молчащий цикл.
 BUDGET_SLOWDOWN = 4  # период проб при исчерпанном бюджете: INTERVAL × 4
 BUDGET_ALERT_PERIOD_S = 3600  # pg_down_budget_exceeded — не чаще раза в час
+# P2: исчерпанный бюджет — человеку, а не только в журнал. Тот же канал и контракт, что у
+# deploy-агента (alert-relay → Telegram); одно firing на эпизод, resolved при восстановлении.
+# Контракт доставки (flush_notifications):
+#   * firing/resolved ретраятся до успешной доставки, не чаще NOTIFY_RETRY_S (5 мин), независимо
+#     от часового троттлинга ERROR-строки в журнале (F2); каждый ERROR дополнительно форсирует попытку;
+#   * порядок: недоставленный resolved прошлого эпизода уходит ДО firing нового эпизода;
+#   * resolved шлётся только если firing этого эпизода был доставлен.
+RELAY_URL = os.environ.get("ROMA_ALERT_RELAY_URL", "http://127.0.0.1:8099/notify")
+# Relay replies only after its synchronous Telegram call (15 s socket timeout).
+# Allow 5 s of local relay overhead instead of timing out before delivery completes.
+# urllib timeouts bound individual blocking operations, not total wall-clock time.
+RELAY_TIMEOUT_S = 20
+NOTIFY_RETRY_S = 300
+BUDGET_ALERTNAME = "PgWatchdogBudgetExceeded"
 # R3: state и журнал — на persistent-пути (/dev/shm теряется при перезапуске
 # песочницы). История рестартов обязана переживать рестарт.
 STATE_DIR = "/var/lib/pg-watchdog"
@@ -171,8 +186,39 @@ def _port_listening(port: int, host: str = "127.0.0.1", timeout: float = 0.5) ->
         return False
 
 
-def _budget_alert_due(state: dict) -> bool:
-    last = state.get("budget_alerted_at")
+def notify(summary: str, status: str = "firing") -> bool:
+    """POST в alert-relay. Ошибка канала не роняет сторожа, но пишется событием notify_failed."""
+    title = f"PG watchdog: бюджет рестартов исчерпан (порт {PORT})"
+    payload = {
+        "title": title,
+        "status": status,
+        "alerts": [
+            {
+                "status": status,
+                "labels": {"alertname": BUDGET_ALERTNAME, "severity": "critical", "service": "pg-watchdog"},
+                "annotations": {"summary": summary[:900]},
+            }
+        ],
+    }
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    try:
+        req = urllib.request.Request(RELAY_URL, data=data, method="POST", headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=RELAY_TIMEOUT_S) as resp:
+            emit(event="notify_sent", alertname=BUDGET_ALERTNAME, status=status, http=resp.status)
+            return True
+    except Exception as exc:  # канал алертов не причина останавливать супервизию
+        emit(
+            event="notify_failed",
+            level="ERROR",
+            alertname=BUDGET_ALERTNAME,
+            status=status,
+            error=f"{type(exc).__name__}: {str(exc)[:200]}",
+        )
+        return False
+
+
+def _due(state: dict, key: str, period_s: float) -> bool:
+    last = state.get(key)
     if not last:
         return True
     try:
@@ -180,7 +226,30 @@ def _budget_alert_due(state: dict) -> bool:
     except Exception:
         return True
     age = (datetime.datetime.now(datetime.timezone.utc) - ts).total_seconds()
-    return age >= BUDGET_ALERT_PERIOD_S
+    return age >= period_s
+
+
+def _budget_alert_due(state: dict) -> bool:
+    return _due(state, "budget_alerted_at", BUDGET_ALERT_PERIOD_S)
+
+
+def flush_notifications(state: dict) -> None:
+    """Доставка firing/resolved по контракту выше; состояние — в state.json (переживает рестарт)."""
+    firing_due = bool(state.get("budget_exceeded")) and not state.get("budget_notified")
+    if not (state.get("resolve_pending") or firing_due):
+        return
+    if not _due(state, "notify_attempt_at", NOTIFY_RETRY_S):
+        return
+    state["notify_attempt_at"] = now_iso()
+    if state.get("resolve_pending"):
+        if not notify(f"PG снова доступен (порт {PORT}), сторож вернулся в штатный режим", status="resolved"):
+            return  # firing нового эпизода не обгоняет недоставленный resolved прошлого
+        state["resolve_pending"] = False
+    if firing_due:
+        state["budget_notified"] = notify(
+            f"PG недоступен, {len(state.get('restarts', []))} попыток рестарта за час исчерпали бюджет "
+            f"({RESTART_BUDGET_PER_HOUR}/ч); автоподъём остановлен — manual intervention required"
+        )
 
 
 def _rotate_quarantine(root: str, keep: int) -> list[str]:
@@ -336,6 +405,10 @@ def main() -> int:
                     pg_up=1,
                     restarts_last_hour=len(state["restarts"]),
                 )
+                if state.get("budget_notified"):  # resolved — только после доставленного firing
+                    state["budget_notified"] = False
+                    state["resolve_pending"] = True
+                    state["notify_attempt_at"] = None  # первая попытка resolved — сразу
         else:
             state["was_down"] = True
             if len(state["restarts"]) >= RESTART_BUDGET_PER_HOUR:
@@ -353,6 +426,7 @@ def main() -> int:
                         restarts_last_hour=len(state["restarts"]),
                         action="none",
                     )
+                    state["notify_attempt_at"] = None  # ERROR форсирует попытку доставки (flush ниже)
             else:
                 emit(event="pg_down", pg_up=0, action="pg_ctlcluster_start")
                 cleared, reason, quarantine = clear_stale_lock()
@@ -372,6 +446,11 @@ def main() -> int:
                     state["last_restart_at"] = now_iso()
                     state["last_recovery_s"] = recovery
                     state["budget_exceeded"] = False
+                    state["budget_alerted_at"] = None
+                    if state.get("budget_notified"):
+                        state["budget_notified"] = False
+                        state["resolve_pending"] = True
+                        state["notify_attempt_at"] = None
                     emit(
                         event="pg_restart_ok",
                         pg_up=1,
@@ -389,6 +468,8 @@ def main() -> int:
                         action="pg_ctlcluster_start",
                         recovery_s=None,
                     )
+
+        flush_notifications(state)
 
         rows = ledger_rows()
         if rows is not None:

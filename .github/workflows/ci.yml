@@ -23,7 +23,7 @@ jobs:
         # (requirements-ci.txt), а не в этом файле — иначе он разъезжается с деревом.
         # P-DEPS-LOCK: requirements-ci.txt — экспорт uv.lock (scripts/gen_requirements.sh),
         # сверяется с lock в job deps-drift.
-        run: pip install -r requirements-ci.txt
+        run: pip install --require-hashes -r requirements-ci.txt
       - name: Compile check
         run: |
           find . -name "*.py" -not -path "./__pycache__/*" -exec python -m py_compile {} + 2>&1 | tail -5
@@ -70,7 +70,7 @@ jobs:
           python-version: "3.11"
       - name: Install deps
         # G-CI-DEPS-INCOMPLETE: тот же список, что в test-джобе (единый источник).
-        run: pip install -r requirements-ci.txt
+        run: pip install --require-hashes -r requirements-ci.txt
       - name: Apply migrations to CI test DB (реальный вход миграций, без глушителей)
         run: python scripts/run_migrations.py
       - name: "Full suite — repo-wide (A-2/N7b: область прогона = весь репозиторий)"

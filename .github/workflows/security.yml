@@ -62,7 +62,7 @@ jobs:
           set -euo pipefail
           python -m venv /tmp/ci-deps-check
           /tmp/ci-deps-check/bin/python -m pip install -q -U pip
-          /tmp/ci-deps-check/bin/python -m pip install -q -r requirements-ci.txt
+          /tmp/ci-deps-check/bin/python -m pip install -q --require-hashes -r requirements-ci.txt
           /tmp/ci-deps-check/bin/python -m pip check
 
       # G-CI-AUDIT-PINS: шаг выше аудирует окружение, собранное из pyproject (диапазоны
