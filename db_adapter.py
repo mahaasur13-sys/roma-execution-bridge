@@ -737,7 +737,8 @@ def _ensure_execution_jobs_table(c) -> None:
     """Create execution_jobs in SQLite if absent and backfill the execution-billing
     columns (backend, backend_job_id, ...) on tables created before migration 005.
 
-    Mirrors migrations/002_billing_pg.sql + migrations/007_execution_billing.sql.
+    Mirrors migrations/002_billing_pg.sql + migrations/007_execution_billing.sql +
+    migrations/021_execution_jobs_lease.sql.
     backend is intentionally nullable (no silent 'local' default on an empty chain).
     """
     c.execute("""
@@ -755,7 +756,11 @@ def _ensure_execution_jobs_table(c) -> None:
             duration_seconds REAL DEFAULT 0.0,
             started_at      TEXT,
             completed_at    TEXT,
-            error           TEXT
+            error           TEXT,
+            worker_id       TEXT,
+            lease_token_hash TEXT,
+            lease_epoch     INTEGER NOT NULL DEFAULT 0,
+            lease_expires_at TEXT
         )
     """)
     existing = {row[1] for row in c.execute("PRAGMA table_info(execution_jobs)").fetchall()}
@@ -767,6 +772,10 @@ def _ensure_execution_jobs_table(c) -> None:
         ("started_at", "TEXT"),
         ("completed_at", "TEXT"),
         ("error", "TEXT"),
+        ("worker_id", "TEXT"),
+        ("lease_token_hash", "TEXT"),
+        ("lease_epoch", "INTEGER NOT NULL DEFAULT 0"),
+        ("lease_expires_at", "TEXT"),
     ):
         if column not in existing:
             c.execute(f"ALTER TABLE execution_jobs ADD COLUMN {column} {ddl}")
