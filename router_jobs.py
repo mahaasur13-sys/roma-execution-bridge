@@ -7,6 +7,7 @@ import os
 from datetime import datetime, timezone
 
 import db_adapter as db
+import job_lease
 from policy_engine import evaluate_policies
 from policy_transition import validate_transition
 from audit_events import write_audit_event
@@ -47,6 +48,84 @@ async def _billable_seconds_or_409(job_id: str, job: dict) -> float:
         logger.error("billing.duration_unknown job=%s started_at=%r", job_id, job.get("started_at"))
         raise HTTPException(409, "billing_duration_unknown: no confirmed duration and no valid started_at")
     return gpu_sec
+
+
+def _lease_metric(path: str, mode: str, reason: str) -> None:
+    try:
+        from monitoring.metrics import roma_job_lease_verdict_total
+
+        roma_job_lease_verdict_total.labels(path=path, mode=mode, reason=reason).inc()
+    except Exception as exc:  # метрика не должна ломать запрос
+        logger.warning("lease.metric_error path=%s reason=%s: %s", path, reason, exc)
+
+
+def _write_lease_audit(tenant_id: str, event_type: str, job_id: str, data: dict, mode: str) -> bool:
+    """D-04: аудит аренды без потерь повторов и без 500.
+
+    entity_id уникален на каждое событие (``<job_id>#lease:<uuid>``), поэтому
+    частичный UNIQUE (tenant_id, event_type, entity_id) не схлопывает повторные
+    shadow_mismatch/denied по одной задаче; job_id лежит в data. Сбой записи →
+    лог + метрика, исключение наружу не идёт; решение принимает вызывающий.
+    """
+    import uuid
+
+    try:
+        write_audit_event(
+            tenant_id,
+            event_type,
+            "job_lease",
+            f"{job_id}#lease:{uuid.uuid4().hex}",
+            {**data, "job_id": job_id},
+        )
+        return True
+    except Exception as exc:
+        logger.error("lease.audit_write_failed mode=%s event=%s job=%s: %s", mode, event_type, job_id, exc)
+        try:
+            from monitoring.metrics import roma_job_lease_audit_write_failed_total
+
+            roma_job_lease_audit_write_failed_total.labels(mode=mode).inc()
+        except Exception:
+            pass
+        return False
+
+
+def _lease_guard(job_id: str, job: dict, tenant_id: str, payload: dict, *, path: str = "worker_ack") -> None:
+    """Identity + lease до finalize (021b). Unbound — молча пропускаем.
+
+    D-02: bound local-задачу закрывает доверенный серверный путь — токен,
+    эпоха и worker_id берутся из серверного реестра и local_worker_id(), а не
+    из запроса клиента (клиент токена не получает). D-06: worker_id не
+    подставляется из недоверенных данных. D-04: shadow — pass-through при
+    любом сбое аудита; enforce — отказ 409 до finalize, даже если аудит не
+    записался.
+    """
+    if path == "complete" and job_lease.is_local_binding(job):
+        lease = job_lease.server_lease(job_id) or {}
+        ok, reason = job_lease.verdict(
+            job,
+            worker_id=job_lease.local_worker_id(),
+            lease_token=lease.get("token"),
+            epoch=lease.get("epoch"),
+        )
+        path = "complete_local_server"
+    else:
+        ok, reason = job_lease.verdict(
+            job,
+            worker_id=payload.get("worker_id"),
+            lease_token=payload.get("lease_token"),
+            epoch=payload.get("lease_epoch"),
+        )
+    enforce = job_lease.enforce_enabled()
+    mode = "enforce" if enforce else "shadow"
+    _lease_metric(path, mode, reason)
+    if ok:
+        return
+    data = job_lease.audit_data(job, reason)
+    data["path"] = path
+    if enforce:
+        _write_lease_audit(tenant_id, "job.lease.denied", job_id, data, mode)
+        raise HTTPException(409, f"lease_denied: {reason}")
+    _write_lease_audit(tenant_id, "job.lease.shadow_mismatch", job_id, data, mode)
 
 
 @router.post("/{job_id}/retry")
@@ -153,6 +232,7 @@ async def complete_job(job_id: str, payload: dict = {}, x_api_key: str = Header(
             {"from": current, "to": "completed"},
         )
         raise HTTPException(409, tr["reason"])
+    _lease_guard(job_id, job, tenant_id, payload, path="complete")
     # Billing: debit exactly once before marking completed (fail-closed).
     gpu_sec = await _billable_seconds_or_409(job_id, job)
     plan_name = (db.get_tenant(tenant_id) or {}).get("plan", "free")
@@ -188,6 +268,8 @@ async def complete_job(job_id: str, payload: dict = {}, x_api_key: str = Header(
             {"status": latest, "debited": True},
         )
         raise HTTPException(409, f"transition_denied: {latest} → completed invalid")
+    # D-02: закрытая задача — исходный токен больше не нужен серверу.
+    job_lease.forget_server_lease(job_id)
     return {"job_id": job_id, "status": "completed"}
 
 
@@ -224,6 +306,8 @@ async def worker_ack(
     tr = validate_transition(job.get("status", ""), new_status)
     if not tr["allowed"]:
         raise HTTPException(409, tr["reason"])
+
+    _lease_guard(job_id, job, tenant_id, payload)
 
     if action == "complete":
         # Billing: debit exactly once before marking completed (fail-closed).

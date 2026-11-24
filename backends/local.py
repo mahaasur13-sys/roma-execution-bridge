@@ -32,7 +32,7 @@ class LocalBackend(BaseBackend):
             "backend": "local",
             "status": "queued",
             "job_id": ctx.job_id,
-            "message": "Job queued in local mode. Call POST /complete/{job_id} to mark complete.",
+            "message": "Job queued in local mode. Call POST /v1/jobs/{job_id}/complete to mark complete.",
         }
 
     async def get_status(self, job_id: str, instance_id: str | None = None) -> dict:

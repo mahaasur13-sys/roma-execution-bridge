@@ -14,6 +14,8 @@ import concurrent.futures
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
+import job_lease
+
 try:
     import psycopg2
     import psycopg2.pool
@@ -1882,12 +1884,189 @@ def get_queued_execution_jobs(limit: int = 10) -> list[dict]:
         c.close()
 
 
+def bind_worker_lease(job_id: str, worker_id: str, token_hash: str, ttl_seconds: int) -> dict | None:
+    """Привязать running-задачу к воркеру (021b): один CAS-UPDATE.
+
+    Условие ``worker_id IS NULL AND status='running'``: задачу нельзя
+    перепривязать к другому воркеру, а проигранная гонка (cancel/свипер уже
+    закрыли строку) даёт None и оставляет её unbound. Возвращает
+    worker_id/lease_epoch/lease_expires_at из той же строки.
+    """
+    if _pg_enabled():
+        conn = None
+        failed = False
+        try:
+            conn = _pg_conn()
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE execution_jobs SET worker_id=%s, lease_token_hash=%s, "
+                    "lease_epoch=lease_epoch+1, lease_expires_at=now() + make_interval(secs => %s), "
+                    "updated_at=now() WHERE id=%s AND status='running' AND worker_id IS NULL "
+                    "RETURNING worker_id, lease_epoch, lease_expires_at",
+                    (worker_id, token_hash, int(ttl_seconds), job_id),
+                )
+                row = cur.fetchone()
+                cols = [d[0] for d in cur.description]
+            conn.commit()
+            return dict(zip(cols, row)) if row else None
+        except Exception as e:
+            failed = True
+            logger.warning("bind_worker_lease.pg_error job=%s: %s", job_id, e)
+            try:
+                if conn is not None:
+                    conn.rollback()
+            except Exception:
+                pass
+            return None
+        finally:
+            _pg_return(conn, close_on_error=failed)
+    c = _sqlite_conn()
+    try:
+        _ensure_execution_jobs_table(c)
+        cur = c.execute(
+            "UPDATE execution_jobs SET worker_id=?, lease_token_hash=?, "
+            "lease_epoch=lease_epoch+1, lease_expires_at=datetime('now', ?), "
+            "updated_at=datetime('now') WHERE id=? AND status='running' AND worker_id IS NULL "
+            "RETURNING worker_id, lease_epoch, lease_expires_at",
+            (worker_id, token_hash, f"+{int(ttl_seconds)} seconds", job_id),
+        )
+        row = cur.fetchone()
+        c.commit()
+        return dict(row) if row else None
+    except Exception as e:
+        c.rollback()
+        logger.warning("bind_worker_lease.sqlite_error job=%s: %s", job_id, e)
+        return None
+    finally:
+        c.close()
+
+
+def renew_worker_lease(job_id: str, worker_id: str, token_hash: str, epoch: int, ttl_seconds: int) -> dict | None:
+    """Продлить аренду (D-05): CAS по актуальным worker_id + хешу токена + эпохе.
+
+    Продлевается только неистёкшая аренда running-задачи; эпоха не меняется.
+    Любое несовпадение или истечение → None (ничего не продлено).
+    """
+    try:
+        epoch = int(epoch)
+    except (TypeError, ValueError):
+        return None
+    if _pg_enabled():
+        conn = None
+        failed = False
+        try:
+            conn = _pg_conn()
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE execution_jobs SET lease_expires_at=now() + make_interval(secs => %s), updated_at=now() "
+                    "WHERE id=%s AND status='running' AND worker_id=%s AND lease_token_hash=%s "
+                    "AND lease_epoch=%s AND lease_expires_at > now() "
+                    "RETURNING worker_id, lease_epoch, lease_expires_at",
+                    (int(ttl_seconds), job_id, worker_id, token_hash, epoch),
+                )
+                row = cur.fetchone()
+                cols = [d[0] for d in cur.description]
+            conn.commit()
+            return dict(zip(cols, row)) if row else None
+        except Exception as e:
+            failed = True
+            logger.warning("renew_worker_lease.pg_error job=%s: %s", job_id, e)
+            try:
+                if conn is not None:
+                    conn.rollback()
+            except Exception:
+                pass
+            return None
+        finally:
+            _pg_return(conn, close_on_error=failed)
+    c = _sqlite_conn()
+    try:
+        _ensure_execution_jobs_table(c)
+        cur = c.execute(
+            "UPDATE execution_jobs SET lease_expires_at=datetime('now', ?), updated_at=datetime('now') "
+            "WHERE id=? AND status='running' AND worker_id=? AND lease_token_hash=? "
+            "AND lease_epoch=? AND lease_expires_at > datetime('now') "
+            "RETURNING worker_id, lease_epoch, lease_expires_at",
+            (f"+{int(ttl_seconds)} seconds", job_id, worker_id, token_hash, epoch),
+        )
+        row = cur.fetchone()
+        c.commit()
+        return dict(row) if row else None
+    except Exception as e:
+        c.rollback()
+        logger.warning("renew_worker_lease.sqlite_error job=%s: %s", job_id, e)
+        return None
+    finally:
+        c.close()
+
+
+def _is_local_payload(payload) -> bool:
+    if isinstance(payload, str):
+        payload = _json_col(payload, {})
+    return isinstance(payload, dict) and payload.get("backend") == "local"
+
+
+def _bind_local_lease_in_tx(cur, row: dict, *, pg: bool):
+    """D-05: bind local-аренды в ТОЙ ЖЕ транзакции, что и claim.
+
+    Строка уже переведена этим же UPDATE в running и заблокирована текущей
+    транзакцией, поэтому привязка безусловна по worker_id: старая привязка
+    (например, после /retry → queued) перекрывается новой эпохой, а её токен
+    перестаёт совпадать. Пустой RETURNING или ошибка → исключение → откат всего
+    claim (задача не остаётся running без привязки). Возвращает исходный токен,
+    который вызывающий регистрирует на сервере только ПОСЛЕ COMMIT (D-02).
+    """
+    if not _is_local_payload(row.get("payload")):
+        return None
+    token = job_lease.new_lease_token()
+    params = (
+        job_lease.local_worker_id(),
+        job_lease.hash_lease_token(token),
+        int(job_lease.LEASE_TTL_SECONDS),
+        row["id"],
+    )
+    if pg:
+        cur.execute(
+            "UPDATE execution_jobs SET worker_id=%s, lease_token_hash=%s, "
+            "lease_epoch=lease_epoch+1, lease_expires_at=now() + make_interval(secs => %s), "
+            "updated_at=now() WHERE id=%s AND status='running' "
+            "RETURNING worker_id, lease_epoch, lease_expires_at",
+            params,
+        )
+        got = cur.fetchone()
+        bound = dict(zip([d[0] for d in cur.description], got)) if got else None
+    else:
+        got = cur.execute(
+            "UPDATE execution_jobs SET worker_id=?, lease_token_hash=?, "
+            "lease_epoch=lease_epoch+1, lease_expires_at=datetime('now', '+' || ? || ' seconds'), "
+            "updated_at=datetime('now') WHERE id=? AND status='running' "
+            "RETURNING worker_id, lease_epoch, lease_expires_at",
+            params,
+        ).fetchone()
+        bound = dict(got) if got else None
+    if not bound:
+        raise RuntimeError(f"lease_bind_failed job={row['id']}")
+    row.update(bound)
+    row.pop("lease_token_hash", None)
+    return token
+
+
+def _register_claimed_leases(rows: list[dict], tokens: dict) -> list[dict]:
+    """После COMMIT: исходный токен — только в серверный реестр, не в строку."""
+    for r in rows:
+        token = tokens.get(r["id"])
+        if token:
+            job_lease.remember_server_lease(r["id"], token, r.get("lease_epoch"), r.get("worker_id"))
+    return rows
+
+
 def claim_queued_execution_jobs(limit: int = 10) -> list[dict]:
     """Атомарно захватить до `limit` queued-джоб: queued → running, started_at=now.
 
     Возвращает ТОЛЬКО строки, которые перевёл в running именно этот вызов:
     каждая джоба достаётся ровно одному вызывающему (реплике) либо никому.
-    PG: один UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED) RETURNING *,
+    PG: один WITH picked AS MATERIALIZED (SELECT … LIMIT … FOR UPDATE SKIP LOCKED)
+    UPDATE … FROM picked RETURNING j.* (LIMIT соблюдается при любом плане),
     commit до возврата. SQLite: BEGIN IMMEDIATE + условный UPDATE
     … AND status='queued' … RETURNING * (SQLite ≥ 3.35), поэтому обе ветки
     возвращают актуальные status/started_at/updated_at из БД.
@@ -1903,19 +2082,31 @@ def claim_queued_execution_jobs(limit: int = 10) -> list[dict]:
         try:
             conn = _pg_conn()
             with conn.cursor() as cur:
+                # MATERIALIZED CTE: выборка с LIMIT выполняется ровно один раз.
+                # Прежняя форма `WHERE id IN (SELECT … LIMIT … SKIP LOCKED)` при
+                # устаревшей статистике планировалась как Nested Loop Semi Join с
+                # повторным выполнением подзапроса на каждую внешнюю строку, и
+                # claim(limit=1) захватывал больше строк, чем `limit` (дефект
+                # master 42a2feed, найден при 021b).
                 cur.execute(
-                    "UPDATE execution_jobs SET status='running', started_at=now(), updated_at=now() "
-                    "WHERE id IN (SELECT id FROM execution_jobs WHERE status='queued' "
+                    "WITH picked AS MATERIALIZED ("
+                    "SELECT id FROM execution_jobs WHERE status='queued' "
                     "ORDER BY created_at ASC LIMIT %s FOR UPDATE SKIP LOCKED) "
-                    "AND status='queued' RETURNING *",
+                    "UPDATE execution_jobs j SET status='running', started_at=now(), updated_at=now() "
+                    "FROM picked WHERE j.id = picked.id AND j.status='queued' RETURNING j.*",
                     (limit,),
                 )
                 rows = cur.fetchall()
                 cols = [d[0] for d in cur.description]
+                out = [dict(zip(cols, r)) for r in rows]
+                tokens = {}
+                for r in out:
+                    token = _bind_local_lease_in_tx(cur, r, pg=True)
+                    if token:
+                        tokens[r["id"]] = token
             conn.commit()
-            out = [dict(zip(cols, r)) for r in rows]
             out.sort(key=lambda d: (d.get("created_at") is None, d.get("created_at")))
-            return out
+            return _register_claimed_leases(out, tokens)
         except Exception as e:
             failed = True
             logger.warning("claim_queued_execution_jobs.pg_error: %s", e)
@@ -1946,13 +2137,18 @@ def claim_queued_execution_jobs(limit: int = 10) -> list[dict]:
                 ).fetchone()
                 if upd is not None:
                     claimed.append(dict(upd))
+            tokens = {}
+            for d in claimed:
+                token = _bind_local_lease_in_tx(c, d, pg=False)
+                if token:
+                    tokens[d["id"]] = token
             c.commit()
         except Exception:
             c.rollback()
             raise
         for d in claimed:
             d["payload"] = _json_col(d.get("payload"), {})
-        return claimed
+        return _register_claimed_leases(claimed, tokens)
     finally:
         c.close()
 
