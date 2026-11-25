@@ -4,8 +4,9 @@
 добавлены миграцией 021. Здесь только чистая логика: флаг, TTL, выпуск токена
 и вердикт «этот ли воркер и не истекла ли аренда».
 
-Токен не секрет БД: в колонке лежит sha256, исходное значение уходит воркеру
-один раз в ответе выдачи задачи и никогда не пишется в лог/аудит/payload.
+D-02: исходный токен local-аренды остаётся в серверном реестре; в БД лежит
+только sha256. Ответ claim не содержит токен: интеграции не должны ожидать
+его от сервера. Токен не пишется в лог/аудит/payload.
 """
 
 from __future__ import annotations
@@ -123,6 +124,19 @@ def _as_utc(value) -> datetime | None:
     return None
 
 
+def parse_lease_epoch(value) -> int | None:
+    """Parse an integer epoch without truncating a number or accepting a boolean."""
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not isinstance(value, str) and parsed != value:
+        return None
+    return parsed
+
+
 def verdict(
     job: dict,
     *,
@@ -152,13 +166,14 @@ def verdict(
         return False, "bad_worker_id"
     if worker_id != bound_to:
         return False, "worker_mismatch"
-    if epoch is not None:
-        try:
-            presented = int(epoch)
-        except (TypeError, ValueError):
-            return False, "bad_epoch"
-        if presented != int(job.get("lease_epoch") or 0):
-            return False, "stale_epoch"
+    if epoch is None:
+        return False, "no_epoch"
+    presented = parse_lease_epoch(epoch)
+    expected = parse_lease_epoch(job.get("lease_epoch"))
+    if presented is None or expected is None:
+        return False, "bad_epoch"
+    if presented != expected:
+        return False, "stale_epoch"
     expires_at = _as_utc(job.get("lease_expires_at"))
     if expires_at is None or expires_at <= datetime.now(timezone.utc):
         return False, "expired"

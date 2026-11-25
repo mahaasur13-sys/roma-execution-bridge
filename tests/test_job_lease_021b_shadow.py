@@ -262,7 +262,7 @@ def test_shadow_expired_lease_still_completes(world):
     jid = world["add_job"](bound=True, workers=GPU_WORKER, expires_in=-30)
     resp = world["client"].post(
         f"/v1/jobs/{jid}/worker-ack",
-        json={"action": "complete", "worker_id": GPU_WORKER, "lease_token": TOKEN},
+        json={"action": "complete", "worker_id": GPU_WORKER, "lease_token": TOKEN, "lease_epoch": 1},
         headers={"X-Roma-Worker-Token": WORKER_TOKEN},
     )
     assert resp.status_code == 200, resp.text
@@ -333,7 +333,7 @@ def test_enforce_expired_lease_denied(world, monkeypatch):
     jid = world["add_job"](bound=True, workers=GPU_WORKER, expires_in=-1)
     resp = world["client"].post(
         f"/v1/jobs/{jid}/worker-ack",
-        json={"action": "complete", "worker_id": GPU_WORKER, "lease_token": TOKEN},
+        json={"action": "complete", "worker_id": GPU_WORKER, "lease_token": TOKEN, "lease_epoch": 1},
         headers={"X-Roma-Worker-Token": WORKER_TOKEN},
     )
     assert resp.status_code == 409, resp.text
@@ -643,7 +643,8 @@ def test_d05_renew_checks_token_epoch_and_expiry(sqlite_db):
     assert sqlite_db.renew_worker_lease("j-renew", wid, "bad-hash", 1, 1800) is None
     assert sqlite_db.renew_worker_lease("j-renew", wid, h, 2, 1800) is None
     assert sqlite_db.renew_worker_lease("j-renew", "other", h, 1, 1800) is None
-    assert sqlite_db.renew_worker_lease("j-renew", wid, h, "x", 1800) is None
+    for invalid_epoch in ("x", 1.5, float("inf"), True):
+        assert sqlite_db.renew_worker_lease("j-renew", wid, h, invalid_epoch, 1800) is None
     ok = sqlite_db.renew_worker_lease("j-renew", wid, h, 1, 3600)
     assert ok and ok["lease_epoch"] == 1
     c = sqlite_db._sqlite_conn()
@@ -747,7 +748,6 @@ def _bound_job(**over):
         ({"lease_token": TOKEN, "worker_id": 123}, "bad_worker_id"),
         ({"lease_token": TOKEN, "worker_id": "gpu-worker-2"}, "worker_mismatch"),
         ({"lease_token": "wrong", "worker_id": GPU_WORKER}, "bad_token"),
-        ({"lease_token": TOKEN, "worker_id": GPU_WORKER, "epoch": 2}, "stale_epoch"),
         ({"lease_token": TOKEN, "worker_id": GPU_WORKER, "epoch": 1}, "ok"),
     ],
 )
@@ -757,14 +757,29 @@ def test_d06_worker_id_required_and_does_not_replace_token_epoch(kwargs, reason)
     assert ok is (reason == "ok")
 
 
-def test_d06_enforce_worker_ack_without_worker_id_denied(world, monkeypatch):
+def test_d06_verdict_validates_epoch_without_truncation():
+    job = _bound_job()
+    for epoch, reason in (
+        (1.5, "bad_epoch"),
+        (float("inf"), "bad_epoch"),
+        (True, "bad_epoch"),
+        (2, "stale_epoch"),
+        ("1", "ok"),
+        (1.0, "ok"),
+    ):
+        assert job_lease.verdict(job, worker_id=GPU_WORKER, lease_token=TOKEN, epoch=epoch) == (reason == "ok", reason)
+
+
+def test_d06_enforce_worker_ack_incomplete_lease_denied(world, monkeypatch):
     monkeypatch.setenv("ROMA_LEASE_ENFORCE", "1")
     jid = world["add_job"](bound=True, workers=GPU_WORKER)
-    resp = world["client"].post(
-        f"/v1/jobs/{jid}/worker-ack",
-        json={"action": "complete", "lease_token": TOKEN},
-        headers={"X-Roma-Worker-Token": WORKER_TOKEN},
-    )
-    assert resp.status_code == 409, resp.text
-    assert dict(world["audits"])["job.lease.denied"]["reason"] == "no_worker_id"
-    assert world["ledger"].calls == 0
+    for identity, reason in (({}, "no_worker_id"), ({"worker_id": GPU_WORKER}, "no_epoch")):
+        resp = world["client"].post(
+            f"/v1/jobs/{jid}/worker-ack",
+            json={"action": "complete", "lease_token": TOKEN, **identity},
+            headers={"X-Roma-Worker-Token": WORKER_TOKEN},
+        )
+        assert resp.status_code == 409, resp.text
+        assert world["audits"][-1][0] == "job.lease.denied"
+        assert world["audits"][-1][1]["reason"] == reason
+        assert world["ledger"].calls == 0

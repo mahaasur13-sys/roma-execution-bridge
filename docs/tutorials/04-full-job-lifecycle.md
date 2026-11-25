@@ -165,8 +165,25 @@ usage2 = client.get_usage()
 print(f"Final: ${usage2['balance_usd']:.4f} (charged ${usage2['balance_usd'] - usage['balance_usd']:.6f})")
 ```
 
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:3aeb13578e480444e0afa2d81312237bf3859312f0bbcbe52e5b1a475b7f932d -->
+
 ## SDK Reference
 
+The example SDKs use `POST /v1/jobs/{job_id}/complete` for unbound jobs and jobs
+with a local worker lease. For local jobs, send only the tenant API key: the
+server handling the request must hold the lease in memory and supplies the
+worker ID, token, and epoch itself. The SDKs do not complete jobs leased to an
+external worker; that worker should report completion through `worker-ack`.
+
+The versioned route checks that the job can transition to completed and returns
+409 if it is already completed. It does not destroy remote backend instances.
+For an unbound job that needs remote backend cleanup, use the legacy endpoint
+shown above.
+
+
+<!-- /coderabbit-ai-generated:v1 -->
 - [Python SDK](../../examples/sdk/sdk.py)
 - [JavaScript SDK](../../examples/sdk/sdk.js)
 - [Go SDK](../../examples/sdk/sdk.go)

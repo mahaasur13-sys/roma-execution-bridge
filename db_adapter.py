@@ -1947,9 +1947,8 @@ def renew_worker_lease(job_id: str, worker_id: str, token_hash: str, epoch: int,
     Продлевается только неистёкшая аренда running-задачи; эпоха не меняется.
     Любое несовпадение или истечение → None (ничего не продлено).
     """
-    try:
-        epoch = int(epoch)
-    except (TypeError, ValueError):
+    epoch = job_lease.parse_lease_epoch(epoch)
+    if epoch is None:
         return None
     if _pg_enabled():
         conn = None
