@@ -53,7 +53,8 @@ class ROMAClient {
   }
 
   async jobStatus(jobId) { return this._request("GET", `/status/${jobId}`); }
-  async completeJob(jobId) { return this._request("POST", `/complete/${jobId}`); }
+  // For unbound or local jobs; the server supplies the local lease.
+  async completeJob(jobId) { return this._request("POST", `/v1/jobs/${jobId}/complete`, {}); }
   async listJobs() { return this._request("GET", "/jobs"); }
 
   // ── Billing ──────────────────────────────────────────────────────
@@ -101,15 +102,16 @@ async function demoFullLifecycle() {
   }
 
   // 3. Poll until complete
+  let status;
   for (let i = 0; i < 5; i++) {
-    const status = await client.jobStatus(job.job_id);
+    status = await client.jobStatus(job.job_id);
     console.log(`  Status: ${status.status}`);
     if (status.status === "completed") break;
     await new Promise(r => setTimeout(r, 2000));
   }
 
-  // 4. Complete job — actual billing
-  await client.completeJob(job.job_id);
+  // 4. Request completion only if the job is still running.
+  if (status.status === "running") await client.completeJob(job.job_id);
 
   // 5. Final balance
   const usage2 = await client.getUsage();

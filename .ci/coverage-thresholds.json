@@ -62,6 +62,7 @@
       "ha",
       "health_gpu.py",
       "input_contract",
+      "job_lease.py",
       "k8s",
       "local_worker.py",
       "main.py",
@@ -216,6 +217,13 @@
       "scope": "product-only",
       "change": "в область измерения введён пакет host_agent/ (агент хоста ROMA). Гейт упал машинной проверкой 'файл вне области и вне exclude' на PR #195.",
       "reason": "feat/host-agent: агент хоста — продуктовый код, покрыт tests/test_host_agent.py и tests/test_hosts_agent_http.py. Полы не менялись."
+    },
+    {
+      "date": "2026-11-11",
+      "scope": "product-only",
+      "change": "в область измерения введён корневой модуль job_lease.py (флаг ROMA_LEASE_ENFORCE, TTL аренды, выпуск и проверка lease-токена — 021b). Гейт упал машинной проверкой 'файл вне области и вне exclude'; включение записано явно, полы не менялись (36.3/62.2).",
+      "reason": "PR #221 (021b, shadow-аренда задачи): модуль читается router_jobs.py (вердикт до finalize) и db_adapter.py (привязка при claim), покрыт tests/test_job_lease_021b_shadow.py.",
+      "commit": "PR #221 (5839ae7)"
     }
   ],
   "measured_on": {

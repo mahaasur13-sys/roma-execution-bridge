@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 
 import db_adapter as db
+import job_lease
 from deps import verify_api_key
 from billing.finalize import finalize_job_billing, resolve_billable_seconds
 from billing.pg_ledger import PGUnavailableError
@@ -79,6 +80,22 @@ async def complete_job(job_id: str, key_info: dict = Depends(verify_api_key)):
     job = db.get_execution_job(job_id)
     if not job or job.get("tenant_id") != tenant_id:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    # D-03: legacy-путь не закрывает задачи с арендой и не обходит lease guard.
+    # Отказ — до любых финансовых операций и смены состояния; если привязку
+    # нельзя определить достоверно — тоже отказ (fail-closed). Bound local-задачи
+    # закрываются серверным путём POST /v1/jobs/{job_id}/complete (D-02).
+    binding = job_lease.binding_state(job)
+    if binding != "unbound":
+        logger.warning("complete.legacy_lease_conflict job=%s binding=%s", job_id, binding)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "lease_bound_legacy_complete_denied" if binding == "bound" else "lease_binding_unknown",
+                "job_id": job_id,
+                "use": "POST /v1/jobs/{job_id}/complete",
+            },
+        )
 
     # Single source of truth: finalize_job_billing() debits exactly once
     # (idempotent). Prefer confirmed GPU seconds from the backend contract;

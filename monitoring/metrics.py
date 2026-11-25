@@ -305,3 +305,21 @@ def track_jev_shadow(
             jev_shadow_latency_seconds.labels(point=p).observe(max(0.0, float(latency_s)))
     except Exception as exc:  # noqa: BLE001 — телеметрия не ломает горячий путь
         logger.debug("jev shadow metrics failed: %r", exc)
+
+
+# --- 021b (D-04): аренда задачи — серверный счётчик вердиктов и сбоев аудита ---
+# F3: считается сервером в точке окончательного финансового решения (_lease_guard
+# непосредственно перед finalize). Это наблюдаемость, не замена долговременного
+# аудита и не источник финансовых эффектов.
+roma_job_lease_verdict_total = Counter(
+    "roma_job_lease_verdict_total",
+    "021b: вердикты аренды перед finalize (mode=shadow|enforce)",
+    ["path", "mode", "reason"],
+)
+roma_job_lease_audit_write_failed_total = Counter(
+    "roma_job_lease_audit_write_failed_total",
+    "021b: сбой записи аудит-события аренды (mode=shadow|enforce)",
+    ["mode"],
+)
+for _mode in ("shadow", "enforce"):
+    roma_job_lease_audit_write_failed_total.labels(mode=_mode)

@@ -134,6 +134,9 @@ def world(monkeypatch):
     def add_job(started_at="past", status="running"):
         jid = _uniq("job-fix2")
         job = {"job_id": jid, "tenant_id": tenant_id, "status": status, "backend": None, "payload": {}}
+        # Колонки аренды 021 есть в любой реальной строке execution_jobs; без них
+        # legacy /complete отвечает 409 lease_binding_unknown (D-03, fail-closed).
+        job.update(worker_id=None, lease_token_hash=None, lease_epoch=0, lease_expires_at=None)
         if started_at == "past":
             job["started_at"] = (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat()
         elif started_at is not None:

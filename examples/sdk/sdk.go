@@ -139,8 +139,9 @@ func (c *ROMAClient) JobStatus(jobID string) (*JobStatus, error) {
 	return &status, nil
 }
 
+// CompleteJob completes an unbound or local job; the server supplies the local lease.
 func (c *ROMAClient) CompleteJob(jobID string) error {
-	_, err := c.request("POST", "/complete/"+jobID, nil)
+	_, err := c.request("POST", "/v1/jobs/"+jobID+"/complete", struct{}{})
 	return err
 }
 
@@ -192,8 +193,13 @@ func main() {
 		job.JobID, job.EstimatedCostUSD, job.SpendCapRemaining)
 
 	// 3. Poll status
+	var status *JobStatus
 	for i := 0; i < 5; i++ {
-		status, _ := client.JobStatus(job.JobID)
+		status, err = client.JobStatus(job.JobID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Status check failed: %v\n", err)
+			os.Exit(1)
+		}
 		fmt.Printf("  Status: %s\n", status.Status)
 		if status.Status == "completed" {
 			break
@@ -201,8 +207,13 @@ func main() {
 		time.Sleep(2 * time.Second)
 	}
 
-	// 4. Complete job — actual billing
-	client.CompleteJob(job.JobID)
+	// 4. Request completion only if the job is still running.
+	if status.Status == "running" {
+		if err := client.CompleteJob(job.JobID); err != nil {
+			fmt.Fprintf(os.Stderr, "Completion failed: %v\n", err)
+			os.Exit(1)
+		}
+	}
 
 	// 5. Final balance
 	usage2, _ := client.GetUsage()

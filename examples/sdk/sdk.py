@@ -60,8 +60,8 @@ class ROMAClient:
         return self._request("GET", f"/status/{job_id}")
 
     def complete_job(self, job_id: str) -> dict:
-        """Mark job complete — triggers actual billing recalculation."""
-        return self._request("POST", f"/complete/{job_id}")
+        """Complete an unbound or local job; the server supplies the local lease."""
+        return self._request("POST", f"/v1/jobs/{job_id}/complete", json={})
 
     def list_jobs(self) -> dict:
         return self._request("GET", "/jobs")
@@ -133,9 +133,10 @@ def demo_full_lifecycle():
             break
         time.sleep(2)
 
-    # 4. Complete job — triggers actual billing
-    completed = client.complete_job(job_id)
-    print(f"Completed: {completed}")
+    # 4. Request completion only if the job is still running.
+    if status["status"] == "running":
+        completed = client.complete_job(job_id)
+        print(f"Completed: {completed}")
 
     # 5. Check balance after
     usage2 = client.get_usage()
